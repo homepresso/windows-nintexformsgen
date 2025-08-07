@@ -1,0 +1,962 @@
+﻿<Window x:Class="FormGenerator.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:converters="clr-namespace:FormGenerator.Converters"
+        xmlns:local="clr-namespace:FormGenerator"
+        mc:Ignorable="d"
+        Title="Nintex Forms Generator" 
+        Height="800" 
+        Width="1400"
+        WindowStartupLocation="CenterScreen"
+        Background="#1e1e1e">
+
+    <Window.Resources>
+        <!-- Improved Dark Theme Colors with Better Contrast -->
+        <converters:BoolToIconConverter x:Key="BoolToIconConverter"/>
+        <SolidColorBrush x:Key="BackgroundDark" Color="#0d0d0d"/>
+        <SolidColorBrush x:Key="BackgroundMedium" Color="#1a1a1a"/>
+        <SolidColorBrush x:Key="BackgroundLight" Color="#262626"/>
+        <SolidColorBrush x:Key="BackgroundLighter" Color="#333333"/>
+        <SolidColorBrush x:Key="AccentColor" Color="#0078D4"/>
+        <SolidColorBrush x:Key="AccentHover" Color="#106EBE"/>
+        <SolidColorBrush x:Key="AccentLight" Color="#40E0D0"/>
+        <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="TextSecondary" Color="#CCCCCC"/>
+        <SolidColorBrush x:Key="TextDim" Color="#888888"/>
+        <SolidColorBrush x:Key="BorderColor" Color="#404040"/>
+        <SolidColorBrush x:Key="BorderLight" Color="#606060"/>
+        <SolidColorBrush x:Key="SuccessColor" Color="#10B981"/>
+        <SolidColorBrush x:Key="WarningColor" Color="#F59E0B"/>
+        <SolidColorBrush x:Key="ErrorColor" Color="#EF4444"/>
+        <SolidColorBrush x:Key="InfoColor" Color="#3B82F6"/>
+
+        <!-- Modern Button Style -->
+        <Style x:Key="ModernButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource AccentColor}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="15,10"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" 
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <Border.Effect>
+                                <DropShadowEffect Color="Black" Direction="270" ShadowDepth="2" Opacity="0.3" BlurRadius="5"/>
+                            </Border.Effect>
+                            <ContentPresenter HorizontalAlignment="Center" 
+                                            VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource AccentHover}"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="#404040"/>
+                    <Setter Property="Foreground" Value="#808080"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Card Style with Better Contrast -->
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource BackgroundLight}"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="20"/>
+            <Setter Property="Margin" Value="10"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource BackgroundLighter}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource BorderLight}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Summary Card Style -->
+        <Style x:Key="SummaryCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource BackgroundLight}"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="15"/>
+            <Setter Property="Margin" Value="5"/>
+            <Setter Property="Width" Value="150"/>
+            <Setter Property="Height" Value="100"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource BackgroundLighter}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentColor}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Modern TextBox Style -->
+        <Style x:Key="ModernTextBox" TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource BackgroundLight}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontFamily" Value="Consolas, Courier New"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+        </Style>
+
+        <!-- TreeView Item Style -->
+        <Style TargetType="TreeViewItem">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Padding" Value="5,3"/>
+            <Setter Property="Margin" Value="0,1"/>
+        </Style>
+
+        <!-- TabItem Style -->
+        <Style TargetType="TabItem">
+            <Setter Property="Background" Value="{StaticResource BackgroundMedium}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="15,8"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border Name="Border" 
+                                Background="{TemplateBinding Background}"
+                                BorderThickness="0,0,0,2"
+                                BorderBrush="Transparent"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter ContentSource="Header"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource AccentColor}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundLight}"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundLighter}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ComboBox Toggle Button Template -->
+        <ControlTemplate x:Key="ComboBoxToggleButton" TargetType="ToggleButton">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition />
+                    <ColumnDefinition Width="20" />
+                </Grid.ColumnDefinitions>
+                <Border
+                    x:Name="Border" 
+                    Grid.ColumnSpan="2"
+                    CornerRadius="3"
+                    Background="{StaticResource BackgroundLight}"
+                    BorderBrush="{StaticResource BorderColor}"
+                    BorderThickness="1" />
+                <Border 
+                    Grid.Column="0"
+                    CornerRadius="3,0,0,3" 
+                    Margin="1" 
+                    Background="{StaticResource BackgroundLight}" 
+                    BorderBrush="{StaticResource BorderColor}"
+                    BorderThickness="0,0,1,0" />
+                <Path 
+                    x:Name="Arrow"
+                    Grid.Column="1"     
+                    Fill="{StaticResource TextSecondary}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Data="M 0 0 L 4 4 L 8 0 Z"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="ToggleButton.IsMouseOver" Value="true">
+                    <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundLighter}" />
+                    <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource AccentColor}" />
+                </Trigger>
+                <Trigger Property="ToggleButton.IsChecked" Value="true">
+                    <Setter TargetName="Border" Property="Background" Value="{StaticResource BackgroundLighter}" />
+                    <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource AccentColor}" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- ComboBox TextBox Template -->
+        <ControlTemplate x:Key="ComboBoxTextBox" TargetType="TextBox">
+            <Border x:Name="PART_ContentHost" 
+                    Focusable="False" 
+                    Background="{TemplateBinding Background}" />
+        </ControlTemplate>
+
+        <!-- Modern ComboBox Style -->
+        <Style x:Key="ModernComboBox" TargetType="ComboBox">
+            <Setter Property="Background" Value="{StaticResource BackgroundLight}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="5,2"/>
+            <Setter Property="MinHeight" Value="24"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton 
+                                Name="ToggleButton" 
+                                Template="{StaticResource ComboBoxToggleButton}"
+                                Grid.Column="2" 
+                                Focusable="false"
+                                IsChecked="{Binding Path=IsDropDownOpen,Mode=TwoWay,RelativeSource={RelativeSource TemplatedParent}}"
+                                ClickMode="Press"/>
+                            <ContentPresenter
+                                Name="ContentSite"
+                                IsHitTestVisible="False" 
+                                Content="{TemplateBinding SelectionBoxItem}"
+                                ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                Margin="5,2,23,2"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Left"/>
+                            <TextBox x:Name="PART_EditableTextBox"
+                                Style="{x:Null}" 
+                                Template="{StaticResource ComboBoxTextBox}" 
+                                HorizontalAlignment="Left" 
+                                VerticalAlignment="Center" 
+                                Margin="3,3,23,3"
+                                Focusable="True" 
+                                Background="{StaticResource BackgroundLight}"
+                                Foreground="{StaticResource TextPrimary}"
+                                Visibility="Hidden"
+                                IsReadOnly="{TemplateBinding IsReadOnly}"/>
+                            <Popup 
+                                Name="Popup"
+                                Placement="Bottom"
+                                IsOpen="{TemplateBinding IsDropDownOpen}"
+                                AllowsTransparency="True" 
+                                Focusable="False"
+                                PopupAnimation="Slide">
+                                <Grid 
+                                    Name="DropDown"
+                                    SnapsToDevicePixels="True"                
+                                    MinWidth="{TemplateBinding ActualWidth}"
+                                    MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border 
+                                        x:Name="DropDownBorder"
+                                        Background="{StaticResource BackgroundMedium}"
+                                        BorderThickness="1"
+                                        BorderBrush="{StaticResource BorderColor}"
+                                        CornerRadius="0,0,4,4"/>
+                                    <ScrollViewer Margin="2" SnapsToDevicePixels="True">
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="HasItems" Value="false">
+                                <Setter TargetName="DropDownBorder" Property="MinHeight" Value="95"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="false">
+                                <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+                            </Trigger>
+                            <Trigger Property="IsGrouping" Value="true">
+                                <Setter Property="ScrollViewer.CanContentScroll" Value="false"/>
+                            </Trigger>
+                            <Trigger SourceName="Popup" Property="Popup.AllowsTransparency" Value="true">
+                                <Setter TargetName="DropDownBorder" Property="CornerRadius" Value="0,0,4,4"/>
+                                <Setter TargetName="DropDownBorder" Property="Margin" Value="0,0,0,0"/>
+                            </Trigger>
+                            <Trigger Property="IsEditable" Value="true">
+                                <Setter Property="IsTabStop" Value="false"/>
+                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="ContentSite" Property="Visibility" Value="Hidden"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ComboBox Item Style -->
+        <Style x:Key="ModernComboBoxItem" TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border Name="Border"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                SnapsToDevicePixels="true">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="true">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource AccentColor}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="true">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource AccentColor}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="false">
+                                <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="70"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="30"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="{StaticResource BackgroundMedium}" BorderThickness="0,0,0,1" BorderBrush="{StaticResource BorderColor}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="20,0">
+                    <!-- Logo Image -->
+                    <Border Width="45" 
+                            Height="45" 
+                            CornerRadius="5"
+                            Margin="0,0,15,0"
+                            Background="White">
+                        <Border.Effect>
+                            <DropShadowEffect Color="Black" Direction="270" ShadowDepth="2" Opacity="0.3" BlurRadius="5"/>
+                        </Border.Effect>
+                        <Image Source="pack://application:,,,/Resources/logo.png" 
+                               Stretch="UniformToFill"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+
+                    <TextBlock Text="Nintex Forms Generator" 
+                              FontSize="26" 
+                              FontWeight="Light"
+                              Foreground="{StaticResource TextPrimary}"
+                              VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <ComboBox Grid.Column="2" 
+                         Name="FormTypeSelector"
+                         Width="200"
+                         Height="35"
+                         Margin="20,0"
+                         VerticalAlignment="Center"
+                         Style="{StaticResource ModernComboBox}"
+                         ItemContainerStyle="{StaticResource ModernComboBoxItem}"
+                         SelectedIndex="0">
+                    <ComboBoxItem Content="InfoPath 2013" Tag="InfoPath2013"/>
+                    <ComboBoxItem Content="InfoPath 2010" Tag="InfoPath2010" IsEnabled="False"/>
+                    <ComboBoxItem Content="InfoPath 2007" Tag="InfoPath2007" IsEnabled="False"/>
+                    <ComboBoxItem Content="Nintex Forms" Tag="NintexForms" IsEnabled="False"/>
+                </ComboBox>
+            </Grid>
+        </Border>
+
+        <!-- Main Content -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="400"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Panel - File Upload -->
+            <Border Grid.Column="0" Background="{StaticResource BackgroundMedium}" BorderThickness="0,0,1,0" BorderBrush="{StaticResource BorderColor}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Upload Section -->
+                    <Border Grid.Row="0" Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" 
+                                      Text="Upload Forms" 
+                                      FontSize="18" 
+                                      FontWeight="Medium"
+                                      Foreground="{StaticResource TextPrimary}"
+                                      Margin="0,0,0,15"/>
+
+                            <!-- Drop Zone -->
+                            <Border Grid.Row="1" 
+                                   Name="DropZone"
+                                   Height="150"
+                                   Background="{StaticResource BackgroundLighter}"
+                                   BorderBrush="{StaticResource BorderLight}"
+                                   BorderThickness="2"
+                                   CornerRadius="5"
+                                   AllowDrop="True"
+                                   Drop="DropZone_Drop"
+                                   DragEnter="DropZone_DragEnter"
+                                   DragLeave="DropZone_DragLeave">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="BorderBrush">
+                                            <Setter.Value>
+                                                <VisualBrush>
+                                                    <VisualBrush.Visual>
+                                                        <Rectangle StrokeDashArray="5 3"
+                                                                  Stroke="{StaticResource BorderLight}"
+                                                                  StrokeThickness="2"
+                                                                  Width="{Binding RelativeSource={RelativeSource AncestorType={x:Type Border}}, Path=ActualWidth}"
+                                                                  Height="{Binding RelativeSource={RelativeSource AncestorType={x:Type Border}}, Path=ActualHeight}"/>
+                                                    </VisualBrush.Visual>
+                                                </VisualBrush>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </Border.Style>
+                                <Grid>
+                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                        <Path Data="M9,16V10H5L12,3L19,10H15V16H9M5,20V18H19V20H5Z" 
+                                              Fill="{StaticResource TextSecondary}" 
+                                              Width="48" 
+                                              Height="48" 
+                                              Stretch="Uniform"
+                                              HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Drag &amp; drop XSN files here" 
+                                                  Foreground="{StaticResource TextSecondary}"
+                                                  FontSize="14"
+                                                  Margin="0,10,0,5"
+                                                  HorizontalAlignment="Center"/>
+                                        <TextBlock Text="or" 
+                                                  Foreground="{StaticResource TextDim}"
+                                                  FontSize="12"
+                                                  HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Button Grid.Row="2" 
+                                   Name="BrowseButton"
+                                   Content="Browse Files"
+                                   Style="{StaticResource ModernButton}"
+                                   Margin="0,15,0,0"
+                                   Click="BrowseButton_Click"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- File List -->
+                    <Border Grid.Row="1" Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" 
+                                      Text="Uploaded Forms" 
+                                      FontSize="16" 
+                                      FontWeight="Medium"
+                                      Foreground="{StaticResource TextPrimary}"
+                                      Margin="0,0,0,10"/>
+
+                            <ListBox Grid.Row="1" 
+                                    Name="FileListBox"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{StaticResource BackgroundLighter}"
+                                               BorderBrush="{StaticResource BorderColor}"
+                                               BorderThickness="1"
+                                               CornerRadius="5"
+                                               Padding="10"
+                                               Margin="0,5">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <Path Grid.Column="0" 
+                                                     Data="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" 
+                                                     Fill="{StaticResource AccentColor}" 
+                                                     Width="24" 
+                                                     Height="24" 
+                                                     Stretch="Uniform"
+                                                     Margin="0,0,10,0"/>
+
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding FileName}" 
+                                                             Foreground="{StaticResource TextPrimary}"
+                                                             FontSize="13"
+                                                             FontWeight="Medium"/>
+                                                    <TextBlock Text="{Binding Status}" 
+                                                             Foreground="{StaticResource TextSecondary}"
+                                                             FontSize="11"/>
+                                                </StackPanel>
+
+                                                <Button Grid.Column="2" 
+                                                       Content="✕"
+                                                       Width="20"
+                                                       Height="20"
+                                                       Background="Transparent"
+                                                       Foreground="{StaticResource TextDim}"
+                                                       BorderThickness="0"
+                                                       Click="RemoveFile_Click"
+                                                       Tag="{Binding}"
+                                                       Cursor="Hand"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
+
+                    <!-- Action Buttons -->
+                    <StackPanel Grid.Row="2" Margin="10">
+                        <Button Name="AnalyzeButton"
+                               Content="Analyze Forms"
+                               Style="{StaticResource ModernButton}"
+                               Height="45"
+                               FontSize="16"
+                               Click="AnalyzeButton_Click"
+                               IsEnabled="False"/>
+
+                        <Button Name="ExportButton"
+                               Content="Export Results"
+                               Style="{StaticResource ModernButton}"
+                               Height="40"
+                               Margin="0,10,0,0"
+                               Background="{StaticResource SuccessColor}"
+                               Click="ExportButton_Click"
+                               IsEnabled="False"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Right Panel - Results -->
+            <TabControl Grid.Column="1" 
+                       Name="ResultsTabs"
+                       Background="{StaticResource BackgroundDark}"
+                       BorderThickness="0">
+
+                <!-- Summary Tab -->
+                <TabItem Header="Summary">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource BackgroundDark}">
+                        <StackPanel>
+                            <!-- Legend Panel -->
+                            <Border Name="SummaryLegendPanel"
+                                    Background="{StaticResource BackgroundLight}"
+                                    CornerRadius="8"
+                                    Padding="15"
+                                    Margin="20,10,20,0">
+                                <StackPanel>
+                                    <TextBlock Text="Form Analysis Summary"
+                                              FontSize="18"
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,10"/>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Form Structure Legend -->
+                                        <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                                            <TextBlock Text="Form Structure"
+                                                      FontWeight="SemiBold"
+                                                      FontSize="13"
+                                                      Foreground="{StaticResource TextPrimary}"
+                                                      Margin="0,0,0,8"/>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="📄" FontSize="16" Width="25" Foreground="{StaticResource AccentColor}"/>
+                                                <TextBlock Text="Views - Form pages/screens" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="📦" FontSize="16" Width="25" Foreground="#009688"/>
+                                                <TextBlock Text="Sections - Logical groupings" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="🎛️" FontSize="16" Width="25" Foreground="#9C27B0"/>
+                                                <TextBlock Text="Controls - Input fields" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <!-- Dynamic Elements Legend -->
+                                        <StackPanel Grid.Column="1" Margin="0,0,10,0">
+                                            <TextBlock Text="Dynamic Elements"
+                                                      FontWeight="SemiBold"
+                                                      FontSize="13"
+                                                      Foreground="{StaticResource TextPrimary}"
+                                                      Margin="0,0,0,8"/>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="🔄" FontSize="16" Width="25" Foreground="#FF9800"/>
+                                                <TextBlock Text="Dynamic - Conditional visibility" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="🔁" FontSize="16" Width="25" Foreground="#03A9F4"/>
+                                                <TextBlock Text="Repeating - Multiple entries" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="📊" FontSize="16" Width="25" Foreground="#8BC34A"/>
+                                                <TextBlock Text="Data Columns - Database fields" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <!-- Status Indicators Legend -->
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Status Indicators"
+                                                      FontWeight="SemiBold"
+                                                      FontSize="13"
+                                                      Foreground="{StaticResource TextPrimary}"
+                                                      Margin="0,0,0,8"/>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="✅" FontSize="16" Width="25" Foreground="{StaticResource SuccessColor}"/>
+                                                <TextBlock Text="Success - Analysis complete" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="⚠️" FontSize="16" Width="25" Foreground="{StaticResource WarningColor}"/>
+                                                <TextBlock Text="Warnings - Potential issues" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+
+                                            <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                <TextBlock Text="ℹ️" FontSize="16" Width="25" Foreground="{StaticResource InfoColor}"/>
+                                                <TextBlock Text="Info - Helpful information" FontSize="11" 
+                                                          Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Divider -->
+                            <Border Height="1" Background="{StaticResource BorderColor}" Margin="20,15"/>
+
+                            <!-- Summary Cards Panel -->
+                            <ItemsControl Name="SummaryPanel" Margin="20,0,20,20">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel HorizontalAlignment="Center"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Form Structure Tab -->
+                <TabItem Header="Form Structure">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource BackgroundDark}">
+                        <TreeView Name="StructureTreeView"
+                                 Background="{StaticResource BackgroundDark}"
+                                 Foreground="{StaticResource TextPrimary}"
+                                 BorderThickness="0"
+                                 Padding="20"/>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Data Columns Tab -->
+                <TabItem Header="Data Columns">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header with filter options -->
+                        <Border Grid.Row="0" 
+                Background="{StaticResource BackgroundLight}"
+                Padding="15"
+                Margin="20,10,20,0">
+                            <StackPanel>
+                                <TextBlock Text="Data Columns Analysis"
+                          FontSize="16"
+                          FontWeight="Medium"
+                          Foreground="{StaticResource TextPrimary}"
+                          Margin="0,0,0,10"/>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="200"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="200"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Grid.Column="0" 
+                              Text="Filter by Form:"
+                              VerticalAlignment="Center"
+                              Foreground="{StaticResource TextSecondary}"
+                              Margin="0,0,10,0"/>
+
+                                    <ComboBox Grid.Column="1"
+                             Name="FormFilterCombo"
+                             Style="{StaticResource ModernComboBox}"
+                             ItemContainerStyle="{StaticResource ModernComboBoxItem}"
+                             VerticalAlignment="Center">
+                                        <ComboBoxItem Content="All Forms" IsSelected="True"/>
+                                    </ComboBox>
+
+                                    <TextBlock Grid.Column="2" 
+                              Text="Search:"
+                              VerticalAlignment="Center"
+                              Foreground="{StaticResource TextSecondary}"
+                              Margin="20,0,10,0"/>
+
+                                    <TextBox Grid.Column="3"
+                            Name="ColumnSearchBox"
+                            Style="{StaticResource ModernTextBox}"
+                            VerticalAlignment="Center"
+                            Height="28"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Data Grid -->
+                        <DataGrid Grid.Row="1"
+                 Name="DataColumnsGrid"
+                 Background="{StaticResource BackgroundDark}"
+                 Foreground="{StaticResource TextPrimary}"
+                 BorderThickness="0"
+                 GridLinesVisibility="Horizontal"
+                 HorizontalGridLinesBrush="{StaticResource BorderColor}"
+                 AutoGenerateColumns="False"
+                 CanUserAddRows="False"
+                 CanUserSortColumns="True"
+                 RowBackground="{StaticResource BackgroundLight}"
+                 AlternatingRowBackground="{StaticResource BackgroundMedium}"
+                 Margin="20,10,20,20">
+                            <DataGrid.ColumnHeaderStyle>
+                                <Style TargetType="DataGridColumnHeader">
+                                    <Setter Property="Background" Value="{StaticResource BackgroundLighter}"/>
+                                    <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                                    <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+                                    <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                                    <Setter Property="Padding" Value="10,8"/>
+                                    <Setter Property="FontWeight" Value="Medium"/>
+                                    <Setter Property="Cursor" Value="Hand"/>
+                                </Style>
+                            </DataGrid.ColumnHeaderStyle>
+                            <DataGrid.CellStyle>
+                                <Style TargetType="DataGridCell">
+                                    <Setter Property="BorderThickness" Value="0"/>
+                                    <Setter Property="Padding" Value="5,2"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background" Value="{StaticResource AccentColor}"/>
+                                            <Setter Property="Foreground" Value="White"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.CellStyle>
+                            <DataGrid.Columns>
+                                <!-- Form Name Column -->
+                                <DataGridTemplateColumn Header="Form" Width="180">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="📁" 
+                                          Foreground="{StaticResource AccentColor}"
+                                          Margin="0,0,5,0"/>
+                                                <TextBlock Text="{Binding FormName}" 
+                                          Foreground="{StaticResource TextPrimary}"
+                                          FontWeight="Medium"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Column Name -->
+                                <DataGridTextColumn Header="Column Name" 
+                                   Binding="{Binding ColumnName}" 
+                                   Width="200">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+
+                                <!-- Type -->
+                                <DataGridTemplateColumn Header="Type" Width="150">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{StaticResource BackgroundLighter}"
+                                   CornerRadius="3"
+                                   Padding="5,2"
+                                   HorizontalAlignment="Left">
+                                                <TextBlock Text="{Binding Type}" 
+                                          Foreground="{StaticResource AccentLight}"
+                                          FontSize="11"
+                                          FontFamily="Consolas"/>
+                                            </Border>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Display Name -->
+                                <DataGridTextColumn Header="Display Name" 
+                                   Binding="{Binding DisplayName}" 
+                                   Width="200">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+
+                                <!-- Repeating -->
+                                <DataGridTemplateColumn Header="Repeating" Width="80">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding IsRepeating, Converter={StaticResource BoolToIconConverter}}"
+                                      HorizontalAlignment="Center"
+                                      FontSize="16"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Conditional -->
+                                <DataGridTemplateColumn Header="Conditional" Width="90">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding IsConditional, Converter={StaticResource BoolToIconConverter}}"
+                                      HorizontalAlignment="Center"
+                                      FontSize="16"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Section -->
+                                <DataGridTextColumn Header="Section" 
+                                   Binding="{Binding RepeatingSection}" 
+                                   Width="*">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                </TabItem>
+
+                <!-- JSON Output Tab -->
+                <TabItem Header="JSON Output">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <TextBox Name="JsonOutput"
+                                Style="{StaticResource ModernTextBox}"
+                                IsReadOnly="True"
+                                FontFamily="Consolas"
+                                Margin="20"
+                                Background="{StaticResource BackgroundMedium}"
+                                BorderBrush="{StaticResource BorderColor}"/>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- SQL Preview Tab -->
+                <TabItem Header="SQL Preview">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <TextBox Name="SqlPreview"
+                                Style="{StaticResource ModernTextBox}"
+                                IsReadOnly="True"
+                                FontFamily="Consolas"
+                                Margin="20"
+                                Background="{StaticResource BackgroundMedium}"
+                                BorderBrush="{StaticResource BorderColor}"
+                                Text="-- SQL generation will be available after analysis"/>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
+        </Grid>
+
+        <!-- Status Bar -->
+        <Border Grid.Row="2" Background="{StaticResource BackgroundMedium}" BorderThickness="0,1,0,0" BorderBrush="{StaticResource BorderColor}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" 
+                          Name="StatusText"
+                          Text="Ready"
+                          Foreground="{StaticResource TextSecondary}"
+                          VerticalAlignment="Center"
+                          Margin="10,0"/>
+
+                <ProgressBar Grid.Column="1" 
+                            Name="ProgressBar"
+                            Height="4"
+                            Background="{StaticResource BackgroundLighter}"
+                            Foreground="{StaticResource AccentColor}"
+                            BorderThickness="0"
+                            Visibility="Collapsed"
+                            Margin="10,0"/>
+
+                <TextBlock Grid.Column="2" 
+                          Name="VersionText"
+                          Text="v1.0.0"
+                          Foreground="{StaticResource TextSecondary}"
+                          VerticalAlignment="Center"
+                          Margin="10,0"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

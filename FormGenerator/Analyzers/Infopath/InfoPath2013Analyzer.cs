@@ -1,0 +1,473 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Diagnostics;
+using FormGenerator.Core.Interfaces;
+using FormGenerator.Core.Models;
+using FormGenerator.Core.Interfaces;
+using FormGenerator.Analyzers.Infopath;
+
+namespace FormGenerator.Analyzers.InfoPath
+{
+    /// <summary>
+    /// InfoPath 2013 specific analyzer implementation
+    /// </summary>
+    public class InfoPath2013Analyzer : IFormAnalyzer
+    {
+        private readonly EnhancedInfoPathParser _parser;
+
+        public string AnalyzerName => "InfoPath 2013 Analyzer";
+        public string SupportedVersion => "2013";
+        public string[] SupportedFileExtensions => new[] { ".xsn" };
+
+        public InfoPath2013Analyzer()
+        {
+            _parser = new EnhancedInfoPathParser();
+        }
+
+        /// <summary>
+        /// Checks if this analyzer can handle the given file
+        /// </summary>
+        public bool CanAnalyze(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath))
+                return false;
+
+            var extension = Path.GetExtension(filePath).ToLowerInvariant();
+            return Array.Exists(SupportedFileExtensions, ext => ext.Equals(extension, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Analyzes an InfoPath form asynchronously
+        /// </summary>
+        public async Task<FormAnalysisResult> AnalyzeFormAsync(string filePath)
+        {
+            var result = new FormAnalysisResult
+            {
+                FormName = Path.GetFileNameWithoutExtension(filePath),
+                FormType = "InfoPath",
+                AnalyzerUsed = AnalyzerName,
+                AnalysisDate = DateTime.Now
+            };
+
+            var stopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                // Log start of analysis
+                Debug.WriteLine($"Starting analysis of {filePath}");
+
+                // Run analysis in background thread to keep UI responsive
+                var formDefinition = await Task.Run(() => _parser.ParseXsnFile(filePath));
+
+                result.FormDefinition = formDefinition;
+                result.Success = true;
+
+                // Add analysis messages based on what was found
+                AddAnalysisMessages(result, formDefinition);
+
+                // Add metadata about the analysis
+                AddMetadata(result, filePath, formDefinition);
+
+                Debug.WriteLine($"Analysis completed successfully for {filePath}");
+            }
+            catch (FileNotFoundException fnfEx)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"File not found: {fnfEx.FileName}";
+
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Error,
+                    Message = "File not found",
+                    Details = fnfEx.Message,
+                    Source = "FileSystem"
+                });
+
+                Debug.WriteLine($"File not found error: {fnfEx.Message}");
+            }
+            catch (UnauthorizedAccessException uaEx)
+            {
+                result.Success = false;
+                result.ErrorMessage = "Access denied to the file";
+
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Error,
+                    Message = "Access denied",
+                    Details = uaEx.Message,
+                    Source = "FileSystem"
+                });
+
+                Debug.WriteLine($"Access denied error: {uaEx.Message}");
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Error,
+                    Message = "Analysis failed",
+                    Details = ex.ToString(),
+                    Source = "InfoPath2013Analyzer"
+                });
+
+                Debug.WriteLine($"Analysis error: {ex}");
+            }
+            finally
+            {
+                stopwatch.Stop();
+                result.AnalysisDuration = stopwatch.Elapsed;
+                Debug.WriteLine($"Analysis duration: {stopwatch.Elapsed.TotalSeconds:F2} seconds");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Adds analysis messages based on the form structure
+        /// </summary>
+        private void AddAnalysisMessages(FormAnalysisResult result, InfoPathFormDefinition formDef)
+        {
+            // Basic success message
+            result.Messages.Add(new AnalysisMessage
+            {
+                Severity = MessageSeverity.Info,
+                Message = $"Successfully analyzed {formDef.Views.Count} view(s)",
+                Details = $"Found {formDef.Metadata.TotalControls} controls across all views",
+                Source = "ViewAnalysis"
+            });
+
+            // Check for complex repeating structures
+            if (formDef.Metadata.RepeatingSectionCount > 5)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Warning,
+                    Message = "Form contains many repeating sections",
+                    Details = $"Found {formDef.Metadata.RepeatingSectionCount} repeating sections. This may impact SQL generation complexity and performance.",
+                    Source = "StructureAnalysis"
+                });
+            }
+            else if (formDef.Metadata.RepeatingSectionCount > 0)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Info,
+                    Message = $"Form contains {formDef.Metadata.RepeatingSectionCount} repeating section(s)",
+                    Details = "Repeating sections will be created as separate related tables in SQL",
+                    Source = "StructureAnalysis"
+                });
+            }
+
+            // Check for dynamic/conditional sections
+            if (formDef.DynamicSections.Count > 0)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Info,
+                    Message = $"Form contains {formDef.DynamicSections.Count} conditional section(s)",
+                    Details = "Conditional logic will need to be handled in the target platform",
+                    Source = "ConditionalLogicAnalysis"
+                });
+
+                // List the conditional fields
+                if (formDef.Metadata.ConditionalFields.Any())
+                {
+                    result.Messages.Add(new AnalysisMessage
+                    {
+                        Severity = MessageSeverity.Info,
+                        Message = "Conditional fields detected",
+                        Details = $"Fields with conditional logic: {string.Join(", ", formDef.Metadata.ConditionalFields)}",
+                        Source = "ConditionalLogicAnalysis"
+                    });
+                }
+            }
+
+            // Check for complex control types
+            AnalyzeComplexControls(result, formDef);
+
+            // Check for potential migration issues
+            CheckMigrationIssues(result, formDef);
+
+            // Add data structure summary
+            if (formDef.Data.Count > 0)
+            {
+                var repeatingCount = formDef.Data.Count(d => d.IsRepeating);
+                var conditionalCount = formDef.Data.Count(d => d.IsConditional);
+
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Info,
+                    Message = $"Data structure analyzed: {formDef.Data.Count} unique columns",
+                    Details = $"Standard fields: {formDef.Data.Count - repeatingCount}, " +
+                             $"Repeating fields: {repeatingCount}, " +
+                             $"Conditional fields: {conditionalCount}",
+                    Source = "DataAnalysis"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Analyzes complex controls that might need special handling
+        /// </summary>
+        private void AnalyzeComplexControls(FormAnalysisResult result, InfoPathFormDefinition formDef)
+        {
+            var complexControlTypes = new Dictionary<string, string>
+            {
+                { "PeoplePicker", "People Picker controls will need user lookup functionality" },
+                { "FileAttachment", "File attachments will require binary storage in database" },
+                { "SharePointFileAttachment", "SharePoint attachments may need special handling" },
+                { "ActiveX", "ActiveX controls may not be supported in modern platforms" },
+                { "InlinePicture", "Inline pictures will need binary storage" },
+                { "SignatureLine", "Digital signatures will need special security handling" }
+            };
+
+            var foundComplexControls = new Dictionary<string, List<string>>();
+
+            foreach (var view in formDef.Views)
+            {
+                foreach (var control in view.Controls)
+                {
+                    foreach (var complexType in complexControlTypes.Keys)
+                    {
+                        if (control.Type.Contains(complexType))
+                        {
+                            if (!foundComplexControls.ContainsKey(complexType))
+                            {
+                                foundComplexControls[complexType] = new List<string>();
+                            }
+
+                            var controlIdentifier = !string.IsNullOrEmpty(control.Label)
+                                ? control.Label
+                                : control.Name;
+
+                            if (!string.IsNullOrEmpty(controlIdentifier))
+                            {
+                                foundComplexControls[complexType].Add(controlIdentifier);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Report findings
+            foreach (var kvp in foundComplexControls)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Warning,
+                    Message = $"Complex control type detected: {kvp.Key}",
+                    Details = $"Controls: {string.Join(", ", kvp.Value.Take(5))}. " +
+                             $"{complexControlTypes[kvp.Key]}",
+                    Source = "ControlAnalysis"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Checks for potential issues during migration
+        /// </summary>
+        private void CheckMigrationIssues(FormAnalysisResult result, InfoPathFormDefinition formDef)
+        {
+            // Check for very large forms
+            if (formDef.Metadata.TotalControls > 100)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Warning,
+                    Message = "Large form detected",
+                    Details = $"This form has {formDef.Metadata.TotalControls} controls. Consider breaking it into smaller forms for better performance.",
+                    Source = "MigrationAnalysis"
+                });
+            }
+
+            // Check for deeply nested repeating sections
+            var nestedRepeating = 0;
+            foreach (var view in formDef.Views)
+            {
+                foreach (var control in view.Controls)
+                {
+                    if (control.Properties.ContainsKey("ParentRepeatingSections"))
+                    {
+                        var parents = control.Properties["ParentRepeatingSections"].Split('|');
+                        if (parents.Length > 1)
+                        {
+                            nestedRepeating++;
+                        }
+                    }
+                }
+            }
+
+            if (nestedRepeating > 0)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Warning,
+                    Message = "Nested repeating sections detected",
+                    Details = "Nested repeating sections increase complexity and may need special handling in the target platform",
+                    Source = "MigrationAnalysis"
+                });
+            }
+
+            // Check for forms with no data columns
+            if (formDef.Data.Count == 0)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Warning,
+                    Message = "No data columns detected",
+                    Details = "This form may be display-only or the data structure could not be determined",
+                    Source = "DataAnalysis"
+                });
+            }
+
+            // Check for business rules
+            if (formDef.Rules.Any())
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Info,
+                    Message = $"Form contains {formDef.Rules.Count} business rule(s)",
+                    Details = "Business rules will need to be recreated in the target platform",
+                    Source = "RulesAnalysis"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Adds metadata about the file and analysis
+        /// </summary>
+        private void AddMetadata(FormAnalysisResult result, string filePath, InfoPathFormDefinition formDef)
+        {
+            try
+            {
+                var fileInfo = new FileInfo(filePath);
+                result.Metadata["FileSize"] = fileInfo.Length;
+                result.Metadata["FileSizeFormatted"] = FormatFileSize(fileInfo.Length);
+                result.Metadata["FileCreated"] = fileInfo.CreationTime;
+                result.Metadata["FileModified"] = fileInfo.LastWriteTime;
+            }
+            catch
+            {
+                // Ignore file metadata errors
+            }
+
+            // Add form structure metadata
+            result.Metadata["ViewCount"] = formDef.Views.Count;
+            result.Metadata["TotalControls"] = formDef.Metadata.TotalControls;
+            result.Metadata["TotalSections"] = formDef.Metadata.TotalSections;
+            result.Metadata["RepeatingSections"] = formDef.Metadata.RepeatingSectionCount;
+            result.Metadata["DynamicSections"] = formDef.Metadata.DynamicSectionCount;
+            result.Metadata["UniqueDataColumns"] = formDef.Data.Count;
+
+            // Add control type breakdown
+            var controlTypes = new Dictionary<string, int>();
+            foreach (var view in formDef.Views)
+            {
+                foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent))
+                {
+                    if (!controlTypes.ContainsKey(control.Type))
+                    {
+                        controlTypes[control.Type] = 0;
+                    }
+                    controlTypes[control.Type]++;
+                }
+            }
+            result.Metadata["ControlTypes"] = controlTypes;
+
+            // Add view names
+            result.Metadata["ViewNames"] = formDef.Views.Select(v => v.ViewName).ToList();
+        }
+
+        /// <summary>
+        /// Formats file size to human-readable format
+        /// </summary>
+        private string FormatFileSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB" };
+            double len = bytes;
+            int order = 0;
+
+            while (len >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                len = len / 1024;
+            }
+
+            return $"{len:0.##} {sizes[order]}";
+        }
+    }
+
+    /// <summary>
+    /// Placeholder for future InfoPath 2010 analyzer
+    /// </summary>
+    public class InfoPath2010Analyzer : IFormAnalyzer
+    {
+        public string AnalyzerName => "InfoPath 2010 Analyzer";
+        public string SupportedVersion => "2010";
+        public string[] SupportedFileExtensions => new[] { ".xsn" };
+
+        public bool CanAnalyze(string filePath)
+        {
+            // TODO: Implement when ready
+            // For now, return false to indicate this analyzer is not yet implemented
+            return false;
+        }
+
+        public Task<FormAnalysisResult> AnalyzeFormAsync(string filePath)
+        {
+            throw new NotImplementedException("InfoPath 2010 analyzer is not yet implemented. Please use InfoPath 2013 analyzer.");
+        }
+    }
+
+    /// <summary>
+    /// Placeholder for future InfoPath 2007 analyzer
+    /// </summary>
+    public class InfoPath2007Analyzer : IFormAnalyzer
+    {
+        public string AnalyzerName => "InfoPath 2007 Analyzer";
+        public string SupportedVersion => "2007";
+        public string[] SupportedFileExtensions => new[] { ".xsn" };
+
+        public bool CanAnalyze(string filePath)
+        {
+            // TODO: Implement when ready
+            return false;
+        }
+
+        public Task<FormAnalysisResult> AnalyzeFormAsync(string filePath)
+        {
+            throw new NotImplementedException("InfoPath 2007 analyzer is not yet implemented. Please use InfoPath 2013 analyzer.");
+        }
+    }
+
+    /// <summary>
+    /// Placeholder for future Nintex Forms analyzer
+    /// </summary>
+    public class NintexFormsAnalyzer : IFormAnalyzer
+    {
+        public string AnalyzerName => "Nintex Forms Analyzer";
+        public string SupportedVersion => "Latest";
+        public string[] SupportedFileExtensions => new[] { ".nfp", ".xml" };
+
+        public bool CanAnalyze(string filePath)
+        {
+            // TODO: Implement when ready
+            // Check for Nintex-specific file extensions
+            var extension = Path.GetExtension(filePath).ToLowerInvariant();
+
+            // For now, return false as it's not implemented
+            return false;
+        }
+
+        public Task<FormAnalysisResult> AnalyzeFormAsync(string filePath)
+        {
+            throw new NotImplementedException("Nintex Forms analyzer is not yet implemented.");
+        }
+    }
+}
