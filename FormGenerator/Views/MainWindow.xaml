@@ -114,6 +114,16 @@
             <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
         </Style>
 
+        <!-- Modern PasswordBox Style -->
+        <Style x:Key="ModernPasswordBox" TargetType="PasswordBox">
+            <Setter Property="Background" Value="{StaticResource BackgroundLight}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
         <!-- TreeView Item Style -->
         <Style TargetType="TreeViewItem">
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -323,6 +333,22 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <!-- Modern RadioButton Style -->
+        <Style x:Key="ModernRadioButton" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="0,5,15,5"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Modern CheckBox Style -->
+        <Style x:Key="ModernCheckBox" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Margin" Value="0,5,0,5"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
     </Window.Resources>
 
@@ -922,6 +948,673 @@
                                 Text="-- SQL generation will be available after analysis"/>
                     </ScrollViewer>
                 </TabItem>
+
+                <!-- Generate SQL Tab -->
+                <TabItem Header="📊 Generate SQL" Name="GenerateSqlTab" IsEnabled="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="20">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- SQL Connection Settings -->
+                            <Border Grid.Row="0" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="SQL Database Connection" 
+                                              FontSize="18" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,15"/>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <!-- Server -->
+                                        <TextBlock Grid.Row="0" Grid.Column="0" 
+                                                  Text="Server:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <TextBox Grid.Row="0" Grid.Column="1" 
+                                                Name="SqlServerTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Text="localhost\SQLEXPRESS"
+                                                Margin="5,2"/>
+
+                                        <!-- Database -->
+                                        <TextBlock Grid.Row="1" Grid.Column="0" 
+                                                  Text="Database:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <TextBox Grid.Row="1" Grid.Column="1" 
+                                                Name="SqlDatabaseTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Text="FormDatabase"
+                                                Margin="5,2"/>
+
+                                        <!-- Authentication -->
+                                        <TextBlock Grid.Row="2" Grid.Column="0" 
+                                                  Text="Authentication:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <StackPanel Grid.Row="2" Grid.Column="1" 
+                                                   Orientation="Horizontal" 
+                                                   Margin="5,5">
+                                            <RadioButton Name="WindowsAuthRadio" 
+                                                        Content="Windows Authentication" 
+                                                        Style="{StaticResource ModernRadioButton}"
+                                                        IsChecked="True"
+                                                        GroupName="SqlAuth"/>
+                                            <RadioButton Name="SqlAuthRadio" 
+                                                        Content="SQL Server Authentication" 
+                                                        Style="{StaticResource ModernRadioButton}"
+                                                        GroupName="SqlAuth"/>
+                                        </StackPanel>
+
+                                        <!-- Username (for SQL Auth) -->
+                                        <TextBlock Grid.Row="3" Grid.Column="0" 
+                                                  Text="Username:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"
+                                                  Name="SqlUsernameLabel"
+                                                  Visibility="Collapsed"/>
+                                        <TextBox Grid.Row="3" Grid.Column="1" 
+                                                Name="SqlUsernameTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Margin="5,2"
+                                                Visibility="Collapsed"/>
+
+                                        <!-- Password (for SQL Auth) -->
+                                        <TextBlock Grid.Row="4" Grid.Column="0" 
+                                                  Text="Password:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"
+                                                  Name="SqlPasswordLabel"
+                                                  Visibility="Collapsed"/>
+                                        <PasswordBox Grid.Row="4" Grid.Column="1" 
+                                                    Name="SqlPasswordBox"
+                                                    Style="{StaticResource ModernPasswordBox}"
+                                                    Margin="5,2"
+                                                    Visibility="Collapsed"/>
+
+                                        <!-- Test Connection Button -->
+                                        <Button Grid.Row="5" Grid.Column="1" 
+                                               Name="TestSqlConnectionButton"
+                                               Content="Test Connection"
+                                               Style="{StaticResource ModernButton}"
+                                               HorizontalAlignment="Left"
+                                               Margin="5,10,0,0"
+                                               Width="150"
+                                               Click="TestSqlConnection_Click"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- SQL Generation Options -->
+                            <Border Grid.Row="1" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Generation Options" 
+                                              FontSize="18" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,15"/>
+
+                                    <StackPanel>
+                                        <TextBlock Text="Table Structure:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,0,0,10"/>
+
+                                        <RadioButton Name="FlatTablesRadio"
+                                                    Content="Flat Tables (Simple structure, one table per form)"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    IsChecked="True"
+                                                    GroupName="TableStructure"/>
+
+                                        <RadioButton Name="NormalizedTablesRadio"
+                                                    Content="Normalized Tables (Separate tables for repeating sections)"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    GroupName="TableStructure"/>
+
+                                        <TextBlock Text="Stored Procedures:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,15,0,10"/>
+
+                                        <CheckBox Name="GenerateCrudProcsCheckBox"
+                                                 Content="Generate CRUD Stored Procedures"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="GenerateScalableProcsCheckBox"
+                                                 Content="Generate Scalable Stored Procedures (with pagination)"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="False"/>
+
+                                        <TextBlock Text="Additional Options:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,15,0,10"/>
+
+                                        <CheckBox Name="IncludeIndexesCheckBox"
+                                                 Content="Include Indexes for Performance"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="IncludeConstraintsCheckBox"
+                                                 Content="Include Foreign Key Constraints"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="IncludeTriggersCheckBox"
+                                                 Content="Include Audit Triggers"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="False"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Generate Button -->
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20">
+                                <Button Name="GenerateSqlButton"
+                                       Content="🔨 Generate SQL Scripts"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="200"
+                                       Height="45"
+                                       FontSize="16"
+                                       Click="GenerateSql_Click"
+                                       IsEnabled="False"/>
+
+                                <Button Name="DeploySqlButton"
+                                       Content="🚀 Deploy to Database"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="200"
+                                       Height="45"
+                                       FontSize="16"
+                                       Background="{StaticResource SuccessColor}"
+                                       Margin="10,0,0,0"
+                                       Click="DeploySql_Click"
+                                       IsEnabled="False"/>
+                            </StackPanel>
+
+                            <!-- Output Log -->
+                            <Border Grid.Row="3" Style="{StaticResource CardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                              Text="Generation Log" 
+                                              FontSize="16" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,10"/>
+
+                                    <TextBox Grid.Row="1"
+                                            Name="SqlGenerationLog"
+                                            Style="{StaticResource ModernTextBox}"
+                                            IsReadOnly="True"
+                                            MinHeight="150"
+                                            Text="Ready to generate SQL scripts..."/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Generate Nintex Workflow Tab -->
+                <TabItem Header="🔄 Generate NW" Name="GenerateNintexTab" IsEnabled="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="20">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Nintex Configuration -->
+                            <Border Grid.Row="0" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Nintex Workflow Configuration" 
+                                              FontSize="18" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,15"/>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <!-- Target Platform -->
+                                        <TextBlock Grid.Row="0" Grid.Column="0" 
+                                                  Text="Target Platform:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <ComboBox Grid.Row="0" Grid.Column="1" 
+                                                 Name="NintexPlatformCombo"
+                                                 Style="{StaticResource ModernComboBox}"
+                                                 ItemContainerStyle="{StaticResource ModernComboBoxItem}"
+                                                 Margin="5,2"
+                                                 SelectedIndex="0">
+                                            <ComboBoxItem Content="Nintex Automation Cloud (NAC)"/>
+                                            <ComboBoxItem Content="Nintex for SharePoint Online"/>
+                                            <ComboBoxItem Content="Nintex for SharePoint On-Premises"/>
+                                        </ComboBox>
+
+                                        <!-- Form Name -->
+                                        <TextBlock Grid.Row="1" Grid.Column="0" 
+                                                  Text="Form Name:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <TextBox Grid.Row="1" Grid.Column="1" 
+                                                Name="NintexFormNameTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Text="Generated Form"
+                                                Margin="5,2"/>
+
+                                        <!-- Description -->
+                                        <TextBlock Grid.Row="2" Grid.Column="0" 
+                                                  Text="Description:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <TextBox Grid.Row="2" Grid.Column="1" 
+                                                Name="NintexDescriptionTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Text="Form generated from InfoPath analysis"
+                                                TextWrapping="Wrap"
+                                                MinHeight="60"
+                                                Margin="5,2"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Nintex Generation Options -->
+                            <Border Grid.Row="1" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Form Generation Options" 
+                                              FontSize="18" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,15"/>
+
+                                    <StackPanel>
+                                        <TextBlock Text="Form Components:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,0,0,10"/>
+
+                                        <CheckBox Name="IncludeValidationRulesCheckBox"
+                                                 Content="Include Validation Rules"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="IncludeConditionalLogicCheckBox"
+                                                 Content="Include Conditional Logic"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="IncludeCalculationsCheckBox"
+                                                 Content="Include Calculations"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="GenerateWorkflowCheckBox"
+                                                 Content="Generate Associated Workflow"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="False"/>
+
+                                        <TextBlock Text="Layout Options:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,15,0,10"/>
+
+                                        <RadioButton Name="ResponsiveLayoutRadio"
+                                                    Content="Responsive Layout (Mobile-friendly)"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    IsChecked="True"
+                                                    GroupName="NintexLayout"/>
+
+                                        <RadioButton Name="FixedLayoutRadio"
+                                                    Content="Fixed Layout (Desktop-optimized)"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    GroupName="NintexLayout"/>
+
+                                        <TextBlock Text="Export Format:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,15,0,10"/>
+
+                                        <RadioButton Name="NintexJsonRadio"
+                                                    Content="JSON (For import to NAC)"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    IsChecked="True"
+                                                    GroupName="NintexExport"/>
+
+                                        <RadioButton Name="NintexXmlRadio"
+                                                    Content="XML (For SharePoint)"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    GroupName="NintexExport"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Generate and Download Buttons -->
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20">
+                                <Button Name="GenerateNintexButton"
+                                       Content="🔨 Generate Forms"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="200"
+                                       Height="45"
+                                       FontSize="16"
+                                       Click="GenerateNintex_Click"
+                                       IsEnabled="False"/>
+
+                                <Button Name="DownloadNintexButton"
+                                       Content="📥 Download Package"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="200"
+                                       Height="45"
+                                       FontSize="16"
+                                       Background="{StaticResource SuccessColor}"
+                                       Margin="10,0,0,0"
+                                       Click="DownloadNintex_Click"
+                                       IsEnabled="False"/>
+                            </StackPanel>
+
+                            <!-- Generation Log -->
+                            <Border Grid.Row="3" Style="{StaticResource CardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                              Text="Generation Log" 
+                                              FontSize="16" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,10"/>
+
+                                    <TextBox Grid.Row="1"
+                                            Name="NintexGenerationLog"
+                                            Style="{StaticResource ModernTextBox}"
+                                            IsReadOnly="True"
+                                            MinHeight="150"
+                                            Text="Ready to generate Nintex forms..."/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Generate K2 Tab -->
+                <TabItem Header="⚙️ Generate K2" Name="GenerateK2Tab" IsEnabled="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="20">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- K2 Environment Configuration -->
+                            <Border Grid.Row="0" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="K2 Environment Configuration" 
+                                              FontSize="18" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,15"/>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <!-- K2 Server -->
+                                        <TextBlock Grid.Row="0" Grid.Column="0" 
+                                                  Text="K2 Server:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <TextBox Grid.Row="0" Grid.Column="1" 
+                                                Name="K2ServerTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Text="https://k2.company.com"
+                                                Margin="5,2"/>
+
+                                        <!-- Port -->
+                                        <TextBlock Grid.Row="1" Grid.Column="0" 
+                                                  Text="Port:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <TextBox Grid.Row="1" Grid.Column="1" 
+                                                Name="K2PortTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Text="5555"
+                                                Margin="5,2"/>
+
+                                        <!-- Username -->
+                                        <TextBlock Grid.Row="2" Grid.Column="0" 
+                                                  Text="Username:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <TextBox Grid.Row="2" Grid.Column="1" 
+                                                Name="K2UsernameTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Text="K2Admin"
+                                                Margin="5,2"/>
+
+                                        <!-- Password -->
+                                        <TextBlock Grid.Row="3" Grid.Column="0" 
+                                                  Text="Password:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <PasswordBox Grid.Row="3" Grid.Column="1" 
+                                                    Name="K2PasswordBox"
+                                                    Style="{StaticResource ModernPasswordBox}"
+                                                    Margin="5,2"/>
+
+                                        <!-- Target Folder -->
+                                        <TextBlock Grid.Row="4" Grid.Column="0" 
+                                                  Text="Target Folder:" 
+                                                  VerticalAlignment="Center"
+                                                  Foreground="{StaticResource TextSecondary}"/>
+                                        <TextBox Grid.Row="4" Grid.Column="1" 
+                                                Name="K2FolderTextBox"
+                                                Style="{StaticResource ModernTextBox}"
+                                                Text="/Forms/Generated"
+                                                Margin="5,2"/>
+                                        <Button Grid.Row="4" Grid.Column="2"
+                                               Name="BrowseK2FolderButton"
+                                               Content="📁 Browse"
+                                               Style="{StaticResource ModernButton}"
+                                               Margin="5,2"
+                                               Width="100"
+                                               Click="BrowseK2Folder_Click"/>
+
+                                        <!-- Test Connection Button -->
+                                        <Button Grid.Row="5" Grid.Column="1" 
+                                               Name="TestK2ConnectionButton"
+                                               Content="Test Connection"
+                                               Style="{StaticResource ModernButton}"
+                                               HorizontalAlignment="Left"
+                                               Margin="5,10,0,0"
+                                               Width="150"
+                                               Click="TestK2Connection_Click"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- K2 Generation Options -->
+                            <Border Grid.Row="1" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="K2 SmartForms Options" 
+                                              FontSize="18" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,15"/>
+
+                                    <StackPanel>
+                                        <TextBlock Text="SmartObject Options:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,0,0,10"/>
+
+                                        <CheckBox Name="GenerateSmartObjectsCheckBox"
+                                                 Content="Generate SmartObjects"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="UseExistingSmartObjectsCheckBox"
+                                                 Content="Link to Existing SmartObjects"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="False"/>
+
+                                        <TextBlock Text="Form Type:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,15,0,10"/>
+
+                                        <RadioButton Name="K2ItemViewRadio"
+                                                    Content="Item View (Single record)"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    IsChecked="True"
+                                                    GroupName="K2FormType"/>
+
+                                        <RadioButton Name="K2ListViewRadio"
+                                                    Content="List View (Multiple records)"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    GroupName="K2FormType"/>
+
+                                        <RadioButton Name="K2BothViewsRadio"
+                                                    Content="Both Item and List Views"
+                                                    Style="{StaticResource ModernRadioButton}"
+                                                    GroupName="K2FormType"/>
+
+                                        <TextBlock Text="Advanced Options:" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,15,0,10"/>
+
+                                        <CheckBox Name="GenerateWorkflowK2CheckBox"
+                                                 Content="Generate K2 Workflow"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="False"/>
+
+                                        <CheckBox Name="IncludeRulesK2CheckBox"
+                                                 Content="Include Form Rules"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="IncludeStylesK2CheckBox"
+                                                 Content="Apply K2 Styling"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="True"/>
+
+                                        <CheckBox Name="EnableVersioningK2CheckBox"
+                                                 Content="Enable Form Versioning"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="False"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Generate and Deploy Buttons -->
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20">
+                                <Button Name="GenerateK2Button"
+                                       Content="🔨 Generate K2 Forms"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="200"
+                                       Height="45"
+                                       FontSize="16"
+                                       Click="GenerateK2_Click"
+                                       IsEnabled="False"/>
+
+                                <Button Name="DeployK2Button"
+                                       Content="🚀 Deploy to K2"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="200"
+                                       Height="45"
+                                       FontSize="16"
+                                       Background="{StaticResource SuccessColor}"
+                                       Margin="10,0,0,0"
+                                       Click="DeployK2_Click"
+                                       IsEnabled="False"/>
+
+                                <Button Name="ExportK2PackageButton"
+                                       Content="📦 Export Package"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="200"
+                                       Height="45"
+                                       FontSize="16"
+                                       Background="{StaticResource InfoColor}"
+                                       Margin="10,0,0,0"
+                                       Click="ExportK2Package_Click"
+                                       IsEnabled="False"/>
+                            </StackPanel>
+
+                            <!-- Generation Log -->
+                            <Border Grid.Row="3" Style="{StaticResource CardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                              Text="Generation Log" 
+                                              FontSize="16" 
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,10"/>
+
+                                    <TextBox Grid.Row="1"
+                                            Name="K2GenerationLog"
+                                            Style="{StaticResource ModernTextBox}"
+                                            IsReadOnly="True"
+                                            MinHeight="150"
+                                            Text="Ready to generate K2 SmartForms..."/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+                </TabItem>
+
             </TabControl>
         </Grid>
 
