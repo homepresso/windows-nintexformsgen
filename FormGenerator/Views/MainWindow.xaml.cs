@@ -861,6 +861,67 @@ namespace FormGenerator.Views
 
             headerPanel.Children.Add(gridPosTextBox);
 
+            // Add repeating section indicator if control is in a repeating section
+            if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+            {
+                // Add separator
+                headerPanel.Children.Add(new TextBlock
+                {
+                    Text = " | ",
+                    Margin = new Thickness(5, 0, 5, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = (Brush)FindResource("TextDim")
+                });
+
+                // Add repeating icon
+                headerPanel.Children.Add(new TextBlock
+                {
+                    Text = "🔁",
+                    Margin = new Thickness(0, 0, 3, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = (Brush)FindResource("WarningColor"),
+                    ToolTip = "This control is in a repeating section"
+                });
+
+                // Add repeating section name (non-editable but styled)
+                var repeatingBorder = new Border
+                {
+                    Background = (Brush)FindResource("BackgroundLighter"),
+                    CornerRadius = new CornerRadius(3),
+                    Padding = new Thickness(5, 2, 5, 2),
+                    Margin = new Thickness(0, 0, 5, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+
+                var repeatingSectionText = new TextBlock
+                {
+                    Text = control.RepeatingSectionName,
+                    Foreground = (Brush)FindResource("WarningColor"),
+                    FontSize = 11,
+                    FontWeight = FontWeights.Medium,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    ToolTip = $"Repeating Section: {control.RepeatingSectionName}\nBinding: {control.RepeatingSectionBinding ?? "N/A"}"
+                };
+
+                repeatingBorder.Child = repeatingSectionText;
+                headerPanel.Children.Add(repeatingBorder);
+
+                // If there are parent repeating sections (nested), show indicator
+                if (control.Properties != null && control.Properties.ContainsKey("ParentRepeatingSections"))
+                {
+                    var nestedIndicator = new TextBlock
+                    {
+                        Text = "📦",
+                        Margin = new Thickness(0, 0, 3, 0),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Foreground = (Brush)FindResource("InfoColor"),
+                        FontSize = 10,
+                        ToolTip = $"Nested in: {control.Properties["ParentRepeatingSections"]}"
+                    };
+                    headerPanel.Children.Add(nestedIndicator);
+                }
+            }
+
             return headerPanel;
         }
 
