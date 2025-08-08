@@ -119,10 +119,11 @@ namespace FormGenerator.Analyzers.Infopath
 
     public class EnhancedInfoPathParser
     {
-        private SectionAwareParser sectionParser = new SectionAwareParser();
-        private LabelControlAssociator labelAssociator = new LabelControlAssociator();
-        private DynamicSectionHandler dynamicHandler = new DynamicSectionHandler();
-        private ComplexLabelHandler labelHandler = new ComplexLabelHandler();
+        // REMOVED: Instance fields that were causing the issue
+        // private SectionAwareParser sectionParser = new SectionAwareParser();
+        // private LabelControlAssociator labelAssociator = new LabelControlAssociator();
+        // private DynamicSectionHandler dynamicHandler = new DynamicSectionHandler();
+        // private ComplexLabelHandler labelHandler = new ComplexLabelHandler();
 
         public InfoPathFormDefinition ParseXsnFile(string xsnFilePath)
         {
@@ -158,8 +159,9 @@ namespace FormGenerator.Analyzers.Infopath
                         Console.WriteLine($"Parsing view: {Path.GetFileName(vf)}");
                         var singleView = ParseSingleView(vf);
 
-                        // Extract dynamic sections
+                        // Extract dynamic sections with a NEW handler for each view
                         var xslDoc = XDocument.Load(vf);
+                        var dynamicHandler = new DynamicSectionHandler(); // Create new instance
                         var dynamicSections = dynamicHandler.ExtractDynamicSections(xslDoc);
                         formDef.DynamicSections.AddRange(dynamicSections);
 
@@ -235,7 +237,12 @@ namespace FormGenerator.Analyzers.Infopath
                 ViewName = Path.GetFileName(viewFile)
             };
 
-            // Parse with enhanced parser
+            // CRITICAL FIX: Create NEW parser instances for EACH view
+            var sectionParser = new SectionAwareParser();
+            var labelAssociator = new LabelControlAssociator();
+            var labelHandler = new ComplexLabelHandler();
+
+            // Parse with the new parser instance
             var controls = sectionParser.ParseViewFile(viewFile);
 
             // Associate labels with controls
@@ -307,7 +314,7 @@ namespace FormGenerator.Analyzers.Infopath
                         ColumnName = colName,
                         Type = ctrl.Type,
                         RepeatingSection = repeating,
-                        IsRepeating = ctrl.SectionType == "repeating",
+                        IsRepeating = ctrl.SectionType == "repeating" || ctrl.IsInRepeatingSection,
                         RepeatingSectionPath = repeating,
                         DisplayName = ctrl.Label
                     };
@@ -446,19 +453,18 @@ namespace FormGenerator.Analyzers.Infopath
 
 public class SectionAwareParser
 {
-    private Stack<SectionContext> sectionStack = new Stack<SectionContext>();
-    private List<SectionInfo> sections = new List<SectionInfo>();
-    private int docIndexCounter = 0;
-    private List<ControlDefinition> allControls = new List<ControlDefinition>();
-    private int currentRow = 1;
-    private int currentCol = 1;
-    private bool inTableRow = false;
-    private HashSet<string> processedControls = new HashSet<string>();
-    private Dictionary<string, int> sectionRowCounters = new Dictionary<string, int>();
-    private Stack<RepeatingContext> repeatingContextStack = new Stack<RepeatingContext>();
-
-    // Track recent labels that might be section/table headers
-    private Queue<LabelInfo> recentLabels = new Queue<LabelInfo>();
+    // Instance fields that need to be reset for each parse
+    private Stack<SectionContext> sectionStack;
+    private List<SectionInfo> sections;
+    private int docIndexCounter;
+    private List<ControlDefinition> allControls;
+    private int currentRow;
+    private int currentCol;
+    private bool inTableRow;
+    private HashSet<string> processedControls;
+    private Dictionary<string, int> sectionRowCounters;
+    private Stack<RepeatingContext> repeatingContextStack;
+    private Queue<LabelInfo> recentLabels;
     private const int LABEL_LOOKBACK_COUNT = 5;
 
     public class LabelInfo
@@ -489,28 +495,54 @@ public class SectionAwareParser
         public int Depth { get; set; }
     }
 
+    public SectionAwareParser()
+    {
+        InitializeCollections();
+    }
+
+    private void InitializeCollections()
+    {
+        sectionStack = new Stack<SectionContext>();
+        sections = new List<SectionInfo>();
+        allControls = new List<ControlDefinition>();
+        processedControls = new HashSet<string>();
+        sectionRowCounters = new Dictionary<string, int>();
+        repeatingContextStack = new Stack<RepeatingContext>();
+        recentLabels = new Queue<LabelInfo>();
+    }
+
     public List<ControlDefinition> ParseViewFile(string viewFile)
     {
-        allControls.Clear();
-        sections.Clear();
-        sectionStack.Clear();
-        docIndexCounter = 0;
-        currentRow = 1;
-        currentCol = 1;
-        repeatingContextStack.Clear();
-        recentLabels.Clear();
-        processedControls.Clear();
-        sectionRowCounters.Clear();
+        // CRITICAL: Reset ALL state for each new file parse
+        ResetParserState();
 
         XDocument doc = XDocument.Load(viewFile);
         ProcessElement(doc.Root);
 
-        return allControls;
+        return new List<ControlDefinition>(allControls); // Return a copy
+    }
+
+    private void ResetParserState()
+    {
+        // Create new instances of all collections
+        sectionStack = new Stack<SectionContext>();
+        sections = new List<SectionInfo>();
+        allControls = new List<ControlDefinition>();
+        processedControls = new HashSet<string>();
+        sectionRowCounters = new Dictionary<string, int>();
+        repeatingContextStack = new Stack<RepeatingContext>();
+        recentLabels = new Queue<LabelInfo>();
+
+        // Reset counters and flags
+        docIndexCounter = 0;
+        currentRow = 1;
+        currentCol = 1;
+        inTableRow = false;
     }
 
     public List<SectionInfo> GetSections()
     {
-        return sections;
+        return new List<SectionInfo>(sections ?? new List<SectionInfo>());
     }
 
     private void ProcessElement(XElement elem)
@@ -558,7 +590,7 @@ public class SectionAwareParser
         if (control != null)
         {
             // Add repeating context information
-            if (repeatingContextStack.Count > 0)
+            if (repeatingContextStack != null && repeatingContextStack.Count > 0)
             {
                 var currentContext = repeatingContextStack.Peek();
                 control.IsInRepeatingSection = true;
@@ -575,26 +607,24 @@ public class SectionAwareParser
             }
 
             // Add section context
-            // In InfoPathParser.cs, update the ProcessElement method where it sets control properties:
-
-            // Around line 380 in ProcessElement method, update this section:
-            if (sectionStack.Count > 0)
+            if (sectionStack != null && sectionStack.Count > 0)
             {
                 var currentSection = sectionStack.Peek();
-                // Use DisplayName consistently for matching
-                control.ParentSection = currentSection.DisplayName ?? currentSection.Name;
+                control.ParentSection = currentSection.DisplayName;
                 control.SectionType = currentSection.Type;
-                control.SectionGridPosition = $"{currentSection.Name}-{sectionRowCounters[currentSection.Name]}{GetColumnLetter(currentCol)}";
 
-                // Find the section info by either Name or DisplayName
-                var sectionInfo = sections.LastOrDefault(s =>
-                    s.Name == currentSection.Name ||
-                    s.Name == currentSection.DisplayName ||
-                    s.Name == control.ParentSection);
-
-                if (sectionInfo != null)
+                if (sectionRowCounters != null && sectionRowCounters.ContainsKey(currentSection.Name))
                 {
-                    sectionInfo.ControlIds.Add(control.Name);
+                    control.SectionGridPosition = $"{currentSection.Name}-{sectionRowCounters[currentSection.Name]}{GetColumnLetter(currentCol)}";
+                }
+
+                if (sections != null)
+                {
+                    var sectionInfo = sections.LastOrDefault(s => s.Name == currentSection.Name || s.Name == currentSection.DisplayName);
+                    if (sectionInfo != null)
+                    {
+                        sectionInfo.ControlIds.Add(control.Name);
+                    }
                 }
             }
 
@@ -657,6 +687,9 @@ public class SectionAwareParser
 
     private void TrackPotentialSectionLabel(XElement elem)
     {
+        if (recentLabels == null)
+            recentLabels = new Queue<LabelInfo>();
+
         var text = ExtractLabelText(elem);
         if (!string.IsNullOrWhiteSpace(text))
         {
@@ -1833,4 +1866,4 @@ public class DynamicSectionHandler
     }
 }
 
-    #endregion
+#endregion
