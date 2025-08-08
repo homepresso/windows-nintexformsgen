@@ -10,6 +10,7 @@ using System.Windows.Media;
 using FormGenerator.Analyzers.Infopath;
 using FormGenerator.Analyzers.InfoPath;
 using FormGenerator.Core.Models;
+using FormGenerator.Services;
 using Microsoft.Win32;
 using Newtonsoft.Json;
 
@@ -21,8 +22,11 @@ namespace FormGenerator.Views
     internal class MainWindowAnalysisHandlers
     {
         private readonly MainWindow _mainWindow;
+        private readonly ReusableControlGroupAnalyzer _reusableAnalyzer;
 
         // Reusable Views state
+        private ReusableControlGroupAnalyzer.AnalysisResult _currentReusableAnalysis;
+        private ReusableControlGroupAnalyzer.ControlGroup _selectedGroup;
         private List<ReusableControlGroup> _currentReusableGroups = new List<ReusableControlGroup>();
         private ReusableControlGroup _selectedReusableGroup;
         private int _autoNameCounter = 1;
@@ -36,6 +40,7 @@ namespace FormGenerator.Views
         public MainWindowAnalysisHandlers(MainWindow mainWindow)
         {
             _mainWindow = mainWindow;
+            _reusableAnalyzer = new ReusableControlGroupAnalyzer();
         }
 
         #region Display Analysis Results
@@ -87,7 +92,7 @@ namespace FormGenerator.Views
                     AddSummaryCard("Total Controls", totalControls.ToString(), "🎛️", "All form controls", Brushes.MediumPurple);
                     AddSummaryCard("Total Sections", totalSections.ToString(), "📦", "All form sections", Brushes.Teal);
                     AddSummaryCard("Dynamic Sections", totalDynamicSections.ToString(), "🔄", "Conditional sections", Brushes.Orange);
-                    AddSummaryCard("Repeating Sections", totalRepeatingSections.ToString(), "🔁", "Repeating tables/sections", Brushes.DeepSkyBlue);
+                    AddSummaryCard("Repeating Sections", totalRepeatingSections.ToString(), "🔁", "Will be K2 List Views", Brushes.DeepSkyBlue);
                     AddSummaryCard("Data Columns", totalDataColumns.ToString(), "📊", "Unique data fields", Brushes.LimeGreen);
 
                     // Add message cards if there are any
@@ -202,6 +207,16 @@ namespace FormGenerator.Views
                     FontSize = 11
                 });
 
+                if (formDef.Metadata.RepeatingSectionCount > 0)
+                {
+                    metadataItem.Items.Add(new TreeViewItem
+                    {
+                        Header = $"Repeating Sections: {formDef.Metadata.RepeatingSectionCount} (will be K2 List Views)",
+                        Foreground = (Brush)_mainWindow.FindResource("InfoColor"),
+                        FontSize = 11
+                    });
+                }
+
                 formItem.Items.Add(metadataItem);
 
                 // Add views under the form
@@ -215,15 +230,17 @@ namespace FormGenerator.Views
                     };
 
                     // Group controls by section
-                    var rootControls = view.Controls.Where(c => string.IsNullOrEmpty(c.ParentSection));
+                    var rootControls = view.Controls.Where(c => string.IsNullOrEmpty(c.ParentSection) && !c.IsInRepeatingSection);
+                    var repeatingControls = view.Controls.Where(c => c.IsInRepeatingSection);
 
                     // Add root controls
                     if (rootControls.Any())
                     {
                         var rootItem = new TreeViewItem
                         {
-                            Header = "📦 Root Controls",
-                            IsExpanded = false
+                            Header = "📦 Root Controls (Reusable View Candidates)",
+                            IsExpanded = false,
+                            Foreground = (Brush)_mainWindow.FindResource("SuccessColor")
                         };
 
                         foreach (var control in rootControls.Where(c => !c.IsMergedIntoParent))
@@ -235,8 +252,40 @@ namespace FormGenerator.Views
                         viewItem.Items.Add(rootItem);
                     }
 
-                    // Add sections
-                    foreach (var section in view.Sections)
+                    // Add repeating sections separately
+                    if (repeatingControls.Any())
+                    {
+                        var repeatingSectionsItem = new TreeViewItem
+                        {
+                            Header = $"🔁 Repeating Sections (K2 List Views)",
+                            IsExpanded = false,
+                            Foreground = (Brush)_mainWindow.FindResource("InfoColor")
+                        };
+
+                        var groupedBySection = repeatingControls.GroupBy(c => c.RepeatingSectionName);
+                        foreach (var sectionGroup in groupedBySection)
+                        {
+                            var sectionItem = new TreeViewItem
+                            {
+                                Header = $"📋 {sectionGroup.Key} ({sectionGroup.Count()} controls)",
+                                IsExpanded = false
+                            };
+
+                            foreach (var control in sectionGroup.Where(c => !c.IsMergedIntoParent))
+                            {
+                                var controlItem = CreateControlTreeItem(control);
+                                controlItem.ToolTip = "Part of repeating section - will be in K2 List View";
+                                sectionItem.Items.Add(controlItem);
+                            }
+
+                            repeatingSectionsItem.Items.Add(sectionItem);
+                        }
+
+                        viewItem.Items.Add(repeatingSectionsItem);
+                    }
+
+                    // Add regular sections
+                    foreach (var section in view.Sections.Where(s => s.Type != "repeating"))
                     {
                         var sectionItem = new TreeViewItem
                         {
@@ -247,7 +296,7 @@ namespace FormGenerator.Views
 
                         // Add controls in this section
                         var sectionControls = view.Controls
-                            .Where(c => c.ParentSection == section.Name && !c.IsMergedIntoParent)
+                            .Where(c => c.ParentSection == section.Name && !c.IsMergedIntoParent && !c.IsInRepeatingSection)
                             .OrderBy(c => c.DocIndex);
 
                         foreach (var control in sectionControls)
@@ -319,7 +368,19 @@ namespace FormGenerator.Views
                 headerText += $" 📍{control.GridPosition}";
             }
 
+            // Add indicator if in repeating section
+            if (control.IsInRepeatingSection)
+            {
+                headerText += " 🔁";
+            }
+
             var item = new TreeViewItem { Header = headerText };
+
+            // Color code based on status
+            if (control.IsInRepeatingSection)
+            {
+                item.Foreground = (Brush)_mainWindow.FindResource("InfoColor");
+            }
 
             // Add detailed information as child nodes
             var detailsItem = new TreeViewItem
@@ -350,6 +411,16 @@ namespace FormGenerator.Views
                 });
             }
 
+            if (control.IsInRepeatingSection)
+            {
+                detailsItem.Items.Add(new TreeViewItem
+                {
+                    Header = $"Repeating Section: {control.RepeatingSectionName}",
+                    Foreground = (Brush)_mainWindow.FindResource("InfoColor"),
+                    FontSize = 11
+                });
+            }
+
             if (detailsItem.Items.Count > 0)
             {
                 item.Items.Add(detailsItem);
@@ -360,338 +431,607 @@ namespace FormGenerator.Views
 
         #endregion
 
-        #region Reusable Views
+        #region Reusable Views with Control Groups
 
+        /// <summary>
+        /// Refreshes the reusable views analysis using the new control group analyzer
+        /// </summary>
         public async Task RefreshReusableViews()
         {
+            if (_mainWindow._allFormDefinitions == null || !_mainWindow._allFormDefinitions.Any())
+            {
+                MessageBox.Show("Please analyze forms first before identifying reusable views.",
+                              "No Forms Analyzed",
+                              MessageBoxButton.OK,
+                              MessageBoxImage.Information);
+                return;
+            }
+
+            _mainWindow.UpdateStatus("Analyzing for reusable control groups...");
+
             try
             {
-                _mainWindow.UpdateStatus("Analyzing reusable controls...");
+                // Get the minimum occurrences from the combo box
+                int minOccurrences = GetMinOccurrences();
 
-                if (_mainWindow._allFormDefinitions == null || !_mainWindow._allFormDefinitions.Any())
-                {
-                    MessageBox.Show("Please analyze forms first before identifying reusable controls.",
-                                   "No Analysis Results",
-                                   MessageBoxButton.OK,
-                                   MessageBoxImage.Warning);
-                    return;
-                }
+                // Get the minimum and maximum group sizes
+                int minGroupSize = 2; // Minimum 2 controls to form a group
+                int maxGroupSize = 10; // Maximum 10 controls in a group
 
-                await Task.Run(() =>
-                {
-                    _mainWindow.Dispatcher.Invoke(() =>
-                    {
-                        AnalyzeReusableControls();
-                    });
-                });
+                // Run the analysis
+                _currentReusableAnalysis = await Task.Run(() =>
+                    _reusableAnalyzer.AnalyzeForReusableGroups(
+                        _mainWindow._allFormDefinitions,
+                        minOccurrences,
+                        minGroupSize,
+                        maxGroupSize));
 
-                _mainWindow.UpdateStatus("Reusable controls analysis complete", MessageSeverity.Info);
+                // Display the results
+                await DisplayReusableGroups();
+
+                // Update statistics
+                UpdateReusableStatistics();
+
+                _mainWindow.SaveReusableViewsButton.IsEnabled = true;
+                _mainWindow.UpdateStatus($"Found {_currentReusableAnalysis.IdentifiedGroups.Count} reusable control groups " +
+                                        $"({_currentReusableAnalysis.ControlsInRepeatingSections} controls excluded from repeating sections)",
+                                        MessageSeverity.Info);
             }
             catch (Exception ex)
             {
-                _mainWindow.UpdateStatus($"Reusable analysis failed: {ex.Message}", MessageSeverity.Error);
-                MessageBox.Show($"Analysis failed:\n{ex.Message}",
-                               "Analysis Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
+                _mainWindow.UpdateStatus($"Error analyzing reusable views: {ex.Message}",
+                                        MessageSeverity.Error);
             }
         }
 
-        private void AnalyzeReusableControls()
+        /// <summary>
+        /// Displays the reusable control groups in the TreeView
+        /// </summary>
+        private async Task DisplayReusableGroups()
         {
-            _mainWindow.ReusableControlsTreeView.Items.Clear();
-            _mainWindow.ReusableStatisticsPanel.Children.Clear();
-
-            // Get minimum occurrence threshold
-            var minOccurrences = 2;
-            if (_mainWindow.MinOccurrencesCombo.SelectedItem is ComboBoxItem selectedItem)
+            await _mainWindow.Dispatcher.InvokeAsync(() =>
             {
-                if (int.TryParse(selectedItem.Tag?.ToString(), out int min))
+                _mainWindow.ReusableControlsTreeView.Items.Clear();
+
+                if (_currentReusableAnalysis == null || !_currentReusableAnalysis.IdentifiedGroups.Any())
                 {
-                    minOccurrences = min;
-                }
-            }
-
-            // Collect all controls from all forms
-            var allControlOccurrences = new List<ControlOccurrence>();
-
-            foreach (var formKvp in _mainWindow._allFormDefinitions)
-            {
-                var formName = formKvp.Key;
-                var formDef = formKvp.Value;
-
-                foreach (var view in formDef.Views)
-                {
-                    foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent))
+                    var noDataItem = new TreeViewItem
                     {
-                        allControlOccurrences.Add(new ControlOccurrence
-                        {
-                            FormName = formName,
-                            ViewName = view.ViewName,
-                            Section = control.ParentSection ?? "Root",
-                            GridPosition = control.GridPosition,
-                            Control = control
-                        });
-                    }
-                }
-            }
-
-            // Group controls based on selected grouping
-            var groupBy = (_mainWindow.GroupByCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Control Type";
-            var reusableGroups = GroupControls(allControlOccurrences, groupBy, minOccurrences);
-
-            // Filter by type if specified
-            var filterType = (_mainWindow.FilterTypeCombo.SelectedItem as ComboBoxItem)?.Content?.ToString();
-            if (filterType != "All Types" && !string.IsNullOrEmpty(filterType))
-            {
-                reusableGroups = reusableGroups.Where(g => g.ControlType == filterType).ToList();
-            }
-
-            // Store the current groups
-            _currentReusableGroups = reusableGroups;
-
-            // Enable save button if we have groups
-            _mainWindow.SaveReusableViewsButton.IsEnabled = reusableGroups.Any();
-
-            // Display statistics
-            DisplayReusableStatistics(reusableGroups, allControlOccurrences.Count);
-
-            // Build tree view
-            BuildReusableControlsTree(reusableGroups);
-        }
-
-        private List<ReusableControlGroup> GroupControls(List<ControlOccurrence> occurrences, string groupBy, int minOccurrences)
-        {
-            var groups = new Dictionary<string, ReusableControlGroup>();
-
-            foreach (var occurrence in occurrences)
-            {
-                string groupKey = GetGroupKey(occurrence.Control, groupBy);
-
-                if (string.IsNullOrEmpty(groupKey))
-                    continue;
-
-                if (!groups.ContainsKey(groupKey))
-                {
-                    groups[groupKey] = new ReusableControlGroup
-                    {
-                        GroupKey = groupKey,
-                        ControlType = occurrence.Control.Type,
-                        Label = occurrence.Control.Label,
-                        Name = occurrence.Control.Name
+                        Header = "No reusable control groups found with current criteria",
+                        Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                        FontStyle = FontStyles.Italic
                     };
+                    _mainWindow.ReusableControlsTreeView.Items.Add(noDataItem);
+
+                    // Show info about excluded controls if any
+                    if (_currentReusableAnalysis != null && _currentReusableAnalysis.ControlsInRepeatingSections > 0)
+                    {
+                        var excludedInfo = new TreeViewItem
+                        {
+                            Header = $"ℹ️ {_currentReusableAnalysis.ControlsInRepeatingSections} controls in repeating sections were excluded (will be separate K2 List Views)",
+                            Foreground = (Brush)_mainWindow.FindResource("InfoColor"),
+                            FontStyle = FontStyles.Italic
+                        };
+                        _mainWindow.ReusableControlsTreeView.Items.Add(excludedInfo);
+                    }
+                    return;
                 }
 
-                var group = groups[groupKey];
-                group.Occurrences.Add(occurrence);
-
-                if (!group.AppearingInForms.Contains(occurrence.FormName))
+                // Add info about repeating sections at the top
+                if (_currentReusableAnalysis.RepeatingSections != null && _currentReusableAnalysis.RepeatingSections.Any())
                 {
-                    group.AppearingInForms.Add(occurrence.FormName);
+                    var repeatingSectionGroups = _currentReusableAnalysis.RepeatingSections
+                        .GroupBy(r => r.Name)
+                        .ToList();
+
+                    var repeatingSectionItem = new TreeViewItem
+                    {
+                        Header = CreateRepeatingSectionHeader(repeatingSectionGroups.Count),
+                        IsExpanded = false,
+                        FontWeight = FontWeights.Medium,
+                        Foreground = (Brush)_mainWindow.FindResource("InfoColor")
+                    };
+
+                    foreach (var rsGroup in repeatingSectionGroups)
+                    {
+                        var sectionItem = new TreeViewItem
+                        {
+                            Header = $"🔁 {rsGroup.Key} ({rsGroup.Count()} form(s), {rsGroup.First().ControlCount} controls)",
+                            FontStyle = FontStyles.Italic
+                        };
+
+                        foreach (var form in rsGroup)
+                        {
+                            var formItem = new TreeViewItem
+                            {
+                                Header = $"  • {form.FormName}: {string.Join(", ", form.ControlTypes)}",
+                                FontSize = 11,
+                                Foreground = (Brush)_mainWindow.FindResource("TextSecondary")
+                            };
+                            sectionItem.Items.Add(formItem);
+                        }
+
+                        repeatingSectionItem.Items.Add(sectionItem);
+                    }
+
+                    _mainWindow.ReusableControlsTreeView.Items.Add(repeatingSectionItem);
+
+                    // Add separator
+                    var separator = new TreeViewItem
+                    {
+                        Header = "─────────────────────────────────",
+                        IsEnabled = false,
+                        Foreground = (Brush)_mainWindow.FindResource("BorderColor")
+                    };
+                    _mainWindow.ReusableControlsTreeView.Items.Add(separator);
                 }
-            }
 
-            // Filter groups by minimum occurrences and calculate common properties
-            var reusableGroups = groups.Values
-                .Where(g => g.AppearingInForms.Count >= minOccurrences)
-                .ToList();
+                // Group by suggested name pattern
+                var groupedByPattern = _currentReusableAnalysis.IdentifiedGroups
+                    .GroupBy(g => GetPatternCategory(g.SuggestedName))
+                    .OrderByDescending(g => g.Sum(x => x.OccurrenceCount));
 
-            foreach (var group in reusableGroups)
-            {
-                group.OccurrenceCount = group.Occurrences.Count;
-                CalculateCommonProperties(group);
-            }
+                foreach (var patternGroup in groupedByPattern)
+                {
+                    var categoryItem = new TreeViewItem
+                    {
+                        Header = CreateCategoryHeader(patternGroup.Key, patternGroup.Count()),
+                        IsExpanded = true,
+                        FontWeight = FontWeights.Medium
+                    };
 
-            return reusableGroups.OrderByDescending(g => g.AppearingInForms.Count)
-                                   .ThenByDescending(g => g.OccurrenceCount)
-                                   .ToList();
+                    foreach (var group in patternGroup.OrderByDescending(g => g.OccurrenceCount))
+                    {
+                        var groupItem = new TreeViewItem
+                        {
+                            Header = CreateGroupHeader(group),
+                            Tag = group,
+                            IsExpanded = false
+                        };
+
+                        // Add control details
+                        foreach (var control in group.Controls)
+                        {
+                            var controlItem = new TreeViewItem
+                            {
+                                Header = CreateControlHeader(control),
+                                FontSize = 11
+                            };
+                            groupItem.Items.Add(controlItem);
+                        }
+
+                        // Add forms where this group appears
+                        var formsItem = new TreeViewItem
+                        {
+                            Header = $"📁 Found in {group.OccurrenceCount} forms",
+                            FontStyle = FontStyles.Italic,
+                            Foreground = (Brush)_mainWindow.FindResource("TextSecondary")
+                        };
+
+                        foreach (var formName in group.FoundInForms)
+                        {
+                            var formItem = new TreeViewItem
+                            {
+                                Header = $"  • {formName}",
+                                FontSize = 11
+                            };
+                            formsItem.Items.Add(formItem);
+                        }
+                        groupItem.Items.Add(formsItem);
+
+                        // Add selection event handler
+                        groupItem.Selected += GroupItem_Selected;
+
+                        categoryItem.Items.Add(groupItem);
+                    }
+
+                    _mainWindow.ReusableControlsTreeView.Items.Add(categoryItem);
+                }
+            });
         }
 
-        private string GetGroupKey(ControlDefinition control, string groupBy)
+        /// <summary>
+        /// Handles selection of a control group
+        /// </summary>
+        private void GroupItem_Selected(object sender, RoutedEventArgs e)
         {
-            return groupBy switch
+            var item = sender as TreeViewItem;
+            if (item?.Tag is ReusableControlGroupAnalyzer.ControlGroup group)
             {
-                "Label/Name" => !string.IsNullOrEmpty(control.Label) ? control.Label : control.Name,
-                "Section" => $"{control.ParentSection ?? "Root"}_{control.Type}",
-                _ => control.Type // Default to Control Type
+                _selectedGroup = group;
+                DisplayGroupDetails(group);
+
+                // Enable action buttons
+                _mainWindow.GroupNameTextBox.IsEnabled = true;
+                _mainWindow.GroupNameTextBox.Text = group.SuggestedName;
+                _mainWindow.CreateReusableViewButton.IsEnabled = true;
+                _mainWindow.ExportReusableControlsButton.IsEnabled = true;
+
+                // Stop the event from bubbling up to parent items
+                e.Handled = true;
+            }
+        }
+
+        /// <summary>
+        /// Displays detailed information about a selected group
+        /// </summary>
+        private void DisplayGroupDetails(ReusableControlGroupAnalyzer.ControlGroup group)
+        {
+            _mainWindow.ReusableDetailsPanel.Children.Clear();
+
+            // Group summary
+            var summaryText = new TextBlock
+            {
+                Text = $"Control Group: {group.SuggestedName}",
+                FontWeight = FontWeights.Bold,
+                FontSize = 14,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 0, 0, 10)
             };
+            _mainWindow.ReusableDetailsPanel.Children.Add(summaryText);
+
+            // Occurrence info
+            var occurrenceText = new TextBlock
+            {
+                Text = $"Appears in {group.OccurrenceCount} of {_currentReusableAnalysis.TotalFormsAnalyzed} forms ({(group.OccurrenceCount * 100.0 / _currentReusableAnalysis.TotalFormsAnalyzed):F1}%)",
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                Margin = new Thickness(0, 0, 0, 5)
+            };
+            _mainWindow.ReusableDetailsPanel.Children.Add(occurrenceText);
+
+            // Control count
+            var controlCountText = new TextBlock
+            {
+                Text = $"Contains {group.Controls.Count} controls (not in repeating sections)",
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            _mainWindow.ReusableDetailsPanel.Children.Add(controlCountText);
+
+            // Controls list
+            var controlsHeader = new TextBlock
+            {
+                Text = "Controls in this group:",
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 10, 0, 5)
+            };
+            _mainWindow.ReusableDetailsPanel.Children.Add(controlsHeader);
+
+            int index = 1;
+            foreach (var control in group.Controls)
+            {
+                var controlBorder = new Border
+                {
+                    Background = (Brush)_mainWindow.FindResource("BackgroundMedium"),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(8, 5, 8, 5),
+                    Margin = new Thickness(0, 2, 0, 2)
+                };
+
+                var controlStack = new StackPanel();
+
+                var controlText = new TextBlock
+                {
+                    Text = $"{index}. {control.Label ?? control.Name}",
+                    Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                    FontSize = 12
+                };
+                controlStack.Children.Add(controlText);
+
+                var typeText = new TextBlock
+                {
+                    Text = $"   Type: {control.Type}",
+                    Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                    FontSize = 11
+                };
+                controlStack.Children.Add(typeText);
+
+                controlBorder.Child = controlStack;
+                _mainWindow.ReusableDetailsPanel.Children.Add(controlBorder);
+                index++;
+            }
+
+            // Suggested K2 implementation
+            var implementationHeader = new TextBlock
+            {
+                Text = "K2 Implementation:",
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 15, 0, 5)
+            };
+            _mainWindow.ReusableDetailsPanel.Children.Add(implementationHeader);
+
+            var implementationText = new TextBlock
+            {
+                Text = GetK2ImplementationSuggestion(group),
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 11
+            };
+            _mainWindow.ReusableDetailsPanel.Children.Add(implementationText);
         }
 
-        private void CalculateCommonProperties(ReusableControlGroup group)
+        /// <summary>
+        /// Updates the statistics panel
+        /// </summary>
+        private void UpdateReusableStatistics()
         {
-            if (!group.Occurrences.Any())
+            // ReusableStatisticsPanel is a WrapPanel, so we can use Children
+            var panel = _mainWindow.ReusableStatisticsPanel as WrapPanel;
+            if (panel != null)
+                panel.Children.Clear();
+
+            if (_currentReusableAnalysis == null)
                 return;
 
-            // Find properties that are common across all occurrences
-            var firstControl = group.Occurrences.First().Control;
+            // Total groups card
+            AddStatCard("📊", "Total Groups",
+                       _currentReusableAnalysis.IdentifiedGroups.Count.ToString(),
+                       (Brush)_mainWindow.FindResource("AccentColor"));
 
-            // Check common properties
-            if (group.Occurrences.All(o => o.Control.Type == firstControl.Type))
+            // High reuse groups (3+ forms)
+            var highReuseCount = _currentReusableAnalysis.IdentifiedGroups
+                .Count(g => g.OccurrenceCount >= 3);
+            AddStatCard("🔄", "High Reuse (3+)",
+                       highReuseCount.ToString(),
+                       (Brush)_mainWindow.FindResource("SuccessColor"));
+
+            // Total controls analyzed (excluding repeating)
+            AddStatCard("🎛️", "Controls Analyzed",
+                       _currentReusableAnalysis.TotalControlsAnalyzed.ToString(),
+                       (Brush)_mainWindow.FindResource("InfoColor"));
+
+            // Controls in repeating sections (excluded)
+            if (_currentReusableAnalysis.ControlsInRepeatingSections > 0)
             {
-                group.CommonProperties["Type"] = firstControl.Type;
+                AddStatCard("🔁", "Excluded (Repeating)",
+                           _currentReusableAnalysis.ControlsInRepeatingSections.ToString(),
+                           new SolidColorBrush(Color.FromRgb(255, 152, 0))); // Orange
             }
 
-            if (group.Occurrences.All(o => o.Control.Label == firstControl.Label) && !string.IsNullOrEmpty(firstControl.Label))
+            // Forms analyzed
+            AddStatCard("📄", "Forms Analyzed",
+                       _currentReusableAnalysis.TotalFormsAnalyzed.ToString(),
+                       (Brush)_mainWindow.FindResource("WarningColor"));
+
+            // Average group size
+            if (_currentReusableAnalysis.IdentifiedGroups.Any())
             {
-                group.CommonProperties["Label"] = firstControl.Label;
+                var avgSize = _currentReusableAnalysis.IdentifiedGroups
+                    .Average(g => g.Controls.Count);
+                AddStatCard("📏", "Avg Group Size",
+                           $"{avgSize:F1}",
+                           new SolidColorBrush(Color.FromRgb(156, 39, 176))); // Purple
             }
 
-            if (group.Occurrences.All(o => o.Control.ColumnSpan == firstControl.ColumnSpan) && firstControl.ColumnSpan > 1)
+            // Repeating sections count (will be separate reusable views)
+            if (_currentReusableAnalysis.RepeatingSections != null && _currentReusableAnalysis.RepeatingSections.Any())
             {
-                group.CommonProperties["ColumnSpan"] = firstControl.ColumnSpan.ToString();
-            }
-
-            if (group.Occurrences.All(o => o.Control.IsInRepeatingSection == firstControl.IsInRepeatingSection))
-            {
-                group.CommonProperties["IsRepeating"] = firstControl.IsInRepeatingSection.ToString();
+                var uniqueRepeatingSections = _currentReusableAnalysis.RepeatingSections
+                    .GroupBy(r => r.Name)
+                    .Count();
+                AddStatCard("📦", "Repeating Sections",
+                           uniqueRepeatingSections.ToString(),
+                           new SolidColorBrush(Color.FromRgb(0, 188, 212))); // Cyan
             }
         }
 
-        private void DisplayReusableStatistics(List<ReusableControlGroup> groups, int totalControls)
-        {
-            // Clear existing statistics
-            _mainWindow.ReusableStatisticsPanel.Children.Clear();
-
-            // Add statistics cards
-            AddStatisticCard("Total Groups", groups.Count.ToString(), "🎯", Brushes.DodgerBlue);
-            AddStatisticCard("Reusable Controls", groups.Sum(g => g.OccurrenceCount).ToString(), "🔄", Brushes.Green);
-            AddStatisticCard("Unique Controls", totalControls.ToString(), "📊", Brushes.Purple);
-
-            var mostReused = groups.FirstOrDefault();
-            if (mostReused != null)
-            {
-                AddStatisticCard("Most Reused", $"{mostReused.GroupKey} ({mostReused.AppearingInForms.Count} forms)", "⭐", Brushes.Gold);
-            }
-
-            // Calculate potential savings
-            var potentialViews = groups.Count(g => g.AppearingInForms.Count >= 3);
-            AddStatisticCard("Potential Views", potentialViews.ToString(), "💡", Brushes.Orange);
-        }
-
-        private void AddStatisticCard(string label, string value, string icon, Brush color)
+        /// <summary>
+        /// Adds a statistics card to the panel
+        /// </summary>
+        private void AddStatCard(string icon, string label, string value, Brush color)
         {
             var card = new Border
             {
                 Background = (Brush)_mainWindow.FindResource("BackgroundLight"),
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(15, 10, 15, 10),
+                CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(12, 8, 12, 8),
                 Margin = new Thickness(5),
-                MinWidth = 120
+                MinWidth = 100
             };
 
-            var stack = new StackPanel { Orientation = Orientation.Horizontal };
+            var stack = new StackPanel();
 
-            stack.Children.Add(new TextBlock
+            var iconText = new TextBlock
             {
                 Text = icon,
                 FontSize = 20,
-                Foreground = color,
-                Margin = new Thickness(0, 0, 10, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            });
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 5)
+            };
+            stack.Children.Add(iconText);
 
-            var textStack = new StackPanel();
-            textStack.Children.Add(new TextBlock
+            var valueText = new TextBlock
             {
                 Text = value,
-                FontSize = 16,
+                FontSize = 18,
                 FontWeight = FontWeights.Bold,
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary")
-            });
-            textStack.Children.Add(new TextBlock
+                Foreground = color,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            stack.Children.Add(valueText);
+
+            var labelText = new TextBlock
             {
                 Text = label,
                 FontSize = 11,
-                Foreground = (Brush)_mainWindow.FindResource("TextSecondary")
-            });
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            stack.Children.Add(labelText);
 
-            stack.Children.Add(textStack);
             card.Child = stack;
-            _mainWindow.ReusableStatisticsPanel.Children.Add(card);
+
+            // Add to the WrapPanel
+            var panel = _mainWindow.ReusableStatisticsPanel as WrapPanel;
+            if (panel != null)
+                panel.Children.Add(card);
         }
 
-        private void BuildReusableControlsTree(List<ReusableControlGroup> groups)
+        #region Event Handlers
+
+        public void MinOccurrences_Changed()
         {
-            _mainWindow.ReusableControlsTreeView.Items.Clear();
-
-            // Group by control type first
-            var typeGroups = groups.GroupBy(g => g.ControlType).OrderBy(g => g.Key);
-
-            foreach (var typeGroup in typeGroups)
+            if (_currentReusableAnalysis != null)
             {
-                var typeItem = new TreeViewItem
-                {
-                    Header = CreateReusableGroupHeader(typeGroup.Key, typeGroup.Count()),
-                    IsExpanded = true,
-                    Tag = typeGroup
-                };
+                Task.Run(async () => await RefreshReusableViews());
+            }
+        }
 
-                foreach (var group in typeGroup.OrderByDescending(g => g.AppearingInForms.Count))
+        public void GroupBy_Changed()
+        {
+            if (_currentReusableAnalysis != null)
+            {
+                Task.Run(async () => await DisplayReusableGroups());
+            }
+        }
+
+        public void FilterType_Changed()
+        {
+            if (_currentReusableAnalysis != null)
+            {
+                Task.Run(async () => await DisplayReusableGroups());
+            }
+        }
+
+        public void GroupNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_selectedGroup != null)
+            {
+                _selectedGroup.SuggestedName = _mainWindow.GroupNameTextBox.Text;
+            }
+        }
+
+        public async Task SaveReusableViews()
+        {
+            if (_currentReusableAnalysis == null)
+                return;
+
+            var dialog = new SaveFileDialog
+            {
+                Title = "Save Reusable Views Analysis",
+                Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                FileName = $"ReusableViews_{DateTime.Now:yyyyMMdd_HHmmss}.json"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                try
                 {
-                    var groupItem = new TreeViewItem
+                    var exportData = new
                     {
-                        Header = CreateReusableControlHeader(group),
-                        Tag = group
+                        AnalysisDate = DateTime.Now,
+                        Summary = new
+                        {
+                            TotalFormsAnalyzed = _currentReusableAnalysis.TotalFormsAnalyzed,
+                            TotalControlsAnalyzed = _currentReusableAnalysis.TotalControlsAnalyzed,
+                            ControlsInRepeatingSections = _currentReusableAnalysis.ControlsInRepeatingSections,
+                            TotalGroups = _currentReusableAnalysis.IdentifiedGroups.Count,
+                            RepeatingSections = _currentReusableAnalysis.RepeatingSections?.Count ?? 0
+                        },
+                        ReusableControlGroups = _currentReusableAnalysis.IdentifiedGroups,
+                        RepeatingSections = _currentReusableAnalysis.RepeatingSections,
+                        CommonPatterns = _currentReusableAnalysis.CommonPatterns
                     };
 
-                    // Add form occurrences as children
-                    foreach (var formName in group.AppearingInForms)
-                    {
-                        var formOccurrences = group.Occurrences.Where(o => o.FormName == formName).ToList();
+                    var json = JsonConvert.SerializeObject(exportData, Formatting.Indented);
+                    await File.WriteAllTextAsync(dialog.FileName, json);
 
-                        var formItem = new TreeViewItem
-                        {
-                            Header = $"📁 {formName} ({formOccurrences.Count} occurrences)",
-                            Tag = formOccurrences
-                        };
-
-                        foreach (var occurrence in formOccurrences)
-                        {
-                            var occurrenceItem = new TreeViewItem
-                            {
-                                Header = $"📄 {occurrence.ViewName} - {occurrence.Section} [{occurrence.GridPosition}]",
-                                Tag = occurrence,
-                                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                                FontSize = 11
-                            };
-                            formItem.Items.Add(occurrenceItem);
-                        }
-
-                        groupItem.Items.Add(formItem);
-                    }
-
-                    typeItem.Items.Add(groupItem);
+                    _mainWindow.UpdateStatus($"Saved reusable views analysis to {dialog.FileName}",
+                                           MessageSeverity.Info);
                 }
-
-                _mainWindow.ReusableControlsTreeView.Items.Add(typeItem);
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error saving file: {ex.Message}", "Save Error",
+                                  MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
-
-            // Handle selection changed
-            _mainWindow.ReusableControlsTreeView.SelectedItemChanged += ReusableTree_SelectedItemChanged;
         }
 
-        private object CreateReusableGroupHeader(string typeName, int count)
+        public async Task CreateReusableView()
+        {
+            if (_selectedGroup == null)
+                return;
+
+            // This would integrate with K2 API to create the actual view
+            MessageBox.Show($"Creating K2 SmartForm view: {_selectedGroup.SuggestedName}\n\n" +
+                          $"This would create a reusable Item View with {_selectedGroup.Controls.Count} controls " +
+                          $"that can be used across {_selectedGroup.OccurrenceCount} forms.\n\n" +
+                          $"Note: Controls from repeating sections are handled separately as K2 List Views.",
+                          "Create Reusable View",
+                          MessageBoxButton.OK,
+                          MessageBoxImage.Information);
+        }
+
+        public async Task ExportReusableControls()
+        {
+            if (_selectedGroup == null)
+                return;
+
+            var dialog = new SaveFileDialog
+            {
+                Title = "Export Control Group",
+                Filter = "JSON Files (*.json)|*.json|XML Files (*.xml)|*.xml|All Files (*.*)|*.*",
+                FileName = $"{_selectedGroup.SuggestedName}_{DateTime.Now:yyyyMMdd}.json"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                try
+                {
+                    var json = JsonConvert.SerializeObject(_selectedGroup, Formatting.Indented);
+                    await File.WriteAllTextAsync(dialog.FileName, json);
+
+                    _mainWindow.UpdateStatus($"Exported control group to {dialog.FileName}",
+                                           MessageSeverity.Info);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error exporting: {ex.Message}", "Export Error",
+                                  MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        #endregion
+
+        #endregion
+
+        #region Helper Methods
+
+        private int GetMinOccurrences()
+        {
+            var selected = _mainWindow.MinOccurrencesCombo.SelectedItem as ComboBoxItem;
+            if (selected?.Tag != null && int.TryParse(selected.Tag.ToString(), out int min))
+                return min;
+            return 2;
+        }
+
+        private string GetPatternCategory(string suggestedName)
+        {
+            if (suggestedName.Contains("Name")) return "📝 Name Fields";
+            if (suggestedName.Contains("Address")) return "📍 Address Fields";
+            if (suggestedName.Contains("Contact")) return "📞 Contact Fields";
+            if (suggestedName.Contains("Date") || suggestedName.Contains("Time")) return "📅 Date/Time Fields";
+            if (suggestedName.Contains("Organization") || suggestedName.Contains("Department")) return "🏢 Organization Fields";
+            return "📦 Other Field Groups";
+        }
+
+        private object CreateCategoryHeader(string category, int count)
         {
             var panel = new StackPanel { Orientation = Orientation.Horizontal };
 
             panel.Children.Add(new TextBlock
             {
-                Text = GetControlIcon(typeName),
-                FontSize = 16,
-                Margin = new Thickness(0, 0, 5, 0),
-                Foreground = (Brush)_mainWindow.FindResource("AccentColor")
-            });
-
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"{typeName}",
+                Text = $"{category} ",
                 FontWeight = FontWeights.Medium,
                 Foreground = (Brush)_mainWindow.FindResource("TextPrimary")
             });
 
             panel.Children.Add(new TextBlock
             {
-                Text = $" ({count} groups)",
+                Text = $"({count} groups)",
                 Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
                 FontStyle = FontStyles.Italic
             });
@@ -699,65 +1039,41 @@ namespace FormGenerator.Views
             return panel;
         }
 
-        private object CreateReusableControlHeader(ReusableControlGroup group)
+        private object CreateGroupHeader(ReusableControlGroupAnalyzer.ControlGroup group)
         {
             var panel = new StackPanel { Orientation = Orientation.Horizontal };
 
             // Reuse indicator
             var reuseIndicator = new Border
             {
-                Background = group.AppearingInForms.Count >= 4 ? (Brush)_mainWindow.FindResource("SuccessColor") :
-                            group.AppearingInForms.Count >= 3 ? (Brush)_mainWindow.FindResource("WarningColor") :
-                            (Brush)_mainWindow.FindResource("InfoColor"),
+                Background = GetReuseBrush(group.OccurrenceCount),
                 CornerRadius = new CornerRadius(3),
-                Padding = new Thickness(5, 2, 5, 2),
+                Padding = new Thickness(4, 1, 4, 1),
                 Margin = new Thickness(0, 0, 5, 0)
             };
 
             reuseIndicator.Child = new TextBlock
             {
-                Text = $"{group.AppearingInForms.Count} forms",
+                Text = $"{group.OccurrenceCount}x",
                 Foreground = Brushes.White,
-                FontSize = 11,
-                FontWeight = FontWeights.Medium
+                FontSize = 10,
+                FontWeight = FontWeights.Bold
             };
-
             panel.Children.Add(reuseIndicator);
 
-            // Show custom name if available
-            if (!string.IsNullOrEmpty(group.CustomName))
-            {
-                panel.Children.Add(new TextBlock
-                {
-                    Text = group.CustomName,
-                    Foreground = (Brush)_mainWindow.FindResource("AccentLight"),
-                    FontWeight = FontWeights.Medium,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 5, 0)
-                });
-
-                panel.Children.Add(new TextBlock
-                {
-                    Text = "→",
-                    Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 5, 0)
-                });
-            }
-
-            // Control name/label
+            // Group name
             panel.Children.Add(new TextBlock
             {
-                Text = !string.IsNullOrEmpty(group.Label) ? group.Label : group.Name ?? group.GroupKey,
+                Text = group.SuggestedName,
                 Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
                 VerticalAlignment = VerticalAlignment.Center
             });
 
-            // Total occurrences
+            // Control count
             panel.Children.Add(new TextBlock
             {
-                Text = $" ({group.OccurrenceCount} total)",
-                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                Text = $" ({group.Controls.Count} controls)",
+                Foreground = (Brush)_mainWindow.FindResource("TextDim"),
                 FontStyle = FontStyles.Italic,
                 VerticalAlignment = VerticalAlignment.Center
             });
@@ -765,366 +1081,106 @@ namespace FormGenerator.Views
             return panel;
         }
 
-        private void ReusableTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+        private object CreateControlHeader(ReusableControlGroupAnalyzer.ControlSignature control)
         {
-            var selectedItem = e.NewValue as TreeViewItem;
-            if (selectedItem?.Tag is ReusableControlGroup group)
+            var panel = new StackPanel { Orientation = Orientation.Horizontal };
+
+            // Control type icon
+            var typeIcon = GetControlIcon(control.Type);
+            panel.Children.Add(new TextBlock
             {
-                _selectedReusableGroup = group;
-                DisplayReusableGroupDetails(group);
-
-                // Enable and populate the group name textbox
-                _mainWindow.GroupNameTextBox.IsEnabled = true;
-                _mainWindow.GroupNameTextBox.Text = group.CustomName ?? "";
-
-                _mainWindow.CreateReusableViewButton.IsEnabled = true;
-                _mainWindow.ExportReusableControlsButton.IsEnabled = true;
-            }
-            else
-            {
-                _selectedReusableGroup = null;
-                _mainWindow.GroupNameTextBox.IsEnabled = false;
-                _mainWindow.GroupNameTextBox.Text = "";
-
-                _mainWindow.CreateReusableViewButton.IsEnabled = false;
-                _mainWindow.ExportReusableControlsButton.IsEnabled = false;
-            }
-        }
-
-        public void GroupNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_selectedReusableGroup != null)
-            {
-                _selectedReusableGroup.CustomName = _mainWindow.GroupNameTextBox.Text;
-
-                // Update the tree view header for the selected item
-                if (_mainWindow.ReusableControlsTreeView.SelectedItem is TreeViewItem selectedItem)
-                {
-                    selectedItem.Header = CreateReusableControlHeader(_selectedReusableGroup);
-                }
-            }
-        }
-
-        private void DisplayReusableGroupDetails(ReusableControlGroup group)
-        {
-            _mainWindow.ReusableDetailsPanel.Children.Clear();
-
-            // Group header
-            var headerText = new TextBlock
-            {
-                Text = !string.IsNullOrEmpty(group.Label) ? group.Label : group.Name ?? group.GroupKey,
-                FontSize = 16,
-                FontWeight = FontWeights.Medium,
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                Margin = new Thickness(0, 0, 0, 10),
-                TextWrapping = TextWrapping.Wrap
-            };
-            _mainWindow.ReusableDetailsPanel.Children.Add(headerText);
-
-            // Statistics
-            AddDetailSection("Statistics", new[]
-            {
-                $"Appears in: {group.AppearingInForms.Count} forms",
-                $"Total occurrences: {group.OccurrenceCount}",
-                $"Control type: {group.ControlType}"
+                Text = typeIcon + " ",
+                Foreground = GetControlTypeBrush(control.Type),
+                FontSize = 14
             });
 
-            // Common properties
-            if (group.CommonProperties.Any())
+            // Control label
+            panel.Children.Add(new TextBlock
             {
-                var propLines = group.CommonProperties.Select(kvp => $"{kvp.Key}: {kvp.Value}").ToArray();
-                AddDetailSection("Common Properties", propLines);
-            }
+                Text = control.Label ?? control.Name ?? "Unnamed",
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary")
+            });
 
-            // Forms list
-            AddDetailSection("Forms", group.AppearingInForms.ToArray());
-
-            // Recommendation
-            var recommendation = GetReusabilityRecommendation(group);
-            if (!string.IsNullOrEmpty(recommendation))
+            // Control type
+            panel.Children.Add(new TextBlock
             {
-                var recBorder = new Border
-                {
-                    Background = (Brush)_mainWindow.FindResource("InfoColor"),
-                    CornerRadius = new CornerRadius(5),
-                    Padding = new Thickness(10),
-                    Margin = new Thickness(0, 10, 0, 0)
-                };
+                Text = $" [{control.Type}]",
+                Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                FontStyle = FontStyles.Italic
+            });
 
-                recBorder.Child = new TextBlock
-                {
-                    Text = recommendation,
-                    Foreground = Brushes.White,
-                    TextWrapping = TextWrapping.Wrap,
-                    FontSize = 12
-                };
-
-                _mainWindow.ReusableDetailsPanel.Children.Add(recBorder);
-            }
+            return panel;
         }
 
-        private void AddDetailSection(string title, string[] items)
+        private object CreateRepeatingSectionHeader(int count)
         {
-            var titleText = new TextBlock
+            var panel = new StackPanel { Orientation = Orientation.Horizontal };
+
+            panel.Children.Add(new TextBlock
             {
-                Text = title,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                Margin = new Thickness(0, 10, 0, 5)
+                Text = "📦 ",
+                FontSize = 16,
+                Foreground = (Brush)_mainWindow.FindResource("InfoColor")
+            });
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"Repeating Sections ",
+                FontWeight = FontWeights.Medium,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary")
+            });
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"({count} unique sections - will be separate K2 List Views)",
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                FontStyle = FontStyles.Italic
+            });
+
+            return panel;
+        }
+
+        private Brush GetReuseBrush(int occurrenceCount)
+        {
+            if (occurrenceCount >= 5) return (Brush)_mainWindow.FindResource("SuccessColor");
+            if (occurrenceCount >= 3) return (Brush)_mainWindow.FindResource("InfoColor");
+            return (Brush)_mainWindow.FindResource("WarningColor");
+        }
+
+        private Brush GetControlTypeBrush(string type)
+        {
+            return type switch
+            {
+                "TextField" => new SolidColorBrush(Color.FromRgb(33, 150, 243)),
+                "Label" => new SolidColorBrush(Color.FromRgb(158, 158, 158)),
+                "DropDown" or "ComboBox" => new SolidColorBrush(Color.FromRgb(76, 175, 80)),
+                "DatePicker" => new SolidColorBrush(Color.FromRgb(255, 152, 0)),
+                "CheckBox" or "RadioButton" => new SolidColorBrush(Color.FromRgb(156, 39, 176)),
+                _ => (Brush)_mainWindow.FindResource("TextSecondary")
             };
-            _mainWindow.ReusableDetailsPanel.Children.Add(titleText);
-
-            foreach (var item in items)
-            {
-                var itemText = new TextBlock
-                {
-                    Text = $"• {item}",
-                    Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                    Margin = new Thickness(10, 2, 0, 2),
-                    TextWrapping = TextWrapping.Wrap
-                };
-                _mainWindow.ReusableDetailsPanel.Children.Add(itemText);
-            }
         }
 
-        private string GetReusabilityRecommendation(ReusableControlGroup group)
+        private string GetK2ImplementationSuggestion(ReusableControlGroupAnalyzer.ControlGroup group)
         {
-            if (group.AppearingInForms.Count >= 4)
+            var suggestion = new StringBuilder();
+
+            suggestion.AppendLine($"This control group appears in {group.OccurrenceCount} forms and is a good candidate for a reusable K2 SmartForm Item View.");
+            suggestion.AppendLine();
+            suggestion.AppendLine("Recommended implementation:");
+            suggestion.AppendLine("• Create a SmartObject with properties for each control");
+            suggestion.AppendLine("• Build a reusable Item View with these controls");
+            suggestion.AppendLine("• Use subviews or subforms to include in multiple forms");
+            suggestion.AppendLine();
+            suggestion.AppendLine("Note: This group contains only non-repeating controls. Repeating sections are handled separately as K2 List Views.");
+
+            if (group.OccurrenceCount >= 4)
             {
-                return "💡 Highly recommended for reusable view. This control appears in many forms and would benefit from centralized management.";
-            }
-            else if (group.AppearingInForms.Count >= 3)
-            {
-                return "💡 Good candidate for reusable view. Consider creating a shared component.";
-            }
-            else if (group.OccurrenceCount >= 5)
-            {
-                return "💡 Multiple occurrences detected. May benefit from a template approach.";
+                suggestion.AppendLine();
+                suggestion.AppendLine("⭐ High reuse potential - This will significantly reduce development time!");
             }
 
-            return null;
+            return suggestion.ToString();
         }
-
-        public async Task SaveReusableViews()
-        {
-            try
-            {
-                if (_currentReusableGroups == null || !_currentReusableGroups.Any())
-                {
-                    MessageBox.Show("No reusable control groups to save. Please run the analysis first.",
-                                   "No Data to Save",
-                                   MessageBoxButton.OK,
-                                   MessageBoxImage.Warning);
-                    return;
-                }
-
-                var dialog = new SaveFileDialog
-                {
-                    Title = "Save Reusable Views Analysis",
-                    Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
-                    FileName = $"ReusableViews_{DateTime.Now:yyyyMMdd_HHmmss}.json"
-                };
-
-                if (dialog.ShowDialog() == true)
-                {
-                    _mainWindow.UpdateStatus("Saving reusable views to JSON...");
-
-                    // Auto-name any unnamed groups
-                    AutoNameGroups();
-
-                    // Create the full JSON structure
-                    var fullData = new
-                    {
-                        AnalysisDate = DateTime.Now,
-                        TotalForms = _mainWindow._allFormDefinitions.Count,
-                        FormDefinitions = _mainWindow._allFormDefinitions,
-                        ReusableViews = new
-                        {
-                            AnalysisSettings = new
-                            {
-                                MinOccurrences = _mainWindow.MinOccurrencesCombo.SelectedItem is ComboBoxItem item ? item.Tag?.ToString() : "2",
-                                GroupBy = (_mainWindow.GroupByCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "Control Type",
-                                FilterType = (_mainWindow.FilterTypeCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "All Types"
-                            },
-                            Statistics = new
-                            {
-                                TotalGroups = _currentReusableGroups.Count,
-                                TotalReusableControls = _currentReusableGroups.Sum(g => g.OccurrenceCount),
-                                GroupsWithHighReuse = _currentReusableGroups.Count(g => g.AppearingInForms.Count >= 4)
-                            },
-                            Groups = _currentReusableGroups
-                        }
-                    };
-
-                    var json = JsonConvert.SerializeObject(fullData, Formatting.Indented);
-                    await File.WriteAllTextAsync(dialog.FileName, json);
-
-                    _mainWindow.UpdateStatus($"Saved reusable views to: {dialog.FileName}", MessageSeverity.Info);
-                    _mainWindow.JsonOutput.Text = json;
-
-                    MessageBox.Show($"Reusable views analysis saved successfully!",
-                                   "Save Successful",
-                                   MessageBoxButton.OK,
-                                   MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                _mainWindow.UpdateStatus($"Failed to save reusable views: {ex.Message}", MessageSeverity.Error);
-                MessageBox.Show($"Error saving reusable views:\n{ex.Message}",
-                               "Save Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
-            }
-        }
-
-        private void AutoNameGroups()
-        {
-            _autoNameCounter = 1;
-            foreach (var group in _currentReusableGroups)
-            {
-                if (string.IsNullOrEmpty(group.CustomName))
-                {
-                    group.CustomName = $"Group_{_autoNameCounter:D3}";
-                    _autoNameCounter++;
-                }
-            }
-        }
-
-        public void MinOccurrences_Changed()
-        {
-            if (_mainWindow._allFormDefinitions != null && _mainWindow._allFormDefinitions.Any())
-            {
-                AnalyzeReusableControls();
-            }
-        }
-
-        public void GroupBy_Changed()
-        {
-            if (_mainWindow._allFormDefinitions != null && _mainWindow._allFormDefinitions.Any())
-            {
-                AnalyzeReusableControls();
-            }
-        }
-
-        public void FilterType_Changed()
-        {
-            if (_mainWindow._allFormDefinitions != null && _mainWindow._allFormDefinitions.Any())
-            {
-                AnalyzeReusableControls();
-            }
-        }
-
-        public async Task CreateReusableView()
-        {
-            try
-            {
-                var selectedItem = _mainWindow.ReusableControlsTreeView.SelectedItem as TreeViewItem;
-                if (selectedItem?.Tag is ReusableControlGroup group)
-                {
-                    var result = MessageBox.Show(
-                        $"Create a reusable K2 SmartForm view for:\n\n" +
-                        $"{group.Label ?? group.Name ?? group.GroupKey}\n" +
-                        $"Type: {group.ControlType}\n" +
-                        $"Used in {group.AppearingInForms.Count} forms\n\n" +
-                        $"This will generate a K2 view that can be reused across all forms.",
-                        "Create Reusable View",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Question);
-
-                    if (result == MessageBoxResult.Yes)
-                    {
-                        _mainWindow.UpdateStatus($"Creating reusable view for {group.GroupKey}...");
-
-                        // Simulate view creation
-                        await Task.Delay(1000);
-
-                        _mainWindow.K2GenerationLog.Text += $"\n✅ Created reusable view: {group.GroupKey}\n";
-                        _mainWindow.K2GenerationLog.Text += $"   - Type: {group.ControlType}\n";
-                        _mainWindow.K2GenerationLog.Text += $"   - Forms: {string.Join(", ", group.AppearingInForms)}\n";
-
-                        _mainWindow.UpdateStatus("Reusable view created successfully", MessageSeverity.Info);
-
-                        MessageBox.Show(
-                            $"Reusable view created successfully!",
-                            "Success",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _mainWindow.UpdateStatus($"Failed to create reusable view: {ex.Message}", MessageSeverity.Error);
-                MessageBox.Show($"Error creating reusable view:\n{ex.Message}",
-                               "Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
-            }
-        }
-
-        public async Task ExportReusableControls()
-        {
-            try
-            {
-                var selectedItem = _mainWindow.ReusableControlsTreeView.SelectedItem as TreeViewItem;
-                if (selectedItem?.Tag is ReusableControlGroup group)
-                {
-                    var dialog = new SaveFileDialog
-                    {
-                        Title = "Export Reusable Control Group",
-                        Filter = "JSON Files (*.json)|*.json|CSV Files (*.csv)|*.csv|All Files (*.*)|*.*",
-                        FileName = $"ReusableControls_{group.ControlType}_{DateTime.Now:yyyyMMdd}"
-                    };
-
-                    if (dialog.ShowDialog() == true)
-                    {
-                        _mainWindow.UpdateStatus("Exporting reusable controls...");
-
-                        if (Path.GetExtension(dialog.FileName).Equals(".csv", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Export as CSV
-                            var csv = new StringBuilder();
-                            csv.AppendLine("FormName,ViewName,Section,GridPosition,Type,Label,Name");
-
-                            foreach (var occurrence in group.Occurrences)
-                            {
-                                csv.AppendLine($"{occurrence.FormName},{occurrence.ViewName},{occurrence.Section}," +
-                                             $"{occurrence.GridPosition},{occurrence.Control.Type}," +
-                                             $"{occurrence.Control.Label},{occurrence.Control.Name}");
-                            }
-
-                            await File.WriteAllTextAsync(dialog.FileName, csv.ToString());
-                        }
-                        else
-                        {
-                            // Export as JSON
-                            var json = JsonConvert.SerializeObject(group, Formatting.Indented);
-                            await File.WriteAllTextAsync(dialog.FileName, json);
-                        }
-
-                        _mainWindow.UpdateStatus($"Exported to: {dialog.FileName}", MessageSeverity.Info);
-
-                        MessageBox.Show($"Reusable controls exported successfully to:\n{dialog.FileName}",
-                                       "Export Complete",
-                                       MessageBoxButton.OK,
-                                       MessageBoxImage.Information);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _mainWindow.UpdateStatus($"Export failed: {ex.Message}", MessageSeverity.Error);
-                MessageBox.Show($"Export failed:\n{ex.Message}",
-                               "Export Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
-            }
-        }
-
-        #endregion
-
-        #region Helper Methods
 
         private void AddSummaryCard(string title, string value, string icon, string description, Brush accentColor = null)
         {
