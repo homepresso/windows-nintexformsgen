@@ -541,8 +541,8 @@ namespace FormGenerator.Views
                 // Get the minimum occurrences from the combo box
                 int minOccurrences = GetMinOccurrences();
 
-                // Get the minimum and maximum group sizes
-                int minGroupSize = 2; // Minimum 2 controls to form a group
+                // UPDATED: Minimum 3 controls to form a meaningful reusable group
+                int minGroupSize = 3; // Changed from 2 to 3
                 int maxGroupSize = 10; // Maximum 10 controls in a group
 
                 // Run the analysis
@@ -560,8 +560,10 @@ namespace FormGenerator.Views
                 UpdateReusableStatistics();
 
                 _mainWindow.SaveReusableViewsButton.IsEnabled = true;
+
+                // Update status message to indicate labels are excluded
                 _mainWindow.UpdateStatus($"Found {_currentReusableAnalysis.IdentifiedGroups.Count} reusable control groups " +
-                                        $"({_currentReusableAnalysis.ControlsInRepeatingSections} controls excluded from repeating sections)",
+                                        $"(min 3 controls, labels excluded, {_currentReusableAnalysis.ControlsInRepeatingSections} controls in repeating sections excluded)",
                                         MessageSeverity.Info);
             }
             catch (Exception ex)
@@ -766,10 +768,10 @@ namespace FormGenerator.Views
             };
             _mainWindow.ReusableDetailsPanel.Children.Add(occurrenceText);
 
-            // Control count
+            // Control count - emphasize that these are input controls only
             var controlCountText = new TextBlock
             {
-                Text = $"Contains {group.Controls.Count} controls (not in repeating sections)",
+                Text = $"Contains {group.Controls.Count} input controls (labels and repeating sections excluded)",
                 Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
                 Margin = new Thickness(0, 0, 0, 10)
             };
@@ -778,7 +780,7 @@ namespace FormGenerator.Views
             // Controls list
             var controlsHeader = new TextBlock
             {
-                Text = "Controls in this group:",
+                Text = "Input controls in this group:",
                 FontWeight = FontWeights.SemiBold,
                 Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
                 Margin = new Thickness(0, 10, 0, 5)
@@ -1251,14 +1253,14 @@ namespace FormGenerator.Views
         {
             var suggestion = new StringBuilder();
 
-            suggestion.AppendLine($"This control group appears in {group.OccurrenceCount} forms and is a good candidate for a reusable K2 SmartForm Item View.");
+            suggestion.AppendLine($"This control group appears in {group.OccurrenceCount} forms and contains {group.Controls.Count} input controls.");
             suggestion.AppendLine();
             suggestion.AppendLine("Recommended implementation:");
-            suggestion.AppendLine("• Create a SmartObject with properties for each control");
+            suggestion.AppendLine("• Create a SmartObject with properties for each input control");
             suggestion.AppendLine("• Build a reusable Item View with these controls");
             suggestion.AppendLine("• Use subviews or subforms to include in multiple forms");
             suggestion.AppendLine();
-            suggestion.AppendLine("Note: This group contains only non-repeating controls. Repeating sections are handled separately as K2 List Views.");
+            suggestion.AppendLine("Note: This group contains only input controls (minimum 3 required). Labels and repeating sections are handled separately.");
 
             if (group.OccurrenceCount >= 4)
             {

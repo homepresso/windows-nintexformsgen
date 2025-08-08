@@ -195,6 +195,13 @@ namespace FormGenerator.Services
                         control.Type == "RepeatingTable")
                         continue;
 
+                    // IMPORTANT: Skip Label controls - we only want actual input controls
+                    if (control.Type == "Label")
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Skipping label control: '{control.Label}'");
+                        continue;
+                    }
+
                     // IMPORTANT: Skip controls that are inside repeating sections
                     if (control.IsInRepeatingSection)
                     {
