@@ -229,11 +229,43 @@ namespace FormGenerator.Views
                         IsExpanded = false
                     };
 
-                    // Group controls by section
-                    var rootControls = view.Controls.Where(c => string.IsNullOrEmpty(c.ParentSection) && !c.IsInRepeatingSection);
-                    var repeatingControls = view.Controls.Where(c => c.IsInRepeatingSection);
+                    // Create a set of all section names for quick lookup
+                    var sectionNames = new HashSet<string>(view.Sections.Select(s => s.Name));
 
-                    // Add root controls
+                    // Group controls by their actual parent section
+                    var controlsBySection = new Dictionary<string, List<ControlDefinition>>();
+                    var rootControls = new List<ControlDefinition>();
+                    var repeatingControls = new Dictionary<string, List<ControlDefinition>>();
+
+                    foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent))
+                    {
+                        if (control.IsInRepeatingSection)
+                        {
+                            // Group repeating controls by their section name
+                            var sectionKey = control.RepeatingSectionName ?? "Unknown Repeating Section";
+                            if (!repeatingControls.ContainsKey(sectionKey))
+                            {
+                                repeatingControls[sectionKey] = new List<ControlDefinition>();
+                            }
+                            repeatingControls[sectionKey].Add(control);
+                        }
+                        else if (!string.IsNullOrEmpty(control.ParentSection))
+                        {
+                            // Group by parent section
+                            if (!controlsBySection.ContainsKey(control.ParentSection))
+                            {
+                                controlsBySection[control.ParentSection] = new List<ControlDefinition>();
+                            }
+                            controlsBySection[control.ParentSection].Add(control);
+                        }
+                        else
+                        {
+                            // Root level controls
+                            rootControls.Add(control);
+                        }
+                    }
+
+                    // Add root controls if any
                     if (rootControls.Any())
                     {
                         var rootItem = new TreeViewItem
@@ -243,13 +275,56 @@ namespace FormGenerator.Views
                             Foreground = (Brush)_mainWindow.FindResource("SuccessColor")
                         };
 
-                        foreach (var control in rootControls.Where(c => !c.IsMergedIntoParent))
+                        foreach (var control in rootControls.OrderBy(c => c.DocIndex))
                         {
                             var controlItem = CreateControlTreeItem(control);
                             rootItem.Items.Add(controlItem);
                         }
 
                         viewItem.Items.Add(rootItem);
+                    }
+
+                    // Add regular sections with their controls
+                    foreach (var section in view.Sections.Where(s => s.Type != "repeating"))
+                    {
+                        var sectionItem = new TreeViewItem
+                        {
+                            Header = $"{GetSectionIcon(section.Type)} {section.Name} ({section.Type})",
+                            Tag = section,
+                            IsExpanded = false
+                        };
+
+                        // Find controls for this section
+                        // Check both by section.Name and any controls that might have this as ParentSection
+                        var sectionControls = new List<ControlDefinition>();
+
+                        if (controlsBySection.ContainsKey(section.Name))
+                        {
+                            sectionControls.AddRange(controlsBySection[section.Name]);
+                        }
+
+                        // Also check for controls where ParentSection matches any variation of the section name
+                        foreach (var kvp in controlsBySection)
+                        {
+                            if (kvp.Key.Equals(section.Name, StringComparison.OrdinalIgnoreCase) &&
+                                kvp.Key != section.Name)
+                            {
+                                sectionControls.AddRange(kvp.Value);
+                            }
+                        }
+
+                        // Sort by DocIndex and add to tree
+                        foreach (var control in sectionControls.OrderBy(c => c.DocIndex).Distinct())
+                        {
+                            var controlItem = CreateControlTreeItem(control);
+                            sectionItem.Items.Add(controlItem);
+                        }
+
+                        // Only add section if it has controls or is explicitly defined
+                        if (sectionItem.Items.Count > 0 || section.Type == "optional" || section.Type == "dynamic")
+                        {
+                            viewItem.Items.Add(sectionItem);
+                        }
                     }
 
                     // Add repeating sections separately
@@ -262,16 +337,15 @@ namespace FormGenerator.Views
                             Foreground = (Brush)_mainWindow.FindResource("InfoColor")
                         };
 
-                        var groupedBySection = repeatingControls.GroupBy(c => c.RepeatingSectionName);
-                        foreach (var sectionGroup in groupedBySection)
+                        foreach (var sectionGroup in repeatingControls.OrderBy(g => g.Key))
                         {
                             var sectionItem = new TreeViewItem
                             {
-                                Header = $"📋 {sectionGroup.Key} ({sectionGroup.Count()} controls)",
+                                Header = $"📋 {sectionGroup.Key} ({sectionGroup.Value.Count} controls)",
                                 IsExpanded = false
                             };
 
-                            foreach (var control in sectionGroup.Where(c => !c.IsMergedIntoParent))
+                            foreach (var control in sectionGroup.Value.OrderBy(c => c.DocIndex))
                             {
                                 var controlItem = CreateControlTreeItem(control);
                                 controlItem.ToolTip = "Part of repeating section - will be in K2 List View";
@@ -284,28 +358,32 @@ namespace FormGenerator.Views
                         viewItem.Items.Add(repeatingSectionsItem);
                     }
 
-                    // Add regular sections
-                    foreach (var section in view.Sections.Where(s => s.Type != "repeating"))
+                    // Add any orphaned controls that weren't categorized
+                    var allCategorizedControls = new HashSet<ControlDefinition>();
+                    allCategorizedControls.UnionWith(rootControls);
+                    allCategorizedControls.UnionWith(controlsBySection.Values.SelectMany(v => v));
+                    allCategorizedControls.UnionWith(repeatingControls.Values.SelectMany(v => v));
+
+                    var orphanedControls = view.Controls
+                        .Where(c => !c.IsMergedIntoParent && !allCategorizedControls.Contains(c))
+                        .ToList();
+
+                    if (orphanedControls.Any())
                     {
-                        var sectionItem = new TreeViewItem
+                        var orphanedItem = new TreeViewItem
                         {
-                            Header = $"{GetSectionIcon(section.Type)} {section.Name} ({section.Type})",
-                            Tag = section,
-                            IsExpanded = false
+                            Header = $"❓ Uncategorized Controls ({orphanedControls.Count})",
+                            IsExpanded = false,
+                            Foreground = (Brush)_mainWindow.FindResource("WarningColor")
                         };
 
-                        // Add controls in this section
-                        var sectionControls = view.Controls
-                            .Where(c => c.ParentSection == section.Name && !c.IsMergedIntoParent && !c.IsInRepeatingSection)
-                            .OrderBy(c => c.DocIndex);
-
-                        foreach (var control in sectionControls)
+                        foreach (var control in orphanedControls.OrderBy(c => c.DocIndex))
                         {
                             var controlItem = CreateControlTreeItem(control);
-                            sectionItem.Items.Add(controlItem);
+                            orphanedItem.Items.Add(controlItem);
                         }
 
-                        viewItem.Items.Add(sectionItem);
+                        viewItem.Items.Add(orphanedItem);
                     }
 
                     formItem.Items.Add(viewItem);
@@ -334,6 +412,16 @@ namespace FormGenerator.Views
                             FontSize = 11
                         });
 
+                        if (dynSection.Controls != null && dynSection.Controls.Any())
+                        {
+                            sectionItem.Items.Add(new TreeViewItem
+                            {
+                                Header = $"Controls: {string.Join(", ", dynSection.Controls.Take(3))}...",
+                                Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                                FontSize = 11
+                            });
+                        }
+
                         dynamicItem.Items.Add(sectionItem);
                     }
 
@@ -343,7 +431,6 @@ namespace FormGenerator.Views
                 _mainWindow.StructureTreeView.Items.Add(formItem);
             }
         }
-
         private TreeViewItem CreateControlTreeItem(ControlDefinition control)
         {
             // Create header with control info and grid position

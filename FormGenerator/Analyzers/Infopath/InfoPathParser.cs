@@ -575,14 +575,23 @@ public class SectionAwareParser
             }
 
             // Add section context
+            // In InfoPathParser.cs, update the ProcessElement method where it sets control properties:
+
+            // Around line 380 in ProcessElement method, update this section:
             if (sectionStack.Count > 0)
             {
                 var currentSection = sectionStack.Peek();
-                control.ParentSection = currentSection.DisplayName;
+                // Use DisplayName consistently for matching
+                control.ParentSection = currentSection.DisplayName ?? currentSection.Name;
                 control.SectionType = currentSection.Type;
                 control.SectionGridPosition = $"{currentSection.Name}-{sectionRowCounters[currentSection.Name]}{GetColumnLetter(currentCol)}";
 
-                var sectionInfo = sections.LastOrDefault(s => s.Name == currentSection.Name || s.Name == currentSection.DisplayName);
+                // Find the section info by either Name or DisplayName
+                var sectionInfo = sections.LastOrDefault(s =>
+                    s.Name == currentSection.Name ||
+                    s.Name == currentSection.DisplayName ||
+                    s.Name == control.ParentSection);
+
                 if (sectionInfo != null)
                 {
                     sectionInfo.ControlIds.Add(control.Name);
