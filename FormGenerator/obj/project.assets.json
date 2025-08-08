@@ -58,11 +58,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Administrator\\source\\repos\\FormGenerator\\FormGenerator\\FormGenerator.csproj",
+      "projectUniqueName": "C:\\Users\\Administrator\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
       "projectName": "FormGenerator",
-      "projectPath": "C:\\Users\\Administrator\\source\\repos\\FormGenerator\\FormGenerator\\FormGenerator.csproj",
+      "projectPath": "C:\\Users\\Administrator\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
       "packagesPath": "C:\\Users\\Administrator\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Administrator\\source\\repos\\FormGenerator\\FormGenerator\\obj\\",
+      "outputPath": "C:\\Users\\Administrator\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

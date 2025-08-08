@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "iIF9QqYCwDs=",
+  "dgSpecHash": "q4TF98ffblE=",
   "success": true,
-  "projectFilePath": "C:\\Users\\Administrator\\source\\repos\\FormGenerator\\FormGenerator\\FormGenerator.csproj",
+  "projectFilePath": "C:\\Users\\Administrator\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\Administrator\\.nuget\\packages\\newtonsoft.json\\13.0.1\\newtonsoft.json.13.0.1.nupkg.sha512"
   ],
