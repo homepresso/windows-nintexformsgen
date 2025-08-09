@@ -53,6 +53,18 @@ namespace FormGenerator.Analyzers.Infopath
         public string RepeatingSectionBinding { get; set; }
         public Dictionary<string, string> Properties { get; set; } = new Dictionary<string, string>();
         public List<ControlDefinition> Controls { get; set; } = new List<ControlDefinition>();
+
+        public List<DataOption> DataOptions { get; set; } = new List<DataOption>();
+        public string DataOptionsString { get; set; } // Comma-separated for simple display
+        public bool HasStaticData => DataOptions != null && DataOptions.Any();
+    }
+
+    public class DataOption
+    {
+        public string Value { get; set; }
+        public string DisplayText { get; set; }
+        public bool IsDefault { get; set; }
+        public int Order { get; set; }
     }
 
     public class SectionInfo
@@ -90,6 +102,12 @@ namespace FormGenerator.Analyzers.Infopath
         public bool IsConditional { get; set; }
         public string ConditionalOnField { get; set; }
         public string DisplayName { get; set; }
+
+        // NEW: For controls with static data
+        public List<DataOption> ValidValues { get; set; }
+        public string DefaultValue { get; set; }
+        // This is a computed property - read-only, calculated from ValidValues
+        public bool HasConstraints => ValidValues != null && ValidValues.Any();
     }
 
     public class DynamicSection
@@ -114,6 +132,8 @@ namespace FormGenerator.Analyzers.Infopath
     }
 
     #endregion
+
+
 
     #region Enhanced Parser
 
@@ -319,6 +339,25 @@ namespace FormGenerator.Analyzers.Infopath
                         DisplayName = ctrl.Label
                     };
 
+                    // NEW: Add valid values if the control has static data
+                    if (ctrl.HasStaticData && ctrl.DataOptions != null && ctrl.DataOptions.Any())
+                    {
+                        dataCol.ValidValues = new List<DataOption>(ctrl.DataOptions);
+
+                        // Set default value if one exists
+                        var defaultOption = ctrl.DataOptions.FirstOrDefault(o => o.IsDefault);
+                        if (defaultOption != null)
+                        {
+                            dataCol.DefaultValue = defaultOption.Value;
+                        }
+                        else if (ctrl.Properties.ContainsKey("DefaultValue"))
+                        {
+                            dataCol.DefaultValue = ctrl.Properties["DefaultValue"];
+                        }
+
+                        // HasConstraints will automatically be true since ValidValues is populated
+                    }
+
                     // Check if conditional
                     var condField = formDef.ConditionalVisibility
                         .FirstOrDefault(cv => cv.Value.Contains(ctrl.Properties.GetValueOrDefault("CtrlId", "")));
@@ -330,10 +369,29 @@ namespace FormGenerator.Analyzers.Infopath
 
                     dict[key] = dataCol;
                 }
+                else
+                {
+                    // If we already have this column but find another control with data options,
+                    // merge the data options if they're different
+                    var existingCol = dict[key];
+                    if (ctrl.HasStaticData && ctrl.DataOptions != null &&
+                        ctrl.DataOptions.Any() && existingCol.ValidValues == null)
+                    {
+                        existingCol.ValidValues = new List<DataOption>(ctrl.DataOptions);
+                        // HasConstraints will automatically be true since ValidValues is populated
+
+                        var defaultOption = ctrl.DataOptions.FirstOrDefault(o => o.IsDefault);
+                        if (defaultOption != null && string.IsNullOrEmpty(existingCol.DefaultValue))
+                        {
+                            existingCol.DefaultValue = defaultOption.Value;
+                        }
+                    }
+                }
             }
 
             return dict.Values.ToList();
         }
+
 
         private void AddFormMetadata(InfoPathFormDefinition formDef)
         {
@@ -509,6 +567,208 @@ public class SectionAwareParser
         sectionRowCounters = new Dictionary<string, int>();
         repeatingContextStack = new Stack<RepeatingContext>();
         recentLabels = new Queue<LabelInfo>();
+    }
+
+    private void ExtractDropdownOptions(XElement elem, ControlDefinition control)
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"Extracting dropdown options for control: {control.Name} (Type: {control.Type})");
+
+            // Find all option elements (both direct children and descendants)
+            var options = elem.Descendants()
+                .Where(e => e.Name.LocalName.Equals("option", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            System.Diagnostics.Debug.WriteLine($"Found {options.Count} option elements");
+
+            if (options.Any())
+            {
+                control.DataOptions = new List<DataOption>();
+                int order = 0;
+
+                foreach (var option in options)
+                {
+                    var dataOption = new DataOption
+                    {
+                        Value = option.Attribute("value")?.Value ?? "",
+                        DisplayText = GetOptionDisplayText(option),
+                        Order = order++
+                    };
+
+                    System.Diagnostics.Debug.WriteLine($"  Option {order}: Value='{dataOption.Value}', Display='{dataOption.DisplayText}'");
+
+                    // Check if this option is selected by default
+                    // Look for selected attribute or xsl:if conditions
+                    var selectedAttr = option.Attribute("selected");
+                    if (selectedAttr != null)
+                    {
+                        dataOption.IsDefault = true;
+                    }
+                    else
+                    {
+                        // Check for XSL conditional selection
+                        var xslIf = option.Elements()
+                            .FirstOrDefault(e => e.Name.LocalName == "if" && e.Name.Namespace.NamespaceName.Contains("xsl"));
+                        if (xslIf != null)
+                        {
+                            // This option has conditional selection logic
+                            // We can't determine if it's default without runtime evaluation
+                            // But we can note it has selection logic
+                            System.Diagnostics.Debug.WriteLine($"    Has XSL conditional selection");
+                        }
+                    }
+
+                    control.DataOptions.Add(dataOption);
+                }
+
+                // Create comma-separated string for easy display
+                control.DataOptionsString = string.Join(", ",
+                    control.DataOptions.Select(o => o.DisplayText));
+
+                System.Diagnostics.Debug.WriteLine($"DataOptionsString: {control.DataOptionsString}");
+
+                // Store in properties for backward compatibility
+                control.Properties["DataValues"] = control.DataOptionsString;
+                if (control.DataOptions.Any(o => o.IsDefault))
+                {
+                    var defaultOption = control.DataOptions.First(o => o.IsDefault);
+                    control.Properties["DefaultValue"] = defaultOption.Value;
+                }
+
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("No option elements found in dropdown");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error extracting dropdown options: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+        }
+    }
+    // Extract radio button options
+    private void ExtractRadioButtonOptions(XElement elem, ControlDefinition control)
+    {
+        try
+        {
+            // Look for radio buttons in the same group
+            var radioGroup = GetRadioButtonGroup(elem);
+            if (radioGroup != null && radioGroup.Any())
+            {
+                control.DataOptions = new List<DataOption>();
+                int order = 0;
+
+                foreach (var radio in radioGroup)
+                {
+                    var dataOption = new DataOption
+                    {
+                        Value = radio.Attribute("value")?.Value ?? "",
+                        DisplayText = GetRadioButtonLabel(radio),
+                        Order = order++
+                    };
+
+                    // Check if this radio is checked by default
+                    var checkedAttr = radio.Attribute("checked");
+                    if (checkedAttr != null)
+                    {
+                        dataOption.IsDefault = true;
+                    }
+
+                    control.DataOptions.Add(dataOption);
+                }
+
+                control.DataOptionsString = string.Join(", ",
+                    control.DataOptions.Select(o => o.DisplayText));
+                control.Properties["DataValues"] = control.DataOptionsString;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error extracting radio options: {ex.Message}");
+        }
+    }
+
+    private List<XElement> GetRadioButtonGroup(XElement radioElement)
+    {
+        var name = radioElement.Attribute("name")?.Value;
+        if (string.IsNullOrEmpty(name))
+            return null;
+
+        // Find parent container
+        var container = radioElement.Parent;
+        while (container != null &&
+               !container.Name.LocalName.Equals("div", StringComparison.OrdinalIgnoreCase) &&
+               !container.Name.LocalName.Equals("td", StringComparison.OrdinalIgnoreCase))
+        {
+            container = container.Parent;
+        }
+
+        if (container == null)
+            container = radioElement.Parent;
+
+        // Find all radio buttons with the same name
+        return container.Descendants()
+            .Where(e => e.Name.LocalName.Equals("input", StringComparison.OrdinalIgnoreCase) &&
+                       e.Attribute("type")?.Value?.Equals("radio", StringComparison.OrdinalIgnoreCase) == true &&
+                       e.Attribute("name")?.Value == name)
+            .ToList();
+    }
+
+    // Helper to get radio button label
+    private string GetRadioButtonLabel(XElement radio)
+    {
+        // Look for associated label
+        var id = radio.Attribute("id")?.Value;
+        if (!string.IsNullOrEmpty(id))
+        {
+            var label = radio.Parent?.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName.Equals("label", StringComparison.OrdinalIgnoreCase) &&
+                                   e.Attribute("for")?.Value == id);
+            if (label != null)
+                return label.Value?.Trim() ?? "";
+        }
+
+        // Look for text immediately after the radio button
+        var nextNode = radio.NextNode;
+        while (nextNode != null)
+        {
+            if (nextNode is XText textNode && !string.IsNullOrWhiteSpace(textNode.Value))
+            {
+                return textNode.Value.Trim();
+            }
+            if (nextNode is XElement elem && elem.Name.LocalName.Equals("label", StringComparison.OrdinalIgnoreCase))
+            {
+                return elem.Value?.Trim() ?? "";
+            }
+            nextNode = nextNode.NextNode;
+        }
+
+        // Fall back to value attribute
+        return radio.Attribute("value")?.Value ?? "";
+    }
+
+    // Helper to get option display text
+    private string GetOptionDisplayText(XElement option)
+    {
+        // First try to get the direct text content
+        var text = option.Value?.Trim();
+
+        if (string.IsNullOrEmpty(text))
+        {
+            // Try to get text from child nodes
+            var textNodes = option.Nodes().OfType<XText>();
+            text = string.Join("", textNodes.Select(t => t.Value)).Trim();
+        }
+
+        if (string.IsNullOrEmpty(text))
+        {
+            // Fall back to value attribute
+            text = option.Attribute("value")?.Value ?? "";
+        }
+
+        return text;
     }
 
     public List<ControlDefinition> ParseViewFile(string viewFile)
@@ -1117,6 +1377,7 @@ public class SectionAwareParser
         return false;
     }
 
+
     private ControlDefinition TryExtractControl(XElement elem)
     {
         var elemName = elem.Name.LocalName.ToLower();
@@ -1139,7 +1400,8 @@ public class SectionAwareParser
                     Binding = "",
                     DocIndex = ++docIndexCounter,
                     Properties = new Dictionary<string, string>(),
-                    Controls = new List<ControlDefinition>()
+                    Controls = new List<ControlDefinition>(),
+                    DataOptions = new List<DataOption>() // Initialize even for labels
                 };
             }
         }
@@ -1176,7 +1438,6 @@ public class SectionAwareParser
 
         return null;
     }
-
     private ControlDefinition ParseXctControl(XElement elem, string xctType)
     {
         // Handle GUID-based control types (like PeoplePicker)
@@ -1203,7 +1464,8 @@ public class SectionAwareParser
             Type = mappedType,
             DocIndex = ++docIndexCounter,
             Properties = new Dictionary<string, string>(),
-            Controls = new List<ControlDefinition>()
+            Controls = new List<ControlDefinition>(),
+            DataOptions = new List<DataOption>() // Always initialize
         };
 
         control.Label = elem.Attribute("title")?.Value ?? "";
@@ -1226,6 +1488,15 @@ public class SectionAwareParser
             control.Properties["CtrlId"] = ctrlId;
         }
 
+        // IMPORTANT: Extract dropdown options for dropdown/combobox controls
+        if (mappedType.Equals("DropDown", StringComparison.OrdinalIgnoreCase) ||
+            mappedType.Equals("ComboBox", StringComparison.OrdinalIgnoreCase) ||
+            xctType.Equals("dropdown", StringComparison.OrdinalIgnoreCase) ||
+            elem.Name.LocalName.Equals("select", StringComparison.OrdinalIgnoreCase))
+        {
+            ExtractDropdownOptions(elem, control);
+        }
+
         foreach (var attr in elem.Attributes())
         {
             if (!ShouldSkipAttribute(attr.Name.LocalName))
@@ -1237,13 +1508,16 @@ public class SectionAwareParser
         return control;
     }
 
+
+
     private ControlDefinition ParseHtmlControl(XElement elem)
     {
         var control = new ControlDefinition
         {
             DocIndex = ++docIndexCounter,
             Properties = new Dictionary<string, string>(),
-            Controls = new List<ControlDefinition>()
+            Controls = new List<ControlDefinition>(),
+            DataOptions = new List<DataOption>() // Always initialize
         };
 
         // Check if this HTML element has an xctname attribute
@@ -1266,6 +1540,14 @@ public class SectionAwareParser
             {
                 control.Type = MapControlType(xctname);
             }
+
+            // Extract dropdown options if it's a dropdown
+            if (xctname.Equals("dropdown", StringComparison.OrdinalIgnoreCase) ||
+                control.Type.Equals("DropDown", StringComparison.OrdinalIgnoreCase) ||
+                control.Type.Equals("ComboBox", StringComparison.OrdinalIgnoreCase))
+            {
+                ExtractDropdownOptions(elem, control);
+            }
         }
         else
         {
@@ -1273,6 +1555,8 @@ public class SectionAwareParser
             if (elem.Name.LocalName.ToLower() == "select")
             {
                 control.Type = "DropDown";
+                // Extract dropdown options
+                ExtractDropdownOptions(elem, control);
             }
             else if (elem.Name.LocalName.ToLower() == "textarea")
             {
@@ -1282,12 +1566,38 @@ public class SectionAwareParser
             {
                 var type = elem.Attribute("type")?.Value ?? "text";
                 control.Type = MapInputType(type);
+
+                // Extract radio button options if applicable
+                if (type.Equals("radio", StringComparison.OrdinalIgnoreCase))
+                {
+                    ExtractRadioButtonOptions(elem, control);
+                }
+
+                // Extract checkbox default value
+                if (type.Equals("checkbox", StringComparison.OrdinalIgnoreCase))
+                {
+                    var isChecked = elem.Attribute("checked") != null;
+                    control.Properties["DefaultValue"] = isChecked.ToString();
+                }
             }
+        }
+
+        // If it's a select element and we haven't extracted options yet
+        if (elem.Name.LocalName.ToLower() == "select" && control.DataOptions.Count == 0)
+        {
+            ExtractDropdownOptions(elem, control);
         }
 
         control.Name = elem.Attribute("name")?.Value ?? "";
         control.Label = elem.Attribute("title")?.Value ?? "";
         control.Binding = GetAttributeValue(elem, "binding");
+
+        // Extract default value from value attribute
+        var valueAttr = elem.Attribute("value")?.Value;
+        if (!string.IsNullOrEmpty(valueAttr) && !control.Properties.ContainsKey("DefaultValue"))
+        {
+            control.Properties["DefaultValue"] = valueAttr;
+        }
 
         // If no name, try to extract from binding
         if (string.IsNullOrEmpty(control.Name) && !string.IsNullOrEmpty(control.Binding))
@@ -1317,7 +1627,6 @@ public class SectionAwareParser
 
         return control;
     }
-
     private ControlDefinition ParseActiveXControl(XElement elem)
     {
         var control = new ControlDefinition
@@ -1436,7 +1745,8 @@ public class SectionAwareParser
         {
             DocIndex = ++docIndexCounter,
             Properties = new Dictionary<string, string>(),
-            Controls = new List<ControlDefinition>()
+            Controls = new List<ControlDefinition>(),
+            DataOptions = new List<DataOption>() // Always initialize
         };
 
         // Try to determine type from element and attributes
@@ -1455,10 +1765,18 @@ public class SectionAwareParser
         else if (className.Contains("xdComboBox"))
         {
             control.Type = "DropDown";
+            // Extract dropdown options
+            ExtractDropdownOptions(elem, control);
         }
         else if (className.Contains("xdDTPicker"))
         {
             control.Type = "DatePicker";
+        }
+        else if (elemName == "select")
+        {
+            control.Type = "DropDown";
+            // Extract dropdown options
+            ExtractDropdownOptions(elem, control);
         }
         else
         {
@@ -1497,7 +1815,6 @@ public class SectionAwareParser
 
         return control;
     }
-
     private bool IsLabelElement(XElement elem)
     {
         var elemName = elem.Name.LocalName.ToLower();

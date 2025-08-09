@@ -81,6 +81,9 @@ namespace FormGenerator.Services
                 sb.AppendLine("    [ModifiedBy] NVARCHAR(255),");
                 sb.AppendLine("    [Status] NVARCHAR(50) DEFAULT 'Draft',");
 
+                // Track columns that need CHECK constraints
+                var columnsWithConstraints = new List<(string columnName, List<string> validValues)>();
+
                 // Add columns for non-repeating fields
                 var processedColumns = new HashSet<string>();
                 foreach (var column in formDef.Data.Where(d => !d.IsRepeating))
@@ -90,8 +93,19 @@ namespace FormGenerator.Services
                     {
                         processedColumns.Add(columnName);
                         var sqlType = GetSqlType(column.Type);
-                        var nullable = column.IsConditional ? " NULL" : " NULL"; // Make all nullable for flexibility
-                        sb.AppendLine($"    [{columnName}] {sqlType}{nullable},");
+                        var nullable = column.IsConditional ? " NULL" : " NULL";
+
+                        // Check if this column has a default value from the control
+                        var defaultValue = GetDefaultValueClause(column, formDef);
+
+                        sb.AppendLine($"    [{columnName}] {sqlType}{nullable}{defaultValue},");
+
+                        // Track if this column needs constraints
+                        if (column.HasConstraints && column.ValidValues != null)
+                        {
+                            columnsWithConstraints.Add((columnName,
+                                column.ValidValues.Select(v => v.Value).ToList()));
+                        }
                     }
                 }
 
@@ -102,6 +116,18 @@ namespace FormGenerator.Services
 
                 sb.AppendLine(");");
                 sb.AppendLine();
+
+                // Add CHECK constraints for columns with valid values
+                foreach (var (columnName, validValues) in columnsWithConstraints)
+                {
+                    sb.AppendLine($"-- Add CHECK constraint for {columnName}");
+                    var constraintName = $"CK_{tableName}_{columnName}";
+                    var valuesList = string.Join(", ", validValues.Select(v => $"'{v.Replace("'", "''")}'"));
+                    sb.AppendLine($"ALTER TABLE [dbo].[{tableName}]");
+                    sb.AppendLine($"ADD CONSTRAINT [{constraintName}]");
+                    sb.AppendLine($"CHECK ([{columnName}] IN ({valuesList}));");
+                    sb.AppendLine();
+                }
 
                 // Add indexes
                 sb.AppendLine($"CREATE INDEX IX_{tableName}_FormId ON [dbo].[{tableName}] ([FormId]);");
@@ -118,6 +144,102 @@ namespace FormGenerator.Services
                 Description = $"Main table for form {tableName}"
             };
         }
+
+        private List<SqlScript> GenerateLookupTables(InfoPathFormDefinition formDef)
+        {
+            var scripts = new List<SqlScript>();
+            var tableName = SanitizeTableName(formDef.Views.First().ViewName);
+            int order = 50; // Execute after main tables but before procedures
+
+            // Find all controls with static data that might benefit from lookup tables
+            var controlsWithData = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => c.HasStaticData && c.DataOptions.Count > 5) // Only for controls with many options
+                .GroupBy(c => c.Name)
+                .ToList();
+
+            foreach (var controlGroup in controlsWithData)
+            {
+                var control = controlGroup.First();
+                var lookupTableName = $"{tableName}_{SanitizeTableName(control.Name)}_Lookup";
+
+                var sb = new StringBuilder();
+                sb.AppendLine($"-- Lookup table for {control.Name}");
+                sb.AppendLine($"CREATE TABLE [dbo].[{lookupTableName}] (");
+                sb.AppendLine("    [Id] INT IDENTITY(1,1) PRIMARY KEY,");
+                sb.AppendLine("    [Value] NVARCHAR(255) NOT NULL UNIQUE,");
+                sb.AppendLine("    [DisplayText] NVARCHAR(500),");
+                sb.AppendLine("    [SortOrder] INT,");
+                sb.AppendLine("    [IsActive] BIT DEFAULT 1");
+                sb.AppendLine(");");
+                sb.AppendLine();
+
+                // Insert the static values
+                sb.AppendLine($"-- Insert static values for {control.Name}");
+                foreach (var option in control.DataOptions.OrderBy(o => o.Order))
+                {
+                    var value = option.Value.Replace("'", "''");
+                    var displayText = option.DisplayText.Replace("'", "''");
+                    sb.AppendLine($"INSERT INTO [dbo].[{lookupTableName}] ([Value], [DisplayText], [SortOrder])");
+                    sb.AppendLine($"VALUES ('{value}', '{displayText}', {option.Order});");
+                }
+                sb.AppendLine();
+
+                scripts.Add(new SqlScript
+                {
+                    Name = $"Create_{lookupTableName}",
+                    Type = ScriptType.Table,
+                    Content = sb.ToString(),
+                    ExecutionOrder = order++,
+                    Description = $"Lookup table for {control.Name} dropdown values"
+                });
+            }
+
+            return scripts;
+        }
+
+        private string GetDefaultValueClause(DataColumn column, InfoPathFormDefinition formDef)
+        {
+            // Find the control that corresponds to this column
+            var control = formDef.Views
+                .SelectMany(v => v.Controls)
+                .FirstOrDefault(c => c.Name == column.ColumnName || c.Binding == column.ColumnName);
+
+            if (control == null)
+                return "";
+
+            // Check for default value in properties
+            if (control.Properties.ContainsKey("DefaultValue"))
+            {
+                var defaultValue = control.Properties["DefaultValue"];
+
+                // Format based on column type
+                switch (column.Type?.ToLower())
+                {
+                    case "checkbox":
+                        return defaultValue.ToLower() == "true" ? " DEFAULT 1" : " DEFAULT 0";
+                    case "textfield":
+                    case "dropdown":
+                    case "combobox":
+                        return $" DEFAULT '{defaultValue.Replace("'", "''")}'";
+                    case "number":
+                        if (decimal.TryParse(defaultValue, out var numValue))
+                            return $" DEFAULT {numValue}";
+                        break;
+                }
+            }
+
+            // Check for default option in DataOptions
+            if (control.HasStaticData && control.DataOptions.Any(o => o.IsDefault))
+            {
+                var defaultOption = control.DataOptions.First(o => o.IsDefault);
+                return $" DEFAULT '{defaultOption.Value.Replace("'", "''")}'";
+            }
+
+            return "";
+        }
+
+
 
         private List<SqlScript> GenerateRepeatingTables(InfoPathFormDefinition formDef)
         {
@@ -227,6 +349,28 @@ namespace FormGenerator.Services
                 sb.AppendLine("BEGIN");
                 sb.AppendLine("    SET NOCOUNT ON;");
                 sb.AppendLine();
+
+                // Add validation for columns with constraints
+                var columnsWithValidation = formDef.Views
+                    .SelectMany(v => v.Controls)
+                    .Where(c => c.HasStaticData)
+                    .ToList();
+
+                foreach (var control in columnsWithValidation)
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    var validValues = string.Join(", ",
+                        control.DataOptions.Select(o => $"'{o.Value.Replace("'", "''")}'"));
+
+                    sb.AppendLine($"    -- Validate {columnName}");
+                    sb.AppendLine($"    IF @{columnName} IS NOT NULL AND @{columnName} NOT IN ({validValues})");
+                    sb.AppendLine("    BEGIN");
+                    sb.AppendLine($"        RAISERROR('Invalid value for {columnName}', 16, 1);");
+                    sb.AppendLine("        RETURN;");
+                    sb.AppendLine("    END");
+                    sb.AppendLine();
+                }
+
                 sb.AppendLine("    SET @FormId = NEWID();");
                 sb.AppendLine();
                 sb.AppendLine($"    INSERT INTO [dbo].[{tableName}] (");
@@ -267,9 +411,10 @@ namespace FormGenerator.Services
                 Type = ScriptType.StoredProcedure,
                 Content = sb.ToString(),
                 ExecutionOrder = 100,
-                Description = $"Insert procedure for {tableName}"
+                Description = $"Insert procedure with validation for {tableName}"
             };
         }
+
 
         private SqlScript GenerateUpdateProcedure(InfoPathFormDefinition formDef, string tableName)
         {

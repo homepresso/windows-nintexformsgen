@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("FormGenerator")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+9fea4454c51fd972e4637ffd25f8d6f85ce3b902")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+642f4e6107bdc41163cf62fb6fa143624bd04bf7")]
 [assembly: System.Reflection.AssemblyProductAttribute("FormGenerator")]
 [assembly: System.Reflection.AssemblyTitleAttribute("FormGenerator")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
