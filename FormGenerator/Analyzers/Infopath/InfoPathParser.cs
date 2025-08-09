@@ -752,14 +752,37 @@ public class SectionAwareParser
     // Helper to get option display text
     private string GetOptionDisplayText(XElement option)
     {
-        // First try to get the direct text content
-        var text = option.Value?.Trim();
+        // Get only the direct text nodes, excluding text from xsl:if elements
+        var text = "";
 
-        if (string.IsNullOrEmpty(text))
+        foreach (var node in option.Nodes())
         {
-            // Try to get text from child nodes
-            var textNodes = option.Nodes().OfType<XText>();
-            text = string.Join("", textNodes.Select(t => t.Value)).Trim();
+            if (node is XText textNode)
+            {
+                // Get the text value
+                var nodeText = textNode.Value?.Trim();
+
+                // Skip if this text is "selected" (from xsl:if conditions)
+                if (!string.IsNullOrEmpty(nodeText) && !nodeText.Equals("selected", StringComparison.OrdinalIgnoreCase))
+                {
+                    text = nodeText;
+                    break; // Take the first valid text node
+                }
+            }
+            else if (node is XElement elem)
+            {
+                // Skip xsl:if elements - don't extract their text
+                if (!elem.Name.LocalName.Equals("if", StringComparison.OrdinalIgnoreCase))
+                {
+                    // For non-xsl:if elements, recursively get text
+                    var childText = GetDirectTextContent(elem)?.Trim();
+                    if (!string.IsNullOrEmpty(childText) && !childText.Equals("selected", StringComparison.OrdinalIgnoreCase))
+                    {
+                        text = childText;
+                        break;
+                    }
+                }
+            }
         }
 
         if (string.IsNullOrEmpty(text))
