@@ -853,6 +853,7 @@ namespace FormGenerator.Analyzers.Infopath
 
         private void ApplyControlContext(ControlDefinition control)
         {
+            // Apply repeating context if we're in one
             if (repeatingContextStack != null && repeatingContextStack.Count > 0)
             {
                 var currentRepeating = repeatingContextStack.Peek();
@@ -867,18 +868,16 @@ namespace FormGenerator.Analyzers.Infopath
                 }
             }
 
-            if (sectionStack != null && sectionStack.Count > 0)
+            // Only apply section context if we're NOT in a repeating section
+            // This prevents controls from getting both section and repeating attributes
+            if (sectionStack != null && sectionStack.Count > 0 && repeatingContextStack.Count == 0)
             {
                 var currentSection = sectionStack.Peek();
+                control.ParentSection = currentSection.DisplayName;
+                control.SectionType = currentSection.Type;
 
-                if (!control.IsInRepeatingSection || currentSection.Type != "repeating")
-                {
-                    control.ParentSection = currentSection.DisplayName;
-                    control.SectionType = currentSection.Type;
-
-                    if (!string.IsNullOrEmpty(currentSection.CtrlId))
-                        control.Properties["SectionCtrlId"] = currentSection.CtrlId;
-                }
+                if (!string.IsNullOrEmpty(currentSection.CtrlId))
+                    control.Properties["SectionCtrlId"] = currentSection.CtrlId;
             }
         }
 
@@ -892,38 +891,20 @@ namespace FormGenerator.Analyzers.Infopath
             currentTemplateMode = mode;
             insideXslTemplate = true;
 
-            bool isRepeating = false;
-
-            if (!string.IsNullOrEmpty(match) && match.Contains("/") && !match.Contains("roundTrip"))
-                isRepeating = true;
+            // Determine if this template represents a truly repeating structure
+            bool isRepeating = IsActuallyRepeatingPattern(match, templateElem);
 
             var hasRepeatingSection = templateElem.Descendants().Any(IsRepeatingSection);
 
             if (hasRepeatingSection)
             {
+                // Let the repeating section handler deal with it
                 foreach (var child in templateElem.Elements())
                     ProcessElement(child);
-            }
-            else if (!string.IsNullOrEmpty(match) && match.Contains("roundTrip"))
-            {
-                var sectionContext = new SectionContext
-                {
-                    Name = "Round Trip",
-                    Type = "conditional",
-                    DisplayName = "Round Trip",
-                    StartRow = currentRow,
-                    CtrlId = GetAttributeValue(templateElem, "CtrlId")
-                };
-
-                sectionStack.Push(sectionContext);
-
-                foreach (var child in templateElem.Elements())
-                    ProcessElement(child);
-
-                sectionStack.Pop();
             }
             else if (isRepeating)
             {
+                // This is a true repeating section
                 var sectionName = ExtractNameFromBinding(match);
 
                 var repeatingContext = new RepeatingContext
@@ -944,6 +925,9 @@ namespace FormGenerator.Analyzers.Infopath
             }
             else
             {
+                // This is either a conditional section or just a regular template
+                // Don't create any section context - just process children
+                // Controls will inherit any existing repeating context from the stack
                 foreach (var child in templateElem.Elements())
                     ProcessElement(child);
             }
@@ -951,6 +935,76 @@ namespace FormGenerator.Analyzers.Infopath
             insideXslTemplate = false;
             currentTemplateMode = null;
         }
+
+        private bool IsActuallyRepeatingPattern(string match, XElement templateElem)
+        {
+            if (string.IsNullOrEmpty(match))
+                return false;
+
+            // Pattern 1: parent/child relationship (e.g., "my:trips/my:trip")
+            // This indicates iteration over child elements
+            if (match.Contains("/"))
+            {
+                var parts = match.Split('/');
+                if (parts.Length >= 2)
+                {
+                    // Check if the last part is singular and second-to-last is plural
+                    // Or if they follow a collection/item pattern
+                    var parent = parts[parts.Length - 2].Split(':').Last();
+                    var child = parts[parts.Length - 1].Split(':').Last();
+
+                    // Check for collection patterns (plural parent, singular child)
+                    if (IsCollectionPattern(parent, child))
+                    {
+                        Debug.WriteLine($"Detected collection pattern: {parent}/{child}");
+                        return true;
+                    }
+                }
+            }
+
+            // Pattern 2: Check for xsl:for-each in the template
+            var ns = templateElem.Name.Namespace;
+            var hasForEach = templateElem.Descendants(ns + "for-each").Any();
+            if (hasForEach)
+            {
+                Debug.WriteLine($"Template contains for-each - treating as repeating");
+                return true;
+            }
+
+            // Pattern 3: Check if this template is called from within a repeating context
+            // If we're already in a repeating context and this is a simple match (no /),
+            // it's probably NOT another repeating level
+            if (!match.Contains("/") && repeatingContextStack.Count > 0)
+            {
+                Debug.WriteLine($"Simple match '{match}' within existing repeating context - NOT repeating");
+                return false;
+            }
+
+            return false;
+        }
+
+        private bool IsCollectionPattern(string parent, string child)
+        {
+            // Remove common prefixes/suffixes for comparison
+            parent = parent.ToLower();
+            child = child.ToLower();
+
+            // Pattern: plural to singular (items/item, trips/trip, etc.)
+            if (parent.EndsWith("s") && parent.Substring(0, parent.Length - 1) == child)
+                return true;
+
+            // Pattern: collection suffix (tripList/trip, tripCollection/trip)
+            if ((parent.EndsWith("list") || parent.EndsWith("collection") || parent.EndsWith("array")) &&
+                parent.StartsWith(child))
+                return true;
+
+            // Pattern: repeated element (trip/trip) - sometimes used for collections
+            if (parent == child)
+                return true;
+
+            return false;
+        }
+
 
         private bool IsStandaloneLabelElement(XElement elem)
         {
@@ -996,16 +1050,39 @@ namespace FormGenerator.Analyzers.Infopath
             string sectionName = "RepeatingSection";
             var binding = GetAttributeValue(elem, "binding");
 
+            // Look for apply-templates to determine the actual repeating structure
             var applyTemplates = elem.Descendants()
                 .FirstOrDefault(e => e.Name.LocalName == "apply-templates" &&
                                      e.Attribute("select") != null);
 
             if (applyTemplates != null)
             {
-                binding = applyTemplates.Attribute("select")?.Value;
-                sectionName = ExtractNameFromBinding(binding);
+                var selectValue = applyTemplates.Attribute("select")?.Value;
+
+                // Check if this select pattern indicates actual repetition
+                if (IsActuallyRepeatingPattern(selectValue, elem))
+                {
+                    binding = selectValue;
+                    sectionName = ExtractNameFromBinding(binding);
+                }
+                else
+                {
+                    // This might be labeled as repeating but isn't actually
+                    // Check the immediate context
+                    Debug.WriteLine($"Section marked as repeating but pattern '{selectValue}' doesn't indicate repetition");
+
+                    // If we're already in a repeating context, this is probably just a subsection
+                    if (repeatingContextStack.Count > 0)
+                    {
+                        // Don't create a new repeating context, just process children
+                        foreach (var child in elem.Elements())
+                            ProcessElement(child);
+                        return;
+                    }
+                }
             }
 
+            // If we get here, treat it as a proper repeating section
             var bestLabel = FindBestLabelForSection(elem, sectionName);
             if (!string.IsNullOrEmpty(bestLabel))
                 sectionName = bestLabel;
@@ -1037,6 +1114,7 @@ namespace FormGenerator.Analyzers.Infopath
             sectionInfo.EndRow = currentRow;
         }
 
+
         private bool IsRegularSection(XElement elem)
         {
             var className = elem.Attribute("class")?.Value ?? "";
@@ -1059,6 +1137,40 @@ namespace FormGenerator.Analyzers.Infopath
 
             Debug.WriteLine($"Processing regular section - class: {className}, ctrlId: {ctrlId}");
 
+            // If we're in a repeating context, check if this section adds value
+            if (repeatingContextStack.Count > 0)
+            {
+                // This is a regular/conditional section within a repeating section
+                // Check if it has meaningful structure or is just a layout container
+
+                var hasConditionalLogic = elem.Descendants()
+                    .Any(e => e.Name.LocalName == "if" ||
+                             e.Name.LocalName == "when" ||
+                             e.Name.LocalName == "choose");
+
+                if (!hasConditionalLogic)
+                {
+                    // It's probably just a layout container - skip creating a section
+                    Debug.WriteLine($"Section {ctrlId} within repeating context appears to be layout-only - flattening");
+
+                    foreach (var child in elem.Elements())
+                        ProcessElement(child);
+
+                    return;
+                }
+
+                // It has conditional logic, so it might be meaningful
+                // But still don't create a separate section context
+                // Just mark controls as conditional
+                Debug.WriteLine($"Section {ctrlId} has conditional logic but is within repeating context");
+
+                foreach (var child in elem.Elements())
+                    ProcessElement(child);
+
+                return;
+            }
+
+            // Normal section processing for non-nested sections
             var sectionType = className.Contains("xdOptional") ? "optional" : "section";
 
             var sectionName = !string.IsNullOrEmpty(caption) ? caption :

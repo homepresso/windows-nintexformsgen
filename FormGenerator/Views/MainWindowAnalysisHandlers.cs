@@ -250,27 +250,27 @@ namespace FormGenerator.Views
                 IsExpanded = false
             };
 
-            // Group controls by section
-            var controlsBySection = GroupControlsBySection(view.Controls);
+            // Build hierarchical structure of sections and controls
+            var rootControls = new List<ControlDefinition>();
+            var sectionHierarchy = BuildSectionHierarchy(view);
 
             // Add controls without sections first
-            if (controlsBySection.ContainsKey(""))
+            foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent).OrderBy(c => c.DocIndex))
             {
-                var rootControls = controlsBySection[""];
-                foreach (var control in rootControls.OrderBy(c => c.DocIndex))
+                // Skip controls that belong to sections - they'll be added within their sections
+                if (string.IsNullOrEmpty(control.ParentSection) &&
+                    !control.IsInRepeatingSection &&
+                    control.Type != "RepeatingTable" &&
+                    control.Type != "RepeatingSection")
                 {
-                    if (!control.IsMergedIntoParent)
-                    {
-                        viewItem.Items.Add(CreateEnhancedControlItem(control));
-                    }
+                    viewItem.Items.Add(CreateEnhancedControlItem(control));
                 }
             }
 
-            // Add sectioned controls
-            foreach (var section in controlsBySection.Where(s => s.Key != "").OrderBy(s => s.Key))
+            // Add sections with their hierarchical structure
+            foreach (var topLevelSection in sectionHierarchy)
             {
-                var sectionItem = CreateEnhancedSectionItem(section.Key, section.Value, view);
-                viewItem.Items.Add(sectionItem);
+                viewItem.Items.Add(CreateSectionTreeItem(topLevelSection, view));
             }
 
             // Add view statistics
@@ -279,6 +279,240 @@ namespace FormGenerator.Views
 
             return viewItem;
         }
+
+        private List<SectionNode> BuildSectionHierarchy(ViewDefinition view)
+        {
+            var sectionNodes = new Dictionary<string, SectionNode>();
+            var rootSections = new List<SectionNode>();
+
+            // First, create nodes for all sections (including repeating tables/sections from controls)
+            foreach (var section in view.Sections)
+            {
+                if (!sectionNodes.ContainsKey(section.Name))
+                {
+                    sectionNodes[section.Name] = new SectionNode
+                    {
+                        Name = section.Name,
+                        Type = section.Type,
+                        CtrlId = section.CtrlId,
+                        Controls = new List<ControlDefinition>(),
+                        ChildSections = new List<SectionNode>()
+                    };
+                }
+            }
+
+            // Add repeating tables as sections
+            foreach (var control in view.Controls.Where(c => c.Type == "RepeatingTable"))
+            {
+                var sectionName = control.Label ?? control.Name;
+                if (!string.IsNullOrEmpty(sectionName) && !sectionNodes.ContainsKey(sectionName))
+                {
+                    sectionNodes[sectionName] = new SectionNode
+                    {
+                        Name = sectionName,
+                        Type = "repeating",
+                        IsRepeatingTable = true,
+                        Controls = new List<ControlDefinition>(),
+                        ChildSections = new List<SectionNode>()
+                    };
+                }
+            }
+
+            // Now assign controls to their sections and build parent-child relationships
+            foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent))
+            {
+                string sectionKey = null;
+
+                // Determine which section this control belongs to
+                if (!string.IsNullOrEmpty(control.ParentSection))
+                {
+                    sectionKey = control.ParentSection;
+                }
+                else if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+                {
+                    sectionKey = control.RepeatingSectionName;
+                }
+
+                if (!string.IsNullOrEmpty(sectionKey) && sectionNodes.ContainsKey(sectionKey))
+                {
+                    sectionNodes[sectionKey].Controls.Add(control);
+                }
+            }
+
+            // Build parent-child relationships based on control nesting
+            // Look for sections that appear to be nested within other sections
+            foreach (var sectionNode in sectionNodes.Values)
+            {
+                // Check if this section's controls indicate it's nested within another section
+                var firstControl = sectionNode.Controls.FirstOrDefault();
+                if (firstControl != null)
+                {
+                    // Check if the controls in this section have a parent repeating section
+                    if (firstControl.Properties != null &&
+                        firstControl.Properties.ContainsKey("ParentRepeatingSections"))
+                    {
+                        var parentSections = firstControl.Properties["ParentRepeatingSections"].Split('|');
+                        if (parentSections.Length > 0)
+                        {
+                            var immediateParent = parentSections[0];
+                            if (sectionNodes.ContainsKey(immediateParent) && immediateParent != sectionNode.Name)
+                            {
+                                sectionNodes[immediateParent].ChildSections.Add(sectionNode);
+                                sectionNode.ParentSection = immediateParent;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also check template mode relationships (for Round Trip inside Trips)
+            // The Round Trip section appears to be mode "_3" which is nested inside the Trips repeating section
+            foreach (var control in view.Controls)
+            {
+                // If this is a control in the Round Trip section
+                if (control.ParentSection == "CTRL57" || control.ParentSection == "Round Trip")
+                {
+                    // Check if it's also within a repeating section
+                    if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+                    {
+                        var childSectionName = "Round Trip";
+                        var parentSectionName = control.RepeatingSectionName;
+
+                        if (sectionNodes.ContainsKey(childSectionName) &&
+                            sectionNodes.ContainsKey(parentSectionName))
+                        {
+                            var childNode = sectionNodes[childSectionName];
+                            var parentNode = sectionNodes[parentSectionName];
+
+                            if (!parentNode.ChildSections.Contains(childNode))
+                            {
+                                parentNode.ChildSections.Add(childNode);
+                                childNode.ParentSection = parentSectionName;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Identify root sections (those without parents)
+            foreach (var sectionNode in sectionNodes.Values)
+            {
+                if (string.IsNullOrEmpty(sectionNode.ParentSection))
+                {
+                    rootSections.Add(sectionNode);
+                }
+            }
+
+            return rootSections;
+        }
+
+        private TreeViewItem CreateSectionTreeItem(SectionNode sectionNode, ViewDefinition view)
+        {
+            var sectionItem = new TreeViewItem
+            {
+                Header = CreateEnhancedSectionHeader(
+                    sectionNode.Name,
+                    sectionNode.Type,
+                    sectionNode.Controls.Count + sectionNode.ChildSections.Sum(cs => CountAllControls(cs))
+                ),
+                IsExpanded = false,
+                Tag = sectionNode.Name
+            };
+
+            // Apply color based on section type
+            ApplySectionColor(sectionItem, sectionNode.Type);
+
+            // Add section metadata
+            var sectionInfo = view.Sections.FirstOrDefault(s => s.Name == sectionNode.Name);
+            if (sectionInfo != null)
+            {
+                sectionItem.Items.Add(CreateInfoItem($"Type: {sectionNode.Type}", 10));
+                if (!string.IsNullOrEmpty(sectionInfo.CtrlId))
+                {
+                    sectionItem.Items.Add(CreateInfoItem($"ID: {sectionInfo.CtrlId}", 10));
+                }
+            }
+
+            // If this is a repeating table, add a special indicator
+            if (sectionNode.IsRepeatingTable)
+            {
+                sectionItem.Items.Add(CreateInfoItem($"📊 Repeating Table", 10));
+            }
+
+            // Add child sections first (nested sections)
+            foreach (var childSection in sectionNode.ChildSections)
+            {
+                sectionItem.Items.Add(CreateSectionTreeItem(childSection, view));
+            }
+
+            // Then add controls in this section (but not in child sections)
+            foreach (var control in sectionNode.Controls.OrderBy(c => c.DocIndex))
+            {
+                // Skip controls that are in child sections
+                bool isInChildSection = false;
+                foreach (var childSection in sectionNode.ChildSections)
+                {
+                    if (IsControlInSection(control, childSection))
+                    {
+                        isInChildSection = true;
+                        break;
+                    }
+                }
+
+                if (!isInChildSection && !control.IsMergedIntoParent)
+                {
+                    sectionItem.Items.Add(CreateEnhancedControlItem(control));
+                }
+            }
+
+            return sectionItem;
+        }
+
+        private class SectionNode
+        {
+            public string Name { get; set; }
+            public string Type { get; set; }
+            public string CtrlId { get; set; }
+            public string ParentSection { get; set; }
+            public bool IsRepeatingTable { get; set; }
+            public List<ControlDefinition> Controls { get; set; }
+            public List<SectionNode> ChildSections { get; set; }
+        }
+
+        private int CountAllControls(SectionNode section)
+        {
+            int count = section.Controls.Count(c => !c.IsMergedIntoParent);
+            foreach (var childSection in section.ChildSections)
+            {
+                count += CountAllControls(childSection);
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// Checks if a control belongs to a specific section or its children
+        /// </summary>
+        private bool IsControlInSection(ControlDefinition control, SectionNode section)
+        {
+            // Check direct membership
+            if (control.ParentSection == section.Name ||
+                (control.IsInRepeatingSection && control.RepeatingSectionName == section.Name))
+            {
+                return true;
+            }
+
+            // Check child sections
+            foreach (var childSection in section.ChildSections)
+            {
+                if (IsControlInSection(control, childSection))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
 
         /// <summary>
         /// Groups controls by their section information
