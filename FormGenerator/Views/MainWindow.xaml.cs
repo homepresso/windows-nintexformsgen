@@ -58,7 +58,365 @@ namespace FormGenerator.Views
             // Wire up SQL Auth radio button events
             SqlAuthRadio.Checked += SqlAuth_Changed;
             WindowsAuthRadio.Checked += SqlAuth_Changed;
+
+            // Wire up new toolbar buttons for editing features
+            WireUpEditingControls();
         }
+
+        #region Editing Controls Setup
+
+        private void WireUpEditingControls()
+        {
+            // Check if toolbar buttons exist (they might not if XAML hasn't been updated)
+            var addButton = FindName("AddControlButton") as Button;
+            var editButton = FindName("EditControlButton") as Button;
+            var deleteButton = FindName("DeleteControlButton") as Button;
+            var convertButton = FindName("ConvertToRepeatingButton") as Button;
+            var collapseButton = FindName("CollapseAllButton") as Button;
+            var expandButton = FindName("ExpandAllButton") as Button;
+            var searchButton = FindName("TreeSearchButton") as Button;
+            var searchBox = FindName("TreeSearchBox") as TextBox;
+
+            // Wire up toolbar buttons if they exist
+            if (addButton != null)
+                addButton.Click += (s, e) => _analysisHandlers?.ShowAddControlDialog();
+
+            if (editButton != null)
+                editButton.Click += (s, e) => EditSelectedControl();
+
+            if (deleteButton != null)
+                deleteButton.Click += (s, e) => DeleteSelectedControl();
+
+            if (convertButton != null)
+                convertButton.Click += (s, e) => _analysisHandlers?.ShowMoveSectionDialog();
+
+            // Tree manipulation buttons
+            if (collapseButton != null)
+                collapseButton.Click += (s, e) => CollapseAllTreeItems(StructureTreeView.Items);
+
+            if (expandButton != null)
+                expandButton.Click += (s, e) => ExpandAllTreeItems(StructureTreeView.Items);
+
+            // Search functionality
+            if (searchButton != null)
+                searchButton.Click += (s, e) => SearchInTree();
+
+            if (searchBox != null)
+            {
+                searchBox.KeyDown += (s, e) =>
+                {
+                    if (e.Key == Key.Enter)
+                        SearchInTree();
+                };
+            }
+
+            // Setup context menu for StructureTreeView
+            SetupTreeViewContextMenu();
+
+            // Keyboard shortcuts for StructureTreeView
+            StructureTreeView.PreviewKeyDown += StructureTreeView_PreviewKeyDown;
+        }
+
+        private void SetupTreeViewContextMenu()
+        {
+            // Create context menu if it doesn't exist
+            if (StructureTreeView.ContextMenu == null)
+            {
+                StructureTreeView.ContextMenu = new ContextMenu();
+            }
+
+            var contextMenu = StructureTreeView.ContextMenu;
+            contextMenu.Items.Clear();
+
+            // Add Control
+            var addMenuItem = new MenuItem { Header = "Add Control", InputGestureText = "Ctrl+Shift+A" };
+            addMenuItem.Icon = new TextBlock { Text = "➕", FontSize = 14 };
+            addMenuItem.Click += (s, e) => _analysisHandlers?.ShowAddControlDialog();
+            contextMenu.Items.Add(addMenuItem);
+
+            // Edit
+            var editMenuItem = new MenuItem { Header = "Edit", InputGestureText = "F2" };
+            editMenuItem.Icon = new TextBlock { Text = "✏️", FontSize = 14 };
+            editMenuItem.Click += (s, e) => EditSelectedControl();
+            contextMenu.Items.Add(editMenuItem);
+
+            // Delete
+            var deleteMenuItem = new MenuItem { Header = "Delete", InputGestureText = "Delete" };
+            deleteMenuItem.Icon = new TextBlock { Text = "🗑️", FontSize = 14 };
+            deleteMenuItem.Click += (s, e) => DeleteSelectedControl();
+            contextMenu.Items.Add(deleteMenuItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // Convert to Repeating Section
+            var convertMenuItem = new MenuItem { Header = "Convert to Repeating Section", InputGestureText = "Ctrl+Shift+R" };
+            convertMenuItem.Icon = new TextBlock { Text = "🔁", FontSize = 14 };
+            convertMenuItem.Click += (s, e) => _analysisHandlers?.ShowMoveSectionDialog();
+            contextMenu.Items.Add(convertMenuItem);
+
+            // Remove from Repeating Section
+            var removeMenuItem = new MenuItem { Header = "Remove from Repeating Section" };
+            removeMenuItem.Icon = new TextBlock { Text = "➖", FontSize = 14 };
+            removeMenuItem.Click += (s, e) => RemoveSelectedFromRepeating();
+            contextMenu.Items.Add(removeMenuItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // Copy as JSON
+            var copyJsonMenuItem = new MenuItem { Header = "Copy as JSON" };
+            copyJsonMenuItem.Icon = new TextBlock { Text = "📋", FontSize = 14 };
+            copyJsonMenuItem.Click += (s, e) => CopySelectedAsJson();
+            contextMenu.Items.Add(copyJsonMenuItem);
+
+            // Export Section
+            var exportMenuItem = new MenuItem { Header = "Export Section" };
+            exportMenuItem.Icon = new TextBlock { Text = "📥", FontSize = 14 };
+            exportMenuItem.Click += (s, e) => ExportSelectedSection();
+            contextMenu.Items.Add(exportMenuItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // Expand All
+            var expandAllMenuItem = new MenuItem { Header = "Expand All" };
+            expandAllMenuItem.Icon = new TextBlock { Text = "⊞", FontSize = 14 };
+            expandAllMenuItem.Click += (s, e) => ExpandAllTreeItems(StructureTreeView.Items);
+            contextMenu.Items.Add(expandAllMenuItem);
+
+            // Collapse All
+            var collapseAllMenuItem = new MenuItem { Header = "Collapse All" };
+            collapseAllMenuItem.Icon = new TextBlock { Text = "⊟", FontSize = 14 };
+            collapseAllMenuItem.Click += (s, e) => CollapseAllTreeItems(StructureTreeView.Items);
+            contextMenu.Items.Add(collapseAllMenuItem);
+
+            // Context menu opening event to enable/disable items based on selection
+            contextMenu.ContextMenuOpening += TreeViewContextMenu_Opening;
+        }
+
+        private void TreeViewContextMenu_Opening(object sender, ContextMenuEventArgs e)
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+            if (selectedItem == null) return;
+
+            var contextMenu = StructureTreeView.ContextMenu;
+            if (contextMenu == null) return;
+
+            // Find menu items
+            var editItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header.ToString() == "Edit");
+            var deleteItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header.ToString() == "Delete");
+            var convertItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header.ToString().Contains("Convert to Repeating"));
+            var removeItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header.ToString().Contains("Remove from Repeating"));
+
+            // Enable/disable based on what's selected
+            bool isControl = selectedItem.Tag is ControlDefinition;
+            bool isSection = selectedItem.Tag is string;
+            bool isInRepeatingSection = false;
+
+            if (selectedItem.Tag is ControlDefinition control)
+            {
+                isInRepeatingSection = control.IsInRepeatingSection;
+            }
+
+            if (editItem != null) editItem.IsEnabled = isControl;
+            if (deleteItem != null) deleteItem.IsEnabled = isControl;
+            if (convertItem != null) convertItem.IsEnabled = isSection;
+            if (removeItem != null) removeItem.IsEnabled = isControl && isInRepeatingSection;
+        }
+
+        private void StructureTreeView_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.F2)
+            {
+                EditSelectedControl();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Delete)
+            {
+                DeleteSelectedControl();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.A && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+            {
+                _analysisHandlers?.ShowAddControlDialog();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.R && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+            {
+                _analysisHandlers?.ShowMoveSectionDialog();
+                e.Handled = true;
+            }
+        }
+
+        #endregion
+
+        #region Edit Control Methods
+
+        private void EditSelectedControl()
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+            if (selectedItem?.Tag is ControlDefinition control)
+            {
+                _analysisHandlers?.ShowEditPanel(control, selectedItem);
+            }
+        }
+
+        private void DeleteSelectedControl()
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+            if (selectedItem?.Tag is ControlDefinition control)
+            {
+                var result = MessageBox.Show(
+                    $"Are you sure you want to delete '{control.Label ?? control.Name}'?",
+                    "Confirm Delete",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    _analysisHandlers?.DeleteControl(control);
+                }
+            }
+        }
+
+        private void RemoveSelectedFromRepeating()
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+            if (selectedItem?.Tag is ControlDefinition control && control.IsInRepeatingSection)
+            {
+                _analysisHandlers?.RemoveFromRepeatingSectionWithRefresh(control);
+            }
+        }
+
+        private void CopySelectedAsJson()
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+            if (selectedItem?.Tag != null)
+            {
+                try
+                {
+                    var json = JsonConvert.SerializeObject(selectedItem.Tag, Formatting.Indented);
+                    Clipboard.SetText(json);
+                    UpdateStatus("JSON copied to clipboard", MessageSeverity.Info);
+                }
+                catch (Exception ex)
+                {
+                    UpdateStatus($"Failed to copy JSON: {ex.Message}", MessageSeverity.Error);
+                }
+            }
+        }
+
+        private void ExportSelectedSection()
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+            if (selectedItem?.Tag is string sectionName || selectedItem?.Tag is ViewDefinition)
+            {
+                var dialog = new SaveFileDialog
+                {
+                    Title = "Export Section",
+                    Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                    FileName = $"Section_{DateTime.Now:yyyyMMdd_HHmmss}.json"
+                };
+
+                if (dialog.ShowDialog() == true)
+                {
+                    try
+                    {
+                        var json = JsonConvert.SerializeObject(selectedItem.Tag, Formatting.Indented);
+                        File.WriteAllText(dialog.FileName, json);
+                        UpdateStatus($"Section exported to {dialog.FileName}", MessageSeverity.Info);
+                    }
+                    catch (Exception ex)
+                    {
+                        UpdateStatus($"Export failed: {ex.Message}", MessageSeverity.Error);
+                    }
+                }
+            }
+        }
+
+        private void ExpandAllTreeItems(ItemCollection items)
+        {
+            foreach (TreeViewItem item in items)
+            {
+                item.IsExpanded = true;
+                ExpandAllTreeItems(item.Items);
+            }
+        }
+
+        private void CollapseAllTreeItems(ItemCollection items)
+        {
+            foreach (TreeViewItem item in items)
+            {
+                item.IsExpanded = false;
+                CollapseAllTreeItems(item.Items);
+            }
+        }
+
+        private void SearchInTree()
+        {
+            var searchBox = FindName("TreeSearchBox") as TextBox;
+            if (searchBox == null) return;
+
+            var searchText = searchBox.Text?.ToLower();
+            if (string.IsNullOrEmpty(searchText))
+                return;
+
+            // Reset all items to normal appearance
+            ResetTreeItemsAppearance(StructureTreeView.Items);
+
+            // Search and highlight
+            SearchAndHighlight(StructureTreeView.Items, searchText);
+        }
+
+        private void ResetTreeItemsAppearance(ItemCollection items)
+        {
+            foreach (TreeViewItem item in items)
+            {
+                item.Background = Brushes.Transparent;
+                ResetTreeItemsAppearance(item.Items);
+            }
+        }
+
+        private bool SearchAndHighlight(ItemCollection items, string searchText)
+        {
+            bool found = false;
+            foreach (TreeViewItem item in items)
+            {
+                bool itemFound = false;
+
+                // Check if this item matches
+                if (item.Tag is ControlDefinition control)
+                {
+                    if ((control.Name?.ToLower().Contains(searchText) == true) ||
+                        (control.Label?.ToLower().Contains(searchText) == true) ||
+                        (control.Type?.ToLower().Contains(searchText) == true))
+                    {
+                        itemFound = true;
+                    }
+                }
+                else if (item.Tag is string sectionName)
+                {
+                    if (sectionName.ToLower().Contains(searchText))
+                    {
+                        itemFound = true;
+                    }
+                }
+
+                // Check children
+                bool childFound = SearchAndHighlight(item.Items, searchText);
+
+                if (itemFound || childFound)
+                {
+                    if (itemFound)
+                    {
+                        item.Background = new SolidColorBrush(Color.FromArgb(50, 255, 255, 0)); // Highlight yellow
+                    }
+                    item.IsExpanded = true; // Expand to show found items
+                    found = true;
+                }
+            }
+            return found;
+        }
+
+        #endregion
 
         #region File Management
 

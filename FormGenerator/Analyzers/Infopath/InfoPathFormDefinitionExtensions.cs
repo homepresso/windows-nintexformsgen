@@ -22,6 +22,10 @@ namespace FormGenerator.Analyzers.InfoPath
                         c.Label,
                         c.Binding,
                         c.GridPosition,
+                        // IMPORTANT: Include CtrlId at the top level
+                        CtrlId = c.Properties != null && c.Properties.ContainsKey("CtrlId")
+                            ? c.Properties["CtrlId"]
+                            : null,
                         // Add section information as properties rather than in the name
                         SectionInfo = !string.IsNullOrEmpty(c.ParentSection) ? new
                         {
@@ -39,10 +43,23 @@ namespace FormGenerator.Analyzers.InfoPath
                         // Include data options if present
                         DataOptions = c.HasStaticData ? c.DataOptions : null,
                         DataValues = c.HasStaticData ? c.DataOptionsString : null,
-                        DefaultValue = GetDefaultValue(c)
+                        DefaultValue = GetDefaultValue(c),
+                        // Include other important properties (excluding CtrlId since it's at top level)
+                        AdditionalProperties = c.Properties != null
+                            ? c.Properties.Where(p => p.Key != "CtrlId" && p.Key != "DefaultValue")
+                                         .ToDictionary(p => p.Key, p => p.Value)
+                            : null
                     }).ToList(),
-                    // Don't include sections as separate items - they're now part of control info
-                    // Sections = v.Sections  // REMOVED
+                    // Include sections summary for the view
+                    Sections = v.Sections.Select(s => new
+                    {
+                        s.Name,
+                        s.Type,
+                        s.CtrlId,
+                        s.StartRow,
+                        s.EndRow,
+                        ControlCount = s.ControlIds?.Count ?? 0
+                    }).ToList()
                 }).ToList(),
                 Rules = formDef.Rules,
                 Data = formDef.Data.Select(d => new
@@ -84,7 +101,9 @@ namespace FormGenerator.Analyzers.InfoPath
                     formDef.Metadata.RepeatingSectionCount,
                     formDef.Metadata.ConditionalFields,
                     // Add summary of sections found
-                    SectionsSummary = GetSectionsSummary(formDef)
+                    SectionsSummary = GetSectionsSummary(formDef),
+                    // Add summary of controls with CtrlIds
+                    ControlsWithIds = GetControlsWithIds(formDef)
                 }
             };
         }
@@ -98,6 +117,7 @@ namespace FormGenerator.Analyzers.InfoPath
             }
             return null;
         }
+
         private static string BuildControlNameWithSection(ControlDefinition control)
         {
             var baseName = control.Name;
@@ -106,7 +126,6 @@ namespace FormGenerator.Analyzers.InfoPath
             // We don't need to duplicate it in the name field
             return baseName;
         }
-
 
         private static string BuildDataColumnNameWithSection(DataColumn dataColumn)
         {
@@ -140,6 +159,7 @@ namespace FormGenerator.Analyzers.InfoPath
                 {
                     SectionName = g.Key,
                     Type = g.First().Type,
+                    CtrlId = g.First().CtrlId,
                     OccurrencesInViews = g.Count(),
                     Label = GetSectionLabel(g.First().Type)
                 })
@@ -150,6 +170,31 @@ namespace FormGenerator.Analyzers.InfoPath
             {
                 TotalUniqueSections = allSections.Count,
                 Sections = allSections
+            };
+        }
+
+        /// <summary>
+        /// Gets a summary of controls that have CtrlIds
+        /// </summary>
+        private static object GetControlsWithIds(InfoPathFormDefinition formDef)
+        {
+            var controlsWithIds = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => c.Properties != null && c.Properties.ContainsKey("CtrlId"))
+                .Select(c => new
+                {
+                    CtrlId = c.Properties["CtrlId"],
+                    Name = c.Name,
+                    Type = c.Type,
+                    Label = c.Label
+                })
+                .OrderBy(c => c.CtrlId)
+                .ToList();
+
+            return new
+            {
+                TotalControlsWithIds = controlsWithIds.Count,
+                Controls = controlsWithIds
             };
         }
 
@@ -209,5 +254,4 @@ namespace FormGenerator.Analyzers.InfoPath
             return string.Join(" - ", parts);
         }
     }
-
 }
