@@ -553,6 +553,8 @@ public class SectionAwareParser
         public int Depth { get; set; }
     }
 
+
+
     public SectionAwareParser()
     {
         InitializeCollections();
