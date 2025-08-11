@@ -404,6 +404,114 @@ namespace FormGenerator.Views
 
         #endregion
 
+        #region JSON Context Menu Handlers
+
+        private void JsonSelectAll_Click(object sender, RoutedEventArgs e)
+        {
+            JsonOutput.SelectAll();
+            JsonOutput.Focus();
+        }
+
+        private void JsonCopy_Click(object sender, RoutedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(JsonOutput.SelectedText))
+            {
+                Clipboard.SetText(JsonOutput.SelectedText);
+                UpdateStatus("Selected JSON copied to clipboard", MessageSeverity.Info);
+            }
+            else
+            {
+                // If nothing is selected, copy all
+                JsonOutput.SelectAll();
+                Clipboard.SetText(JsonOutput.Text);
+                UpdateStatus("All JSON copied to clipboard", MessageSeverity.Info);
+            }
+        }
+
+        private void JsonCopyFormatted_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string jsonText = !string.IsNullOrEmpty(JsonOutput.SelectedText)
+                    ? JsonOutput.SelectedText
+                    : JsonOutput.Text;
+
+                if (!string.IsNullOrEmpty(jsonText))
+                {
+                    // Parse and re-format with indentation
+                    var parsed = Newtonsoft.Json.Linq.JToken.Parse(jsonText);
+                    string formatted = parsed.ToString(Newtonsoft.Json.Formatting.Indented);
+                    Clipboard.SetText(formatted);
+                    UpdateStatus("Formatted JSON copied to clipboard", MessageSeverity.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error formatting JSON: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        private void JsonCopyMinified_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string jsonText = !string.IsNullOrEmpty(JsonOutput.SelectedText)
+                    ? JsonOutput.SelectedText
+                    : JsonOutput.Text;
+
+                if (!string.IsNullOrEmpty(jsonText))
+                {
+                    // Parse and re-format without indentation (minified)
+                    var parsed = Newtonsoft.Json.Linq.JToken.Parse(jsonText);
+                    string minified = parsed.ToString(Newtonsoft.Json.Formatting.None);
+                    Clipboard.SetText(minified);
+                    UpdateStatus("Minified JSON copied to clipboard", MessageSeverity.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error minifying JSON: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        private async void JsonSaveToFile_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new SaveFileDialog
+            {
+                Title = "Save JSON Output",
+                Filter = "JSON Files (*.json)|*.json|Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
+                FileName = $"FormAnalysis_{DateTime.Now:yyyyMMdd_HHmmss}.json"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                try
+                {
+                    string jsonText = !string.IsNullOrEmpty(JsonOutput.SelectedText)
+                        ? JsonOutput.SelectedText
+                        : JsonOutput.Text;
+
+                    await File.WriteAllTextAsync(dialog.FileName, jsonText);
+                    UpdateStatus($"JSON saved to: {dialog.FileName}", MessageSeverity.Info);
+
+                    MessageBox.Show($"JSON successfully saved to:\n{dialog.FileName}",
+                                  "Save Successful",
+                                  MessageBoxButton.OK,
+                                  MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    UpdateStatus($"Save failed: {ex.Message}", MessageSeverity.Error);
+                    MessageBox.Show($"Failed to save JSON:\n{ex.Message}",
+                                  "Save Error",
+                                  MessageBoxButton.OK,
+                                  MessageBoxImage.Error);
+                }
+            }
+        }
+
+        #endregion
+
         #region Helper Methods
 
         internal void UpdateStatus(string message, MessageSeverity severity = MessageSeverity.Info)

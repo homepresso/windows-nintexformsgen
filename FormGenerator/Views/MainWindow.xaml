@@ -931,7 +931,46 @@
                                 FontFamily="Consolas"
                                 Margin="20"
                                 Background="{StaticResource BackgroundMedium}"
-                                BorderBrush="{StaticResource BorderColor}"/>
+                                BorderBrush="{StaticResource BorderColor}">
+                            <TextBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Select All" 
+                                             Click="JsonSelectAll_Click"
+                                             InputGestureText="Ctrl+A">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="📋" FontSize="14"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Copy" 
+                                             Click="JsonCopy_Click"
+                                             InputGestureText="Ctrl+C">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="📄" FontSize="14"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <Separator/>
+                                    <MenuItem Header="Copy as Formatted JSON" 
+                                             Click="JsonCopyFormatted_Click">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="✨" FontSize="14"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Copy as Minified JSON" 
+                                             Click="JsonCopyMinified_Click">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="🗜️" FontSize="14"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <Separator/>
+                                    <MenuItem Header="Save to File..." 
+                                             Click="JsonSaveToFile_Click">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="💾" FontSize="14"/>
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </TextBox.ContextMenu>
+                        </TextBox>
                     </ScrollViewer>
                 </TabItem>
 

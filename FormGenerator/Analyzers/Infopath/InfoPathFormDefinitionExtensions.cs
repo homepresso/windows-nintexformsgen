@@ -39,9 +39,7 @@ namespace FormGenerator.Analyzers.InfoPath
                         // Include data options if present
                         DataOptions = c.HasStaticData ? c.DataOptions : null,
                         DataValues = c.HasStaticData ? c.DataOptionsString : null,
-                        DefaultValue = c.Properties.ContainsKey("DefaultValue")
-                            ? c.Properties["DefaultValue"]
-                            : null
+                        DefaultValue = GetDefaultValue(c)
                     }).ToList(),
                     // Don't include sections as separate items - they're now part of control info
                     // Sections = v.Sections  // REMOVED
@@ -89,6 +87,16 @@ namespace FormGenerator.Analyzers.InfoPath
                     SectionsSummary = GetSectionsSummary(formDef)
                 }
             };
+        }
+
+        private static string GetDefaultValue(ControlDefinition control)
+        {
+            // Safely get default value from properties
+            if (control.Properties != null && control.Properties.ContainsKey("DefaultValue"))
+            {
+                return control.Properties["DefaultValue"];
+            }
+            return null;
         }
         private static string BuildControlNameWithSection(ControlDefinition control)
         {
