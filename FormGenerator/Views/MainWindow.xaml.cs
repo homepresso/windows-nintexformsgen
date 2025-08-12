@@ -12,10 +12,11 @@ using Microsoft.Win32;
 using Newtonsoft.Json;
 
 using FormGenerator.Analyzers.Infopath;
-using FormGenerator.Analyzers.InfoPath;
+// using FormGenerator.Analyzers.InfoPath; // (Duplicate/typo namespace—remove if not needed)
 using FormGenerator.Core.Interfaces;
 using FormGenerator.Core.Models;
 using FormGenerator.Services;
+using FormGenerator.Analyzers.InfoPath;
 
 namespace FormGenerator.Views
 {
@@ -79,7 +80,16 @@ namespace FormGenerator.Views
 
             // Wire up toolbar buttons if they exist
             if (addButton != null)
-                addButton.Click += (s, e) => _analysisHandlers?.ShowAddControlDialog();
+                addButton.Click += (s, e) =>
+                {
+                    var (view, section) = GetSelectedViewAndSection();
+                    if (view == null)
+                    {
+                        UpdateStatus("Select a view (or a section within a view) first.", MessageSeverity.Warning);
+                        return;
+                    }
+                    _analysisHandlers?.ShowAddControlDialog(view, section);
+                };
 
             if (editButton != null)
                 editButton.Click += (s, e) => EditSelectedControl();
@@ -88,7 +98,16 @@ namespace FormGenerator.Views
                 deleteButton.Click += (s, e) => DeleteSelectedControl();
 
             if (convertButton != null)
-                convertButton.Click += (s, e) => _analysisHandlers?.ShowMoveSectionDialog();
+                convertButton.Click += (s, e) =>
+                {
+                    var control = GetSelectedControl();
+                    if (control == null)
+                    {
+                        UpdateStatus("Select a control to move/convert.", MessageSeverity.Warning);
+                        return;
+                    }
+                    _analysisHandlers?.ShowMoveSectionDialog(control);
+                };
 
             // Tree manipulation buttons
             if (collapseButton != null)
@@ -131,7 +150,16 @@ namespace FormGenerator.Views
             // Add Control
             var addMenuItem = new MenuItem { Header = "Add Control", InputGestureText = "Ctrl+Shift+A" };
             addMenuItem.Icon = new TextBlock { Text = "➕", FontSize = 14 };
-            addMenuItem.Click += (s, e) => _analysisHandlers?.ShowAddControlDialog();
+            addMenuItem.Click += (s, e) =>
+            {
+                var (view, section) = GetSelectedViewAndSection();
+                if (view == null)
+                {
+                    UpdateStatus("Select a view (or a section within a view) first.", MessageSeverity.Warning);
+                    return;
+                }
+                _analysisHandlers?.ShowAddControlDialog(view, section);
+            };
             contextMenu.Items.Add(addMenuItem);
 
             // Edit
@@ -148,10 +176,19 @@ namespace FormGenerator.Views
 
             contextMenu.Items.Add(new Separator());
 
-            // Convert to Repeating Section
+            // Convert to Repeating Section (uses selected control)
             var convertMenuItem = new MenuItem { Header = "Convert to Repeating Section", InputGestureText = "Ctrl+Shift+R" };
             convertMenuItem.Icon = new TextBlock { Text = "🔁", FontSize = 14 };
-            convertMenuItem.Click += (s, e) => _analysisHandlers?.ShowMoveSectionDialog();
+            convertMenuItem.Click += (s, e) =>
+            {
+                var control = GetSelectedControl();
+                if (control == null)
+                {
+                    UpdateStatus("Select a control to move/convert.", MessageSeverity.Warning);
+                    return;
+                }
+                _analysisHandlers?.ShowMoveSectionDialog(control);
+            };
             contextMenu.Items.Add(convertMenuItem);
 
             // Remove from Repeating Section
@@ -189,10 +226,10 @@ namespace FormGenerator.Views
             contextMenu.Items.Add(collapseAllMenuItem);
 
             // Context menu opening event to enable/disable items based on selection
-            contextMenu.ContextMenuOpening += TreeViewContextMenu_Opening;
+            contextMenu.Opened += TreeViewContextMenu_Opening;
         }
 
-        private void TreeViewContextMenu_Opening(object sender, ContextMenuEventArgs e)
+        private void TreeViewContextMenu_Opening(object sender, RoutedEventArgs e)
         {
             var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
             if (selectedItem == null) return;
@@ -201,24 +238,18 @@ namespace FormGenerator.Views
             if (contextMenu == null) return;
 
             // Find menu items
-            var editItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header.ToString() == "Edit");
-            var deleteItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header.ToString() == "Delete");
-            var convertItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header.ToString().Contains("Convert to Repeating"));
-            var removeItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header.ToString().Contains("Remove from Repeating"));
+            var editItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header?.ToString() == "Edit");
+            var deleteItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => m.Header?.ToString() == "Delete");
+            var convertItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => (m.Header?.ToString() ?? "").Contains("Convert to Repeating"));
+            var removeItem = contextMenu.Items.OfType<MenuItem>().FirstOrDefault(m => (m.Header?.ToString() ?? "").Contains("Remove from Repeating"));
 
             // Enable/disable based on what's selected
             bool isControl = selectedItem.Tag is ControlDefinition;
-            bool isSection = selectedItem.Tag is string;
-            bool isInRepeatingSection = false;
-
-            if (selectedItem.Tag is ControlDefinition control)
-            {
-                isInRepeatingSection = control.IsInRepeatingSection;
-            }
+            bool isInRepeatingSection = (selectedItem.Tag as ControlDefinition)?.IsInRepeatingSection ?? false;
 
             if (editItem != null) editItem.IsEnabled = isControl;
             if (deleteItem != null) deleteItem.IsEnabled = isControl;
-            if (convertItem != null) convertItem.IsEnabled = isSection;
+            if (convertItem != null) convertItem.IsEnabled = isControl;
             if (removeItem != null) removeItem.IsEnabled = isControl && isInRepeatingSection;
         }
 
@@ -236,14 +267,66 @@ namespace FormGenerator.Views
             }
             else if (e.Key == Key.A && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
             {
-                _analysisHandlers?.ShowAddControlDialog();
+                var (view, section) = GetSelectedViewAndSection();
+                if (view == null)
+                {
+                    UpdateStatus("Select a view (or a section within a view) first.", MessageSeverity.Warning);
+                }
+                else
+                {
+                    _analysisHandlers?.ShowAddControlDialog(view, section);
+                }
                 e.Handled = true;
             }
             else if (e.Key == Key.R && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
             {
-                _analysisHandlers?.ShowMoveSectionDialog();
+                var control = GetSelectedControl();
+                if (control == null)
+                {
+                    UpdateStatus("Select a control to move/convert.", MessageSeverity.Warning);
+                }
+                else
+                {
+                    _analysisHandlers?.ShowMoveSectionDialog(control);
+                }
                 e.Handled = true;
             }
+        }
+
+        #endregion
+
+        #region Selection Helpers (NEW)
+
+        /// <summary>
+        /// Returns the nearest ViewDefinition ancestor for the current selection,
+        /// and the closest section name (string-tag) in the selection chain.
+        /// </summary>
+        private (ViewDefinition view, string parentSection) GetSelectedViewAndSection()
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+            if (selectedItem == null) return (null, null);
+
+            string section = null;
+            TreeViewItem cursor = selectedItem;
+
+            while (cursor != null)
+            {
+                if (section == null && cursor.Tag is string sec)
+                    section = sec;
+
+                if (cursor.Tag is ViewDefinition v)
+                    return (v, section);
+
+                cursor = ItemsControl.ItemsControlFromItemContainer(cursor) as TreeViewItem;
+            }
+
+            return (null, section);
+        }
+
+        private ControlDefinition GetSelectedControl()
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+            return selectedItem?.Tag as ControlDefinition;
         }
 
         #endregion
@@ -307,7 +390,7 @@ namespace FormGenerator.Views
         private void ExportSelectedSection()
         {
             var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-            if (selectedItem?.Tag is string sectionName || selectedItem?.Tag is ViewDefinition)
+            if (selectedItem?.Tag is string || selectedItem?.Tag is ViewDefinition)
             {
                 var dialog = new SaveFileDialog
                 {
@@ -334,19 +417,25 @@ namespace FormGenerator.Views
 
         private void ExpandAllTreeItems(ItemCollection items)
         {
-            foreach (TreeViewItem item in items)
+            foreach (var obj in items)
             {
-                item.IsExpanded = true;
-                ExpandAllTreeItems(item.Items);
+                if (obj is TreeViewItem item)
+                {
+                    item.IsExpanded = true;
+                    ExpandAllTreeItems(item.Items);
+                }
             }
         }
 
         private void CollapseAllTreeItems(ItemCollection items)
         {
-            foreach (TreeViewItem item in items)
+            foreach (var obj in items)
             {
-                item.IsExpanded = false;
-                CollapseAllTreeItems(item.Items);
+                if (obj is TreeViewItem item)
+                {
+                    item.IsExpanded = false;
+                    CollapseAllTreeItems(item.Items);
+                }
             }
         }
 
@@ -368,18 +457,23 @@ namespace FormGenerator.Views
 
         private void ResetTreeItemsAppearance(ItemCollection items)
         {
-            foreach (TreeViewItem item in items)
+            foreach (var obj in items)
             {
-                item.Background = Brushes.Transparent;
-                ResetTreeItemsAppearance(item.Items);
+                if (obj is TreeViewItem item)
+                {
+                    item.Background = Brushes.Transparent;
+                    ResetTreeItemsAppearance(item.Items);
+                }
             }
         }
 
         private bool SearchAndHighlight(ItemCollection items, string searchText)
         {
             bool found = false;
-            foreach (TreeViewItem item in items)
+            foreach (var obj in items)
             {
+                if (obj is not TreeViewItem item) continue;
+
                 bool itemFound = false;
 
                 // Check if this item matches

@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Input;
 using FormGenerator.Analyzers.Infopath;
 using FormGenerator.Analyzers.InfoPath;
 using FormGenerator.Core.Models;
@@ -35,9 +34,7 @@ namespace FormGenerator.Views
         // Tree view editing state
         private ControlDefinition _selectedControl;
         private TreeViewItem _selectedTreeItem;
-        private ViewDefinition _selectedView;
-        private string _selectedFormName;
-        private Window _editWindow;
+        private Grid _propertiesPanel;
         private Dictionary<string, TextBox> _propertyEditors = new Dictionary<string, TextBox>();
         private Dictionary<string, InfoPathFormDefinition> _currentFormDefinitions;
 
@@ -162,6 +159,496 @@ namespace FormGenerator.Views
         }
 
         /// <summary>
+        /// Creates an enhanced metadata item with section summary
+        /// </summary>
+        private TreeViewItem CreateEnhancedMetadataItem(InfoPathFormDefinition formDef)
+        {
+            var metadataItem = new TreeViewItem
+            {
+                Header = "📊 Form Summary",
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                FontSize = 11,
+                IsExpanded = false
+            };
+
+            // Basic counts
+            metadataItem.Items.Add(CreateInfoItem($"Views: {formDef.Views.Count}"));
+            metadataItem.Items.Add(CreateInfoItem($"Total Controls: {formDef.Metadata.TotalControls}"));
+            metadataItem.Items.Add(CreateInfoItem($"Data Columns: {formDef.Data.Count}"));
+
+            // Section information with details
+            if (formDef.Metadata.RepeatingSectionCount > 0)
+            {
+                var repeatingSectionNames = GetRepeatingSectionNames(formDef);
+                var repeatingSectionItem = new TreeViewItem
+                {
+                    Header = $"🔁 Repeating Sections: {formDef.Metadata.RepeatingSectionCount}",
+                    Foreground = (Brush)_mainWindow.FindResource("InfoColor"),
+                    FontSize = 11,
+                    IsExpanded = false
+                };
+
+                foreach (var sectionName in repeatingSectionNames)
+                {
+                    repeatingSectionItem.Items.Add(new TreeViewItem
+                    {
+                        Header = $"  • {sectionName}",
+                        Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                        FontSize = 10
+                    });
+                }
+
+                metadataItem.Items.Add(repeatingSectionItem);
+            }
+
+            if (formDef.Metadata.DynamicSectionCount > 0)
+            {
+                metadataItem.Items.Add(new TreeViewItem
+                {
+                    Header = $"🔄 Dynamic Sections: {formDef.Metadata.DynamicSectionCount} (conditional visibility)",
+                    Foreground = (Brush)_mainWindow.FindResource("WarningColor"),
+                    FontSize = 11
+                });
+            }
+
+            // Conditional fields
+            if (formDef.Metadata.ConditionalFields.Any())
+            {
+                var conditionalItem = new TreeViewItem
+                {
+                    Header = $"⚡ Conditional Fields: {formDef.Metadata.ConditionalFields.Count}",
+                    Foreground = (Brush)_mainWindow.FindResource("AccentColor"),
+                    FontSize = 11,
+                    IsExpanded = false
+                };
+
+                foreach (var field in formDef.Metadata.ConditionalFields)
+                {
+                    conditionalItem.Items.Add(new TreeViewItem
+                    {
+                        Header = $"  • {field}",
+                        Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                        FontSize = 10
+                    });
+                }
+
+                metadataItem.Items.Add(conditionalItem);
+            }
+
+            return metadataItem;
+        }
+
+        /// <summary>
+        /// Creates an enhanced view item with proper section grouping
+        /// </summary>
+        private TreeViewItem CreateEnhancedViewItem(ViewDefinition view)
+        {
+            var viewItem = new TreeViewItem
+            {
+                Header = $"📄 {view.ViewName}",
+                Tag = view,
+                IsExpanded = false
+            };
+
+            // Add context menu to view for adding controls
+            var viewContextMenu = new ContextMenu();
+            var addControlToView = new MenuItem
+            {
+                Header = "Add Control...",
+                Icon = new TextBlock { Text = "➕" }
+            };
+            addControlToView.Click += (s, e) => AddNewControl(view);
+            viewContextMenu.Items.Add(addControlToView);
+            viewItem.ContextMenu = viewContextMenu;
+
+            // Build hierarchical structure of sections and controls
+            var rootControls = new List<ControlDefinition>();
+            var sectionHierarchy = BuildSectionHierarchy(view);
+
+            // Add controls without sections first
+            foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent).OrderBy(c => c.DocIndex))
+            {
+                // Skip controls that belong to sections - they'll be added within their sections
+                if (string.IsNullOrEmpty(control.ParentSection) &&
+                    !control.IsInRepeatingSection &&
+                    control.Type != "RepeatingTable" &&
+                    control.Type != "RepeatingSection")
+                {
+                    viewItem.Items.Add(CreateEnhancedControlItem(control));
+                }
+            }
+
+            // Add sections with their hierarchical structure
+            foreach (var topLevelSection in sectionHierarchy)
+            {
+                viewItem.Items.Add(CreateSectionTreeItem(topLevelSection, view));
+            }
+
+            // Add view statistics
+            var statsItem = CreateViewStatisticsItem(view);
+            viewItem.Items.Add(statsItem);
+
+            return viewItem;
+        }
+
+        private List<SectionNode> BuildSectionHierarchy(ViewDefinition view)
+        {
+            var sectionNodes = new Dictionary<string, SectionNode>();
+            var rootSections = new List<SectionNode>();
+
+            // First, create nodes for all sections (including repeating tables/sections from controls)
+            foreach (var section in view.Sections)
+            {
+                if (!sectionNodes.ContainsKey(section.Name))
+                {
+                    sectionNodes[section.Name] = new SectionNode
+                    {
+                        Name = section.Name,
+                        Type = section.Type,
+                        CtrlId = section.CtrlId,
+                        Controls = new List<ControlDefinition>(),
+                        ChildSections = new List<SectionNode>()
+                    };
+                }
+            }
+
+            // Add repeating tables as sections
+            foreach (var control in view.Controls.Where(c => c.Type == "RepeatingTable"))
+            {
+                var sectionName = control.Label ?? control.Name;
+                if (!string.IsNullOrEmpty(sectionName) && !sectionNodes.ContainsKey(sectionName))
+                {
+                    sectionNodes[sectionName] = new SectionNode
+                    {
+                        Name = sectionName,
+                        Type = "repeating",
+                        IsRepeatingTable = true,
+                        Controls = new List<ControlDefinition>(),
+                        ChildSections = new List<SectionNode>()
+                    };
+                }
+            }
+
+            // Now assign controls to their sections and build parent-child relationships
+            foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent))
+            {
+                string sectionKey = null;
+
+                // Determine which section this control belongs to
+                if (!string.IsNullOrEmpty(control.ParentSection))
+                {
+                    sectionKey = control.ParentSection;
+                }
+                else if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+                {
+                    sectionKey = control.RepeatingSectionName;
+                }
+
+                if (!string.IsNullOrEmpty(sectionKey) && sectionNodes.ContainsKey(sectionKey))
+                {
+                    sectionNodes[sectionKey].Controls.Add(control);
+                }
+            }
+
+            // Build parent-child relationships based on control nesting
+            foreach (var sectionNode in sectionNodes.Values)
+            {
+                // Check if this section's controls indicate it's nested within another section
+                var firstControl = sectionNode.Controls.FirstOrDefault();
+                if (firstControl != null)
+                {
+                    // Check if the controls in this section have a parent repeating section
+                    if (firstControl.Properties != null &&
+                        firstControl.Properties.ContainsKey("ParentRepeatingSections"))
+                    {
+                        var parentSections = firstControl.Properties["ParentRepeatingSections"].Split('|');
+                        if (parentSections.Length > 0)
+                        {
+                            var immediateParent = parentSections[0];
+                            if (sectionNodes.ContainsKey(immediateParent) && immediateParent != sectionNode.Name)
+                            {
+                                sectionNodes[immediateParent].ChildSections.Add(sectionNode);
+                                sectionNode.ParentSection = immediateParent;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Identify root sections (those without parents)
+            foreach (var sectionNode in sectionNodes.Values)
+            {
+                if (string.IsNullOrEmpty(sectionNode.ParentSection))
+                {
+                    rootSections.Add(sectionNode);
+                }
+            }
+
+            return rootSections;
+        }
+
+        private TreeViewItem CreateSectionTreeItem(SectionNode sectionNode, ViewDefinition view)
+        {
+            var sectionItem = new TreeViewItem
+            {
+                Header = CreateEnhancedSectionHeader(
+                    sectionNode.Name,
+                    sectionNode.Type,
+                    sectionNode.Controls.Count + sectionNode.ChildSections.Sum(cs => CountAllControls(cs))
+                ),
+                IsExpanded = false,
+                Tag = sectionNode.Name
+            };
+
+            // Apply color based on section type
+            ApplySectionColor(sectionItem, sectionNode.Type);
+
+            // Add context menu for section operations
+            var sectionInfo = view.Sections.FirstOrDefault(s => s.Name == sectionNode.Name);
+            if (sectionInfo != null)
+            {
+                AddSectionContextMenu(sectionItem, sectionInfo, view);
+
+                // Add section metadata
+                sectionItem.Items.Add(CreateInfoItem($"Type: {sectionNode.Type}", 10));
+                if (!string.IsNullOrEmpty(sectionInfo.CtrlId))
+                {
+                    sectionItem.Items.Add(CreateInfoItem($"ID: {sectionInfo.CtrlId}", 10));
+                }
+            }
+
+            // If this is a repeating table, add a special indicator
+            if (sectionNode.IsRepeatingTable)
+            {
+                sectionItem.Items.Add(CreateInfoItem($"📊 Repeating Table", 10));
+            }
+
+            // Add child sections first (nested sections)
+            foreach (var childSection in sectionNode.ChildSections)
+            {
+                sectionItem.Items.Add(CreateSectionTreeItem(childSection, view));
+            }
+
+            // Then add controls in this section (but not in child sections)
+            foreach (var control in sectionNode.Controls.OrderBy(c => c.DocIndex))
+            {
+                // Skip controls that are in child sections
+                bool isInChildSection = false;
+                foreach (var childSection in sectionNode.ChildSections)
+                {
+                    if (IsControlInSection(control, childSection))
+                    {
+                        isInChildSection = true;
+                        break;
+                    }
+                }
+
+                if (!isInChildSection && !control.IsMergedIntoParent)
+                {
+                    sectionItem.Items.Add(CreateEnhancedControlItem(control));
+                }
+            }
+
+            return sectionItem;
+        }
+
+        private class SectionNode
+        {
+            public string Name { get; set; }
+            public string Type { get; set; }
+            public string CtrlId { get; set; }
+            public string ParentSection { get; set; }
+            public bool IsRepeatingTable { get; set; }
+            public List<ControlDefinition> Controls { get; set; }
+            public List<SectionNode> ChildSections { get; set; }
+        }
+
+        private int CountAllControls(SectionNode section)
+        {
+            int count = section.Controls.Count(c => !c.IsMergedIntoParent);
+            foreach (var childSection in section.ChildSections)
+            {
+                count += CountAllControls(childSection);
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// Checks if a control belongs to a specific section or its children
+        /// </summary>
+        private bool IsControlInSection(ControlDefinition control, SectionNode section)
+        {
+            // Check direct membership
+            if (control.ParentSection == section.Name ||
+                (control.IsInRepeatingSection && control.RepeatingSectionName == section.Name))
+            {
+                return true;
+            }
+
+            // Check child sections
+            foreach (var childSection in section.ChildSections)
+            {
+                if (IsControlInSection(control, childSection))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Creates an enhanced control item with all properties
+        /// </summary>
+        private TreeViewItem CreateEnhancedControlItem(ControlDefinition control)
+        {
+            var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
+
+            // Control icon
+            headerPanel.Children.Add(new TextBlock
+            {
+                Text = GetControlIcon(control.Type) + " ",
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 14
+            });
+
+            // Control label/name
+            var displayName = !string.IsNullOrEmpty(control.Label) ? control.Label :
+                             !string.IsNullOrEmpty(control.Name) ? control.Name : "Unnamed";
+            headerPanel.Children.Add(new TextBlock
+            {
+                Text = displayName,
+                FontWeight = FontWeights.Medium,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
+            });
+
+            // Control type badge
+            AddControlTypeBadge(headerPanel, control.Type);
+
+            // Section indicator (if in a section)
+            if (!string.IsNullOrEmpty(control.ParentSection) || control.IsInRepeatingSection)
+            {
+                AddSectionIndicator(headerPanel, control);
+            }
+
+            // Grid position
+            if (!string.IsNullOrEmpty(control.GridPosition))
+            {
+                headerPanel.Children.Add(new TextBlock
+                {
+                    Text = $"[{control.GridPosition}]",
+                    Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                    FontSize = 10,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(5, 0, 0, 0)
+                });
+            }
+
+            // Dropdown indicator with count
+            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any())
+            {
+                AddDropdownIndicator(headerPanel, control);
+            }
+
+            // Default value indicator
+            if (control.Properties.ContainsKey("DefaultValue") && !string.IsNullOrEmpty(control.Properties["DefaultValue"]))
+            {
+                headerPanel.Children.Add(new TextBlock
+                {
+                    Text = " 🎯",
+                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
+                    ToolTip = $"Has default value: {control.Properties["DefaultValue"]}",
+                    FontSize = 11,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+
+            // Edit button
+            AddEditButton(headerPanel, control);
+
+            var item = new TreeViewItem
+            {
+                Header = headerPanel,
+                Tag = control
+            };
+
+            // Add control properties
+            AddControlProperties(item, control);
+
+            // Add context menu
+            AddControlContextMenu(item, control);
+
+            return item;
+        }
+
+        /// <summary>
+        /// Creates enhanced dynamic sections item
+        /// </summary>
+        private TreeViewItem CreateEnhancedDynamicSectionsItem(List<DynamicSection> dynamicSections)
+        {
+            var dynamicItem = new TreeViewItem
+            {
+                Header = $"🔄 Dynamic Sections ({dynamicSections.Count})",
+                IsExpanded = false,
+                Foreground = (Brush)_mainWindow.FindResource("AccentColor")
+            };
+
+            foreach (var dynSection in dynamicSections)
+            {
+                var sectionName = !string.IsNullOrEmpty(dynSection.Caption) ? dynSection.Caption : dynSection.Mode;
+
+                var sectionItem = new TreeViewItem
+                {
+                    Header = $"🔀 {sectionName}",
+                    Tag = dynSection
+                };
+
+                // Add condition info
+                if (!string.IsNullOrEmpty(dynSection.ConditionField))
+                {
+                    sectionItem.Items.Add(CreateInfoItem($"Condition Field: {dynSection.ConditionField}", 11));
+                }
+
+                if (!string.IsNullOrEmpty(dynSection.ConditionValue))
+                {
+                    sectionItem.Items.Add(CreateInfoItem($"Condition Value: {dynSection.ConditionValue}", 11));
+                }
+
+                if (!string.IsNullOrEmpty(dynSection.Condition))
+                {
+                    sectionItem.Items.Add(CreateInfoItem($"Full Condition: {dynSection.Condition}", 10));
+                }
+
+                // Add visibility status
+                sectionItem.Items.Add(CreateInfoItem($"Visible by Default: {dynSection.IsVisible}", 11));
+
+                // Add affected controls
+                if (dynSection.Controls != null && dynSection.Controls.Any())
+                {
+                    var controlsItem = new TreeViewItem
+                    {
+                        Header = $"Affected Controls ({dynSection.Controls.Count})",
+                        Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                        FontSize = 11,
+                        IsExpanded = false
+                    };
+
+                    foreach (var ctrlId in dynSection.Controls)
+                    {
+                        controlsItem.Items.Add(CreateInfoItem($"  • {ctrlId}", 10));
+                    }
+
+                    sectionItem.Items.Add(controlsItem);
+                }
+
+                dynamicItem.Items.Add(sectionItem);
+            }
+
+            return dynamicItem;
+        }
+
+        /// <summary>
         /// Displays the enhanced JSON with section information
         /// </summary>
         private void DisplayEnhancedJson(Dictionary<string, InfoPathFormDefinition> allForms)
@@ -182,28 +669,6 @@ namespace FormGenerator.Views
 
             var json = JsonConvert.SerializeObject(hierarchicalStructure, Formatting.Indented);
             _mainWindow.JsonOutput.Text = json;
-        }
-
-        private void RefreshAllDisplays()
-        {
-            // Refresh the tree view
-            RefreshTreeView();
-
-            // Refresh the JSON display
-            DisplayEnhancedJson(_mainWindow._allFormDefinitions);
-
-            // Refresh the data columns grid
-            DisplayEnhancedDataColumns(_mainWindow._allFormDefinitions);
-
-            // Force UI update
-            _mainWindow.Dispatcher.Invoke(() =>
-            {
-                // Ensure JSON tab is updated
-                if (_mainWindow.JsonOutput != null)
-                {
-                    _mainWindow.JsonOutput.Text = _mainWindow.JsonOutput.Text; // Force refresh
-                }
-            }, System.Windows.Threading.DispatcherPriority.Render);
         }
 
         /// <summary>
@@ -242,233 +707,933 @@ namespace FormGenerator.Views
 
         #endregion
 
-        #region Control Editing Methods - PUBLIC
+        #region Control Management Methods
 
-        public void ShowEditPanel(ControlDefinition control, TreeViewItem treeItem)
+        /// <summary>
+        /// Adds a new control to the form structure
+        /// </summary>
+        private void AddNewControl(ViewDefinition view, string parentSection = null)
         {
-            _selectedControl = control;
-            _selectedTreeItem = treeItem;
-
-            // Find the view and form this control belongs to
-            FindControlContext(control);
-
-            // Create edit window
-            _editWindow = new Window
+            // Create dialog for control properties
+            var dialog = new Window
             {
-                Title = $"Edit Control: {control.Label ?? control.Name ?? "Unnamed"}",
-                Width = 600,
-                Height = 700,
+                Title = "Add New Control",
+                Width = 450,
+                Height = 550,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = _mainWindow,
                 Background = (Brush)_mainWindow.FindResource("BackgroundMedium")
             };
 
-            var mainGrid = new Grid();
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var grid = new Grid { Margin = new Thickness(20) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-            // Create scrollable content area
-            var scrollViewer = new ScrollViewer
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            int row = 0;
+
+            // Control Type
+            AddDialogComboBox(grid, row++, "Control Type:", out ComboBox typeCombo);
+            var controlTypes = new[] { "TextField", "DropDown", "DatePicker", "CheckBox", "RadioButton",
+                                       "RichText", "PeoplePicker", "FileAttachment", "Button", "Label" };
+            typeCombo.ItemsSource = controlTypes;
+            typeCombo.SelectedIndex = 0;
+
+            // Control Name
+            AddDialogTextBox(grid, row++, "Control Name:", out TextBox nameText);
+            nameText.Text = $"NewControl{++_autoNameCounter}";
+
+            // Control Label
+            AddDialogTextBox(grid, row++, "Label:", out TextBox labelText);
+            labelText.Text = "New Control";
+
+            // Binding
+            AddDialogTextBox(grid, row++, "Binding:", out TextBox bindingText);
+            bindingText.Text = "";
+
+            // Target Section
+            AddDialogComboBox(grid, row++, "Add to Section:", out ComboBox sectionCombo);
+            var sections = GetAllSections(view);
+            sections.Insert(0, "(No Section)");
+            sectionCombo.ItemsSource = sections;
+            if (!string.IsNullOrEmpty(parentSection))
             {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Margin = new Thickness(20)
-            };
-
-            var contentPanel = new StackPanel();
-
-            // Basic Properties Section
-            AddSectionHeader(contentPanel, "Basic Properties");
-            AddEditableProperty(contentPanel, "Name", control.Name ?? "");
-            AddEditableProperty(contentPanel, "Label", control.Label ?? "");
-            AddEditableProperty(contentPanel, "Type", control.Type ?? "", true); // Read-only
-            AddEditableProperty(contentPanel, "Binding", control.Binding ?? "");
-
-            // Control ID Section
-            if (control.Properties?.ContainsKey("CtrlId") == true)
+                sectionCombo.SelectedItem = sections.FirstOrDefault(s => s.Contains(parentSection));
+            }
+            else
             {
-                AddEditableProperty(contentPanel, "CtrlId", control.Properties["CtrlId"], true);
+                sectionCombo.SelectedIndex = 0;
             }
 
-            // Position Section
-            AddSectionHeader(contentPanel, "Position");
-            AddEditableProperty(contentPanel, "GridPosition", control.GridPosition ?? "");
-            AddEditableProperty(contentPanel, "DocIndex", control.DocIndex.ToString());
-
-            // Section Information
-            if (!string.IsNullOrEmpty(control.ParentSection) || control.IsInRepeatingSection)
-            {
-                AddSectionHeader(contentPanel, "Section Information");
-                AddEditableProperty(contentPanel, "ParentSection", control.ParentSection ?? "", true);
-                AddEditableProperty(contentPanel, "SectionType", control.SectionType ?? "", true);
-
-                if (control.IsInRepeatingSection)
-                {
-                    AddEditableProperty(contentPanel, "RepeatingSectionName", control.RepeatingSectionName ?? "", true);
-
-                    // Add button to remove from repeating section
-                    var removeButton = new Button
-                    {
-                        Content = "➖ Remove from Repeating Section",
-                        Style = (Style)_mainWindow.FindResource("ModernButton"),
-                        Background = (Brush)_mainWindow.FindResource("WarningColor"),
-                        Margin = new Thickness(0, 10, 0, 0)
-                    };
-                    removeButton.Click += (s, args) => RemoveFromRepeatingSectionWithRefresh(control);
-                    contentPanel.Children.Add(removeButton);
-                }
-            }
-
-            // Dropdown Values Section
-            if (control.HasStaticData && control.DataOptions?.Any() == true)
-            {
-                AddSectionHeader(contentPanel, $"Dropdown Values ({control.DataOptions.Count})");
-                AddDropdownEditor(contentPanel, control);
-            }
+            // Is Required
+            AddDialogCheckBox(grid, row++, "Required:", out CheckBox requiredCheck);
 
             // Default Value
-            if (control.Properties?.ContainsKey("DefaultValue") == true)
-            {
-                AddSectionHeader(contentPanel, "Default Value");
-                AddEditableProperty(contentPanel, "DefaultValue", control.Properties["DefaultValue"]);
-            }
+            AddDialogTextBox(grid, row++, "Default Value:", out TextBox defaultText);
 
-            // Additional Properties
-            if (control.Properties?.Count > 2)
+            // Dropdown Options (shown only for dropdown types)
+            var optionsLabel = new TextBlock
             {
-                AddSectionHeader(contentPanel, "Additional Properties");
-                foreach (var prop in control.Properties.Where(p => p.Key != "CtrlId" && p.Key != "DefaultValue"))
+                Text = "Options (one per line):",
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 10, 0, 5),
+                Visibility = Visibility.Collapsed
+            };
+            Grid.SetRow(optionsLabel, row++);
+            Grid.SetColumn(optionsLabel, 1);
+            grid.Children.Add(optionsLabel);
+
+            var optionsText = new TextBox
+            {
+                Height = 80,
+                AcceptsReturn = true,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Background = (Brush)_mainWindow.FindResource("BackgroundLight"),
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Visibility = Visibility.Collapsed
+            };
+            Grid.SetRow(optionsText, row++);
+            Grid.SetColumn(optionsText, 1);
+            grid.Children.Add(optionsText);
+
+            // Show/hide options based on control type
+            typeCombo.SelectionChanged += (s, e) =>
+            {
+                var selectedType = typeCombo.SelectedItem?.ToString();
+                if (selectedType == "DropDown" || selectedType == "RadioButton" || selectedType == "ComboBox")
                 {
-                    AddEditableProperty(contentPanel, prop.Key, prop.Value);
+                    optionsLabel.Visibility = Visibility.Visible;
+                    optionsText.Visibility = Visibility.Visible;
                 }
-            }
+                else
+                {
+                    optionsLabel.Visibility = Visibility.Collapsed;
+                    optionsText.Visibility = Visibility.Collapsed;
+                }
+            };
 
-            scrollViewer.Content = contentPanel;
-            Grid.SetRow(scrollViewer, 0);
-            mainGrid.Children.Add(scrollViewer);
-
-            // Button Panel
+            // Buttons
             var buttonPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(20)
+                Margin = new Thickness(0, 20, 0, 0)
             };
 
-            // Delete Button
-            var deleteButton = new Button
+            var addButton = new Button
             {
-                Content = "🗑️ Delete Control",
-                Style = (Style)_mainWindow.FindResource("ModernButton"),
-                Background = (Brush)_mainWindow.FindResource("ErrorColor"),
-                Width = 150,
-                Margin = new Thickness(0, 0, 10, 0)
+                Content = "Add Control",
+                Width = 100,
+                Height = 35,
+                Margin = new Thickness(0, 0, 10, 0),
+                Style = (Style)_mainWindow.FindResource("ModernButton")
             };
-            deleteButton.Click += (s, args) => DeleteControl(control);
-            buttonPanel.Children.Add(deleteButton);
 
-            // Save Button
-            var saveButton = new Button
-            {
-                Content = "💾 Save Changes",
-                Style = (Style)_mainWindow.FindResource("ModernButton"),
-                Background = (Brush)_mainWindow.FindResource("SuccessColor"),
-                Width = 150,
-                Margin = new Thickness(0, 0, 10, 0)
-            };
-            saveButton.Click += (s, args) => SaveControlChanges(control);
-            buttonPanel.Children.Add(saveButton);
-
-            // Cancel Button
             var cancelButton = new Button
             {
                 Content = "Cancel",
-                Style = (Style)_mainWindow.FindResource("ModernButton"),
-                Width = 100
+                Width = 100,
+                Height = 35,
+                Style = (Style)_mainWindow.FindResource("ModernButton")
             };
-            cancelButton.Click += (s, args) => _editWindow.Close();
+
+            addButton.Click += (s, e) =>
+            {
+                // Create new control
+                var newControl = new ControlDefinition
+                {
+                    Name = nameText.Text,
+                    Type = typeCombo.SelectedItem?.ToString() ?? "TextField",
+                    Label = labelText.Text,
+                    Binding = bindingText.Text,
+                    DocIndex = view.Controls.Count + 1,
+                    GridPosition = $"{view.Controls.Count + 1}A"
+                };
+
+                // Set properties
+                newControl.Properties["Required"] = requiredCheck.IsChecked?.ToString() ?? "false";
+                if (!string.IsNullOrEmpty(defaultText.Text))
+                {
+                    newControl.Properties["DefaultValue"] = defaultText.Text;
+                }
+
+                // Handle section assignment
+                var selectedSection = sectionCombo.SelectedItem?.ToString();
+                if (selectedSection != null && selectedSection != "(No Section)")
+                {
+                    // Extract section name from display text
+                    var sectionName = ExtractSectionName(selectedSection);
+                    var sectionInfo = view.Sections.FirstOrDefault(s => s.Name == sectionName);
+
+                    if (sectionInfo != null)
+                    {
+                        if (sectionInfo.Type == "repeating")
+                        {
+                            newControl.IsInRepeatingSection = true;
+                            newControl.RepeatingSectionName = sectionName;
+                        }
+                        else
+                        {
+                            newControl.ParentSection = sectionName;
+                            newControl.SectionType = sectionInfo.Type;
+                        }
+                    }
+                }
+
+                // Handle dropdown options
+                if (!string.IsNullOrEmpty(optionsText.Text))
+                {
+                    var options = optionsText.Text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    newControl.DataOptions = new List<DataOption>();
+                    for (int i = 0; i < options.Length; i++)
+                    {
+                        newControl.DataOptions.Add(new DataOption
+                        {
+                            Value = options[i].Trim(),
+                            DisplayText = options[i].Trim(),
+                            Order = i,
+                            IsDefault = i == 0
+                        });
+                    }
+                    newControl.DataOptionsString = string.Join(", ", newControl.DataOptions.Select(o => o.DisplayText));
+                }
+
+                // Add to view
+                view.Controls.Add(newControl);
+
+                // Refresh tree view
+                RefreshStructureTree();
+
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            cancelButton.Click += (s, e) =>
+            {
+                dialog.DialogResult = false;
+                dialog.Close();
+            };
+
+            buttonPanel.Children.Add(addButton);
             buttonPanel.Children.Add(cancelButton);
 
-            Grid.SetRow(buttonPanel, 1);
-            mainGrid.Children.Add(buttonPanel);
+            Grid.SetRow(buttonPanel, grid.RowDefinitions.Count - 1);
+            Grid.SetColumn(buttonPanel, 1);
+            grid.Children.Add(buttonPanel);
 
-            _editWindow.Content = mainGrid;
-            _editWindow.ShowDialog();
+            dialog.Content = grid;
+            dialog.ShowDialog();
         }
 
+        /// <summary>
+        /// Moves a control to a different section (including repeating sections)
+        /// </summary>
+        private void MoveControlToSection(ControlDefinition control, ViewDefinition view)
+        {
+            var dialog = new Window
+            {
+                Title = "Move Control to Section",
+                Width = 400,
+                Height = 250,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = _mainWindow,
+                Background = (Brush)_mainWindow.FindResource("BackgroundMedium")
+            };
+
+            var grid = new Grid { Margin = new Thickness(20) };
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            // Current location
+            var currentLabel = new TextBlock
+            {
+                Text = $"Current Location: {GetControlLocation(control)}",
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            Grid.SetRow(currentLabel, 0);
+            grid.Children.Add(currentLabel);
+
+            // Target section
+            var targetLabel = new TextBlock
+            {
+                Text = "Move to Section:",
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 0, 0, 5)
+            };
+            Grid.SetRow(targetLabel, 1);
+            grid.Children.Add(targetLabel);
+
+            var sectionCombo = new ComboBox
+            {
+                Style = (Style)_mainWindow.FindResource("ModernComboBox"),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            Grid.SetRow(sectionCombo, 2);
+            grid.Children.Add(sectionCombo);
+
+            // Populate sections
+            var sections = GetAllSectionsWithType(view);
+            sections.Insert(0, new SectionOption { Display = "(No Section)", Name = "", Type = "" });
+            sectionCombo.ItemsSource = sections.Select(s => s.Display);
+            sectionCombo.SelectedIndex = 0;
+
+            // Buttons
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 20, 0, 0)
+            };
+
+            var moveButton = new Button
+            {
+                Content = "Move",
+                Width = 100,
+                Height = 35,
+                Margin = new Thickness(0, 0, 10, 0),
+                Style = (Style)_mainWindow.FindResource("ModernButton")
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "Cancel",
+                Width = 100,
+                Height = 35,
+                Style = (Style)_mainWindow.FindResource("ModernButton")
+            };
+
+            moveButton.Click += (s, e) =>
+            {
+                var selectedIndex = sectionCombo.SelectedIndex;
+                if (selectedIndex >= 0 && selectedIndex < sections.Count)
+                {
+                    var targetSection = sections[selectedIndex];
+
+                    // Clear current section assignments
+                    control.ParentSection = null;
+                    control.SectionType = null;
+                    control.IsInRepeatingSection = false;
+                    control.RepeatingSectionName = null;
+                    control.RepeatingSectionBinding = null;
+
+                    // Set new section assignment
+                    if (!string.IsNullOrEmpty(targetSection.Name))
+                    {
+                        if (targetSection.Type == "repeating")
+                        {
+                            control.IsInRepeatingSection = true;
+                            control.RepeatingSectionName = targetSection.Name;
+                        }
+                        else
+                        {
+                            control.ParentSection = targetSection.Name;
+                            control.SectionType = targetSection.Type;
+                        }
+                    }
+
+                    // Refresh tree view
+                    RefreshStructureTree();
+
+                    _mainWindow.UpdateStatus($"Moved control to: {targetSection.Display}", MessageSeverity.Info);
+                }
+
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            cancelButton.Click += (s, e) =>
+            {
+                dialog.DialogResult = false;
+                dialog.Close();
+            };
+
+            buttonPanel.Children.Add(moveButton);
+            buttonPanel.Children.Add(cancelButton);
+
+            Grid.SetRow(buttonPanel, 4);
+            grid.Children.Add(buttonPanel);
+
+            dialog.Content = grid;
+            dialog.ShowDialog();
+        }
+
+        /// <summary>
+        /// Converts a regular section to a repeating section
+        /// </summary>
+        private void ConvertSectionToRepeating(SectionInfo section, ViewDefinition view)
+        {
+            var result = MessageBox.Show(
+                $"Convert '{section.Name}' to a repeating section?\n\n" +
+                "This will make all controls in this section repeatable.",
+                "Convert to Repeating Section",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                // Update section type
+                section.Type = "repeating";
+
+                // Update all controls in this section
+                foreach (var control in view.Controls.Where(c => c.ParentSection == section.Name))
+                {
+                    control.IsInRepeatingSection = true;
+                    control.RepeatingSectionName = section.Name;
+                    control.SectionType = "repeating";
+                }
+
+                // Refresh tree view
+                RefreshStructureTree();
+
+                _mainWindow.UpdateStatus($"Converted '{section.Name}' to repeating section", MessageSeverity.Info);
+            }
+        }
+
+        /// <summary>
+        /// Moves an entire section into a repeating section (nesting)
+        /// </summary>
+        private void MoveSectionToRepeatingSection(SectionInfo section, ViewDefinition view)
+        {
+            var dialog = new Window
+            {
+                Title = "Move Section to Repeating Section",
+                Width = 400,
+                Height = 250,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = _mainWindow,
+                Background = (Brush)_mainWindow.FindResource("BackgroundMedium")
+            };
+
+            var grid = new Grid { Margin = new Thickness(20) };
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            // Info
+            var infoLabel = new TextBlock
+            {
+                Text = $"Move '{section.Name}' into a repeating section",
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                FontWeight = FontWeights.Medium,
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            Grid.SetRow(infoLabel, 0);
+            grid.Children.Add(infoLabel);
+
+            // Target repeating section
+            var targetLabel = new TextBlock
+            {
+                Text = "Target Repeating Section:",
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 0, 0, 5)
+            };
+            Grid.SetRow(targetLabel, 1);
+            grid.Children.Add(targetLabel);
+
+            var repeatingSectionCombo = new ComboBox
+            {
+                Style = (Style)_mainWindow.FindResource("ModernComboBox"),
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            Grid.SetRow(repeatingSectionCombo, 2);
+            grid.Children.Add(repeatingSectionCombo);
+
+            // Get all repeating sections (excluding self)
+            var repeatingSections = view.Sections
+                .Where(s => s.Type == "repeating" && s.Name != section.Name)
+                .Select(s => s.Name)
+                .ToList();
+
+            // Add repeating tables
+            var repeatingTables = view.Controls
+                .Where(c => c.Type == "RepeatingTable")
+                .Select(c => c.Label ?? c.Name)
+                .ToList();
+
+            repeatingSections.AddRange(repeatingTables);
+
+            if (!repeatingSections.Any())
+            {
+                MessageBox.Show("No repeating sections available to move into.",
+                              "No Target Available",
+                              MessageBoxButton.OK,
+                              MessageBoxImage.Information);
+                return;
+            }
+
+            repeatingSectionCombo.ItemsSource = repeatingSections;
+            repeatingSectionCombo.SelectedIndex = 0;
+
+            // Buttons
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 20, 0, 0)
+            };
+
+            var moveButton = new Button
+            {
+                Content = "Move Section",
+                Width = 100,
+                Height = 35,
+                Margin = new Thickness(0, 0, 10, 0),
+                Style = (Style)_mainWindow.FindResource("ModernButton")
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "Cancel",
+                Width = 100,
+                Height = 35,
+                Style = (Style)_mainWindow.FindResource("ModernButton")
+            };
+
+            moveButton.Click += (s, e) =>
+            {
+                var targetSection = repeatingSectionCombo.SelectedItem?.ToString();
+                if (!string.IsNullOrEmpty(targetSection))
+                {
+                    // Update all controls in this section to be in the target repeating section
+                    foreach (var control in view.Controls.Where(c => c.ParentSection == section.Name))
+                    {
+                        control.IsInRepeatingSection = true;
+                        control.RepeatingSectionName = targetSection;
+                        control.Properties["ParentRepeatingSections"] = targetSection;
+
+                        // Keep the original section as a subsection marker
+                        control.Properties["OriginalSection"] = section.Name;
+                    }
+
+                    // Update section to indicate it's nested
+                    section.Type = "nested-repeating";
+
+                    // Refresh tree view
+                    RefreshStructureTree();
+
+                    _mainWindow.UpdateStatus($"Moved section '{section.Name}' into repeating section '{targetSection}'",
+                                            MessageSeverity.Info);
+                }
+
+                dialog.DialogResult = true;
+                dialog.Close();
+            };
+
+            cancelButton.Click += (s, e) =>
+            {
+                dialog.DialogResult = false;
+                dialog.Close();
+            };
+
+            buttonPanel.Children.Add(moveButton);
+            buttonPanel.Children.Add(cancelButton);
+
+            Grid.SetRow(buttonPanel, 4);
+            grid.Children.Add(buttonPanel);
+
+            dialog.Content = grid;
+            dialog.ShowDialog();
+        }
+
+        #endregion
+
+        #region Helper Methods for Control Management
+
+        private void AddDialogTextBox(Grid grid, int row, string label, out TextBox textBox)
+        {
+            var labelControl = new TextBlock
+            {
+                Text = label,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 5, 0, 5)
+            };
+            Grid.SetRow(labelControl, row);
+            Grid.SetColumn(labelControl, 0);
+            grid.Children.Add(labelControl);
+
+            textBox = new TextBox
+            {
+                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
+                Margin = new Thickness(0, 5, 0, 5),
+                Height = 28
+            };
+            Grid.SetRow(textBox, row);
+            Grid.SetColumn(textBox, 1);
+            grid.Children.Add(textBox);
+        }
+
+        private void AddDialogComboBox(Grid grid, int row, string label, out ComboBox comboBox)
+        {
+            var labelControl = new TextBlock
+            {
+                Text = label,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 5, 0, 5)
+            };
+            Grid.SetRow(labelControl, row);
+            Grid.SetColumn(labelControl, 0);
+            grid.Children.Add(labelControl);
+
+            comboBox = new ComboBox
+            {
+                Style = (Style)_mainWindow.FindResource("ModernComboBox"),
+                Margin = new Thickness(0, 5, 0, 5),
+                Height = 28
+            };
+            Grid.SetRow(comboBox, row);
+            Grid.SetColumn(comboBox, 1);
+            grid.Children.Add(comboBox);
+        }
+
+        private void AddDialogCheckBox(Grid grid, int row, string label, out CheckBox checkBox)
+        {
+            var labelControl = new TextBlock
+            {
+                Text = label,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                Margin = new Thickness(0, 5, 0, 5)
+            };
+            Grid.SetRow(labelControl, row);
+            Grid.SetColumn(labelControl, 0);
+            grid.Children.Add(labelControl);
+
+            checkBox = new CheckBox
+            {
+                Style = (Style)_mainWindow.FindResource("ModernCheckBox"),
+                Margin = new Thickness(0, 5, 0, 5),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetRow(checkBox, row);
+            Grid.SetColumn(checkBox, 1);
+            grid.Children.Add(checkBox);
+        }
+
+        private List<string> GetAllSections(ViewDefinition view)
+        {
+            var sections = new List<string>();
+
+            // Regular sections
+            foreach (var section in view.Sections)
+            {
+                var type = section.Type == "repeating" ? "🔁" : "📦";
+                sections.Add($"{type} {section.Name}");
+            }
+
+            // Repeating tables
+            foreach (var control in view.Controls.Where(c => c.Type == "RepeatingTable"))
+            {
+                sections.Add($"🔁 {control.Label ?? control.Name}");
+            }
+
+            return sections;
+        }
+
+        private List<SectionOption> GetAllSectionsWithType(ViewDefinition view)
+        {
+            var sections = new List<SectionOption>();
+
+            // Regular sections
+            foreach (var section in view.Sections)
+            {
+                var icon = section.Type == "repeating" ? "🔁" : "📦";
+                sections.Add(new SectionOption
+                {
+                    Display = $"{icon} {section.Name}",
+                    Name = section.Name,
+                    Type = section.Type
+                });
+            }
+
+            // Repeating tables
+            foreach (var control in view.Controls.Where(c => c.Type == "RepeatingTable"))
+            {
+                var name = control.Label ?? control.Name;
+                sections.Add(new SectionOption
+                {
+                    Display = $"🔁 {name}",
+                    Name = name,
+                    Type = "repeating"
+                });
+            }
+
+            return sections;
+        }
+
+        private string ExtractSectionName(string displayText)
+        {
+            // Remove icon and return section name
+            if (displayText.Contains(" "))
+            {
+                return displayText.Substring(displayText.IndexOf(' ') + 1);
+            }
+            return displayText;
+        }
+
+        private string GetControlLocation(ControlDefinition control)
+        {
+            if (!string.IsNullOrEmpty(control.RepeatingSectionName))
+                return $"Repeating Section: {control.RepeatingSectionName}";
+            if (!string.IsNullOrEmpty(control.ParentSection))
+                return $"Section: {control.ParentSection}";
+            return "Root Level";
+        }
+
+        private void RefreshStructureTree()
+        {
+            // Rebuild the structure tree with current data
+            if (_mainWindow._allFormDefinitions != null)
+            {
+                BuildEnhancedStructureTree(_mainWindow._allFormDefinitions);
+            }
+        }
+
+        private class SectionOption
+        {
+            public string Display { get; set; }
+            public string Name { get; set; }
+            public string Type { get; set; }
+        }
+
+        #endregion
+
+        #region Updated Context Menu Creation
+
+        private void AddControlContextMenu(TreeViewItem item, ControlDefinition control)
+        {
+            var contextMenu = new ContextMenu();
+
+            // Edit Properties
+            var editMenuItem = new MenuItem
+            {
+                Header = "Edit Control Properties",
+                Icon = new TextBlock { Text = "✏️" }
+            };
+            editMenuItem.Click += (s, e) => ShowEditPanel(control, item);
+            contextMenu.Items.Add(editMenuItem);
+
+            // Move to Section
+            var moveMenuItem = new MenuItem
+            {
+                Header = "Move to Section...",
+                Icon = new TextBlock { Text = "➡️" }
+            };
+            moveMenuItem.Click += (s, e) =>
+            {
+                var view = GetViewForControl(control);
+                if (view != null)
+                    MoveControlToSection(control, view);
+            };
+            contextMenu.Items.Add(moveMenuItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // Duplicate Control
+            var duplicateMenuItem = new MenuItem
+            {
+                Header = "Duplicate Control",
+                Icon = new TextBlock { Text = "📋" }
+            };
+            duplicateMenuItem.Click += (s, e) => DuplicateControl(control);
+            contextMenu.Items.Add(duplicateMenuItem);
+
+            // Delete Control
+            var deleteMenuItem = new MenuItem
+            {
+                Header = "Delete Control",
+                Icon = new TextBlock { Text = "🗑️" }
+            };
+            deleteMenuItem.Click += (s, e) => DeleteControl(control);
+            contextMenu.Items.Add(deleteMenuItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // Copy as JSON
+            var copyJsonMenuItem = new MenuItem
+            {
+                Header = "Copy as JSON",
+                Icon = new TextBlock { Text = "📄" }
+            };
+            copyJsonMenuItem.Click += (s, e) => CopyControlAsJson(control);
+            contextMenu.Items.Add(copyJsonMenuItem);
+
+            item.ContextMenu = contextMenu;
+        }
+
+        private void AddSectionContextMenu(TreeViewItem item, SectionInfo section, ViewDefinition view)
+        {
+            var contextMenu = new ContextMenu();
+
+            // Add Control to Section
+            var addControlMenuItem = new MenuItem
+            {
+                Header = "Add Control...",
+                Icon = new TextBlock { Text = "➕" }
+            };
+            addControlMenuItem.Click += (s, e) => AddNewControl(view, section.Name);
+            contextMenu.Items.Add(addControlMenuItem);
+
+            if (section.Type != "repeating")
+            {
+                // Convert to Repeating Section
+                var convertMenuItem = new MenuItem
+                {
+                    Header = "Convert to Repeating Section",
+                    Icon = new TextBlock { Text = "🔁" }
+                };
+                convertMenuItem.Click += (s, e) => ConvertSectionToRepeating(section, view);
+                contextMenu.Items.Add(convertMenuItem);
+
+                // Move to Repeating Section
+                var moveMenuItem = new MenuItem
+                {
+                    Header = "Move to Repeating Section...",
+                    Icon = new TextBlock { Text = "➡️" }
+                };
+                moveMenuItem.Click += (s, e) => MoveSectionToRepeatingSection(section, view);
+                contextMenu.Items.Add(moveMenuItem);
+            }
+
+            item.ContextMenu = contextMenu;
+        }
+
+        private ViewDefinition GetViewForControl(ControlDefinition control)
+        {
+            if (_mainWindow._allFormDefinitions != null)
+            {
+                foreach (var formDef in _mainWindow._allFormDefinitions.Values)
+                {
+                    foreach (var view in formDef.Views)
+                    {
+                        if (view.Controls.Contains(control))
+                            return view;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private void DuplicateControl(ControlDefinition control)
+        {
+            var view = GetViewForControl(control);
+            if (view != null)
+            {
+                var newControl = new ControlDefinition
+                {
+                    Name = control.Name + "_Copy",
+                    Type = control.Type,
+                    Label = control.Label + " (Copy)",
+                    Binding = control.Binding,
+                    DocIndex = view.Controls.Count + 1,
+                    GridPosition = $"{view.Controls.Count + 1}A",
+                    ParentSection = control.ParentSection,
+                    SectionType = control.SectionType,
+                    IsInRepeatingSection = control.IsInRepeatingSection,
+                    RepeatingSectionName = control.RepeatingSectionName,
+                    RepeatingSectionBinding = control.RepeatingSectionBinding
+                };
+
+                // Copy properties
+                foreach (var prop in control.Properties)
+                {
+                    newControl.Properties[prop.Key] = prop.Value;
+                }
+
+                // Copy data options
+                if (control.DataOptions != null)
+                {
+                    newControl.DataOptions = new List<DataOption>(control.DataOptions);
+                    newControl.DataOptionsString = control.DataOptionsString;
+                }
+
+                view.Controls.Add(newControl);
+                RefreshStructureTree();
+
+                _mainWindow.UpdateStatus($"Duplicated control: {control.Label}", MessageSeverity.Info);
+            }
+        }
+
+        // Made public for accessibility
         public void DeleteControl(ControlDefinition control)
         {
             var result = MessageBox.Show(
-                $"Are you sure you want to delete the control '{control.Label ?? control.Name ?? "Unnamed"}'?\n\nThis action cannot be undone.",
+                $"Delete control '{control.Label ?? control.Name}'?",
                 "Confirm Delete",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning);
 
             if (result == MessageBoxResult.Yes)
             {
-                try
+                var view = GetViewForControl(control);
+                if (view != null)
                 {
-                    // Find the form and view containing this control
-                    string formName = null;
-                    ViewDefinition containingView = null;
-
-                    foreach (var formKvp in _mainWindow._allFormDefinitions)
-                    {
-                        foreach (var view in formKvp.Value.Views)
-                        {
-                            if (view.Controls.Contains(control))
-                            {
-                                formName = formKvp.Key;
-                                containingView = view;
-                                break;
-                            }
-                        }
-                        if (containingView != null) break;
-                    }
-
-                    if (containingView != null && formName != null)
-                    {
-                        // Remove from view
-                        containingView.Controls.Remove(control);
-
-                        // Remove from data columns
-                        var formDef = _mainWindow._allFormDefinitions[formName];
-                        formDef.Data.RemoveAll(d => d.ColumnName == control.Name);
-
-                        // Update metadata
-                        formDef.Metadata.TotalControls--;
-
-                        // If control was in a section, update section control count
-                        if (!string.IsNullOrEmpty(control.ParentSection))
-                        {
-                            var section = containingView.Sections.FirstOrDefault(s => s.Name == control.ParentSection);
-                            if (section != null && section.ControlIds != null)
-                            {
-                                var ctrlId = control.Properties?.ContainsKey("CtrlId") == true ? control.Properties["CtrlId"] : null;
-                                if (!string.IsNullOrEmpty(ctrlId))
-                                {
-                                    section.ControlIds.Remove(ctrlId);
-                                }
-                            }
-                        }
-
-                        // Refresh all displays
-                        RefreshAllDisplays();
-
-                        _editWindow?.Close();
-                        _mainWindow.UpdateStatus($"Control '{control.Label ?? control.Name}' deleted successfully", MessageSeverity.Info);
-                    }
-                    else
-                    {
-                        _mainWindow.UpdateStatus("Could not find control in form structure", MessageSeverity.Error);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _mainWindow.UpdateStatus($"Error deleting control: {ex.Message}", MessageSeverity.Error);
+                    view.Controls.Remove(control);
+                    RefreshStructureTree();
+                    _mainWindow.UpdateStatus($"Deleted control: {control.Label}", MessageSeverity.Info);
                 }
             }
         }
 
+        #endregion
+
+        #region Control Editing Methods
+
+        private void EditControl_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            var control = button?.Tag as ControlDefinition;
+            if (control != null)
+            {
+                var treeItem = FindTreeItemForControl(_mainWindow.StructureTreeView.Items, control);
+                ShowEditPanel(control, treeItem);
+            }
+        }
+
+        private TreeViewItem FindTreeItemForControl(ItemCollection items, ControlDefinition control)
+        {
+            foreach (TreeViewItem item in items)
+            {
+                if (item.Tag == control)
+                    return item;
+
+                var result = FindTreeItemForControl(item.Items, control);
+                if (result != null)
+                    return result;
+            }
+            return null;
+        }
+
+        // Made public for accessibility
+        public void ShowEditPanel(ControlDefinition control, TreeViewItem treeItem)
+        {
+            // TODO: Implementation for edit panel
+            _selectedControl = control;
+            _selectedTreeItem = treeItem;
+
+            MessageBox.Show($"Edit panel for control: {control.Label ?? control.Name}\n" +
+                          $"Type: {control.Type}\n" +
+                          $"Binding: {control.Binding}",
+                          "Edit Control Properties",
+                          MessageBoxButton.OK,
+                          MessageBoxImage.Information);
+        }
+
+        // Added missing method
         public void RemoveFromRepeatingSectionWithRefresh(ControlDefinition control)
         {
             var result = MessageBox.Show(
@@ -479,839 +1644,66 @@ namespace FormGenerator.Views
 
             if (result == MessageBoxResult.Yes)
             {
-                try
-                {
-                    // Store original values for rollback if needed
-                    var originalIsInRepeating = control.IsInRepeatingSection;
-                    var originalRepeatingSectionName = control.RepeatingSectionName;
-                    var originalRepeatingSectionBinding = control.RepeatingSectionBinding;
-                    var originalSectionType = control.SectionType;
-                    var originalParentSection = control.ParentSection;
+                control.IsInRepeatingSection = false;
+                control.RepeatingSectionName = null;
+                control.RepeatingSectionBinding = null;
 
-                    // Update control properties
-                    control.IsInRepeatingSection = false;
-                    control.RepeatingSectionName = null;
-                    control.RepeatingSectionBinding = null;
+                // Refresh the tree view
+                RefreshStructureTree();
 
-                    // Keep it in the section but not as repeating
-                    if (control.SectionType == "repeating")
-                    {
-                        control.SectionType = "section";
-                    }
-
-                    // Find the form containing this control
-                    string formName = null;
-                    foreach (var formKvp in _mainWindow._allFormDefinitions)
-                    {
-                        foreach (var view in formKvp.Value.Views)
-                        {
-                            if (view.Controls.Contains(control))
-                            {
-                                formName = formKvp.Key;
-                                break;
-                            }
-                        }
-                        if (formName != null) break;
-                    }
-
-                    if (formName != null)
-                    {
-                        // Update the data column
-                        var formDef = _mainWindow._allFormDefinitions[formName];
-                        var dataColumn = formDef.Data.FirstOrDefault(d => d.ColumnName == control.Name);
-                        if (dataColumn != null)
-                        {
-                            dataColumn.IsRepeating = false;
-                            dataColumn.RepeatingSection = null;
-                        }
-
-                        // Update metadata if needed
-                        var remainingRepeatingControls = formDef.Views
-                            .SelectMany(v => v.Controls)
-                            .Count(c => c.IsInRepeatingSection && c.RepeatingSectionName == originalRepeatingSectionName);
-
-                        if (remainingRepeatingControls == 0)
-                        {
-                            // No more controls in this repeating section
-                            formDef.Metadata.RepeatingSectionCount = Math.Max(0, formDef.Metadata.RepeatingSectionCount - 1);
-                        }
-
-                        // Refresh all displays
-                        RefreshAllDisplays();
-
-                        _editWindow?.Close();
-                        _mainWindow.UpdateStatus($"Control removed from repeating section '{originalRepeatingSectionName}'", MessageSeverity.Info);
-                    }
-                    else
-                    {
-                        // Rollback changes if we couldn't find the form
-                        control.IsInRepeatingSection = originalIsInRepeating;
-                        control.RepeatingSectionName = originalRepeatingSectionName;
-                        control.RepeatingSectionBinding = originalRepeatingSectionBinding;
-                        control.SectionType = originalSectionType;
-                        control.ParentSection = originalParentSection;
-
-                        _mainWindow.UpdateStatus("Could not find control in form structure", MessageSeverity.Error);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _mainWindow.UpdateStatus($"Error removing from repeating section: {ex.Message}", MessageSeverity.Error);
-                }
+                _mainWindow.UpdateStatus("Control removed from repeating section", MessageSeverity.Info);
             }
         }
 
-        #endregion
-
-        #region Add Control Functionality
-
-        public void ShowAddControlDialog()
+        // Added missing method
+        public void ShowAddControlDialog(ViewDefinition view, string parentSection = null)
         {
-            // Get selected context (view or section)
-            var selectedItem = _mainWindow.StructureTreeView.SelectedItem as TreeViewItem;
-            if (selectedItem == null)
-            {
-                MessageBox.Show("Please select a view or section where you want to add the control.",
-                               "No Selection",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Information);
-                return;
-            }
-
-            // Find the view context
-            ViewDefinition targetView = null;
-            string targetSection = null;
-            string formName = null;
-
-            // Traverse up to find the view
-            var current = selectedItem;
-            while (current != null)
-            {
-                if (current.Tag is ViewDefinition view)
-                {
-                    targetView = view;
-                    break;
-                }
-                else if (current.Tag is string sectionName)
-                {
-                    targetSection = sectionName;
-                }
-                current = current.Parent as TreeViewItem;
-            }
-
-            // Find the form name
-            current = selectedItem;
-            while (current != null)
-            {
-                if (current.Tag is InfoPathFormDefinition)
-                {
-                    // Find form name from tree structure
-                    var header = current.Header;
-                    if (header is StackPanel panel && panel.Children.Count > 1)
-                    {
-                        if (panel.Children[1] is TextBlock textBlock)
-                        {
-                            formName = textBlock.Text;
-                            break;
-                        }
-                    }
-                }
-                current = current.Parent as TreeViewItem;
-            }
-
-            if (targetView == null || formName == null)
-            {
-                MessageBox.Show("Could not determine the target view. Please select a valid view or section.",
-                               "Invalid Selection",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Warning);
-                return;
-            }
-
-            // Create add control dialog
-            var addWindow = new Window
-            {
-                Title = "Add New Control",
-                Width = 500,
-                Height = 600,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = _mainWindow,
-                Background = (Brush)_mainWindow.FindResource("BackgroundMedium")
-            };
-
-            var mainGrid = new Grid();
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            var contentPanel = new StackPanel
-            {
-                Margin = new Thickness(20)
-            };
-
-            // Control Type Selection
-            contentPanel.Children.Add(new TextBlock
-            {
-                Text = "Control Type:",
-                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                Margin = new Thickness(0, 0, 0, 5)
-            });
-
-            var typeCombo = new ComboBox
-            {
-                Style = (Style)_mainWindow.FindResource("ModernComboBox"),
-                Margin = new Thickness(0, 0, 0, 15)
-            };
-
-            var controlTypes = new[]
-            {
-                "TextField", "RichText", "DropDown", "ComboBox", "CheckBox",
-                "RadioButton", "DatePicker", "PeoplePicker", "FileAttachment",
-                "Button", "Label", "Hyperlink"
-            };
-
-            foreach (var type in controlTypes)
-            {
-                typeCombo.Items.Add(new ComboBoxItem { Content = type });
-            }
-            typeCombo.SelectedIndex = 0;
-            contentPanel.Children.Add(typeCombo);
-
-            // Control Properties
-            var propertyEditors = new Dictionary<string, TextBox>();
-
-            void AddPropertyEditor(string propertyName, string defaultValue = "")
-            {
-                contentPanel.Children.Add(new TextBlock
-                {
-                    Text = propertyName + ":",
-                    Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                    Margin = new Thickness(0, 10, 0, 5)
-                });
-
-                var textBox = new TextBox
-                {
-                    Text = defaultValue,
-                    Style = (Style)_mainWindow.FindResource("ModernTextBox")
-                };
-                propertyEditors[propertyName] = textBox;
-                contentPanel.Children.Add(textBox);
-            }
-
-            AddPropertyEditor("Name", "NewControl" + DateTime.Now.Ticks);
-            AddPropertyEditor("Label", "New Control");
-            AddPropertyEditor("Binding", "");
-            AddPropertyEditor("Grid Position", "1A");
-
-            // Target Section Display
-            contentPanel.Children.Add(new TextBlock
-            {
-                Text = $"Target: {(string.IsNullOrEmpty(targetSection) ? targetView.ViewName : targetSection)}",
-                Foreground = (Brush)_mainWindow.FindResource("InfoColor"),
-                FontStyle = FontStyles.Italic,
-                Margin = new Thickness(0, 20, 0, 0)
-            });
-
-            var scrollViewer = new ScrollViewer
-            {
-                Content = contentPanel,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-            };
-            Grid.SetRow(scrollViewer, 0);
-            mainGrid.Children.Add(scrollViewer);
-
-            // Button Panel
-            var buttonPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(20)
-            };
-
-            var addButton = new Button
-            {
-                Content = "➕ Add Control",
-                Style = (Style)_mainWindow.FindResource("ModernButton"),
-                Background = (Brush)_mainWindow.FindResource("SuccessColor"),
-                Width = 150,
-                Margin = new Thickness(0, 0, 10, 0)
-            };
-            addButton.Click += (s, args) =>
-            {
-                try
-                {
-                    // Create new control with unique ID
-                    var newControl = new ControlDefinition
-                    {
-                        Name = propertyEditors["Name"].Text,
-                        Label = propertyEditors["Label"].Text,
-                        Type = (typeCombo.SelectedItem as ComboBoxItem)?.Content.ToString(),
-                        Binding = propertyEditors["Binding"].Text,
-                        GridPosition = propertyEditors["Grid Position"].Text,
-                        DocIndex = targetView.Controls.Count + 1,
-                        Properties = new Dictionary<string, string>
-                        {
-                            ["CtrlId"] = "CTRL_" + Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper()
-                        }
-                    };
-
-                    // Validate required fields
-                    if (string.IsNullOrWhiteSpace(newControl.Name))
-                    {
-                        MessageBox.Show("Control name is required.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        return;
-                    }
-
-                    // Set section information if adding to a section
-                    if (!string.IsNullOrEmpty(targetSection))
-                    {
-                        var sectionInfo = targetView.Sections.FirstOrDefault(s => s.Name == targetSection);
-                        if (sectionInfo != null)
-                        {
-                            newControl.ParentSection = targetSection;
-                            newControl.SectionType = sectionInfo.Type;
-
-                            if (sectionInfo.Type == "repeating")
-                            {
-                                newControl.IsInRepeatingSection = true;
-                                newControl.RepeatingSectionName = targetSection;
-                                newControl.RepeatingSectionBinding = $"my:{targetSection.Replace(" ", "")}";
-                            }
-
-                            // Add control ID to section
-                            if (sectionInfo.ControlIds == null)
-                                sectionInfo.ControlIds = new List<string>();
-                            sectionInfo.ControlIds.Add(newControl.Properties["CtrlId"]);
-                        }
-                    }
-
-                    // Add to view
-                    targetView.Controls.Add(newControl);
-
-                    // Add to data columns
-                    var formDef = _mainWindow._allFormDefinitions[formName];
-                    var newDataColumn = new DataColumn
-                    {
-                        ColumnName = newControl.Name,
-                        Type = newControl.Type,
-                        DisplayName = newControl.Label,
-                        IsRepeating = newControl.IsInRepeatingSection,
-                        RepeatingSection = newControl.RepeatingSectionName
-                    };
-                    formDef.Data.Add(newDataColumn);
-
-                    // Update metadata
-                    formDef.Metadata.TotalControls++;
-
-                    // Refresh all displays including JSON
-                    RefreshAllDisplays();
-
-                    addWindow.Close();
-                    _mainWindow.UpdateStatus($"Control '{newControl.Label}' added successfully", MessageSeverity.Info);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error adding control: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    _mainWindow.UpdateStatus($"Error adding control: {ex.Message}", MessageSeverity.Error);
-                }
-
-            };
+            AddNewControl(view, parentSection);
         }
 
-        #endregion
-
-            #region Move Section to Repeating
-
-        public void ShowMoveSectionDialog()
+        // Added missing method
+        public void ShowMoveSectionDialog(ControlDefinition control)
         {
-            var selectedItem = _mainWindow.StructureTreeView.SelectedItem as TreeViewItem;
-            if (selectedItem == null || !(selectedItem.Tag is string sectionName))
+            var view = GetViewForControl(control);
+            if (view != null)
             {
-                MessageBox.Show("Please select a section to convert to repeating.",
-                               "No Section Selected",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Information);
-                return;
-            }
-
-            // Find the view and form context
-            ViewDefinition view = null;
-            string formName = null;
-            var current = selectedItem.Parent as TreeViewItem;
-
-            while (current != null)
-            {
-                if (current.Tag is ViewDefinition v)
-                {
-                    view = v;
-                    break;
-                }
-                current = current.Parent as TreeViewItem;
-            }
-
-            // Find form name
-            current = selectedItem;
-            while (current != null)
-            {
-                var header = current.Header;
-                if (header is StackPanel panel && panel.Children.Count > 1)
-                {
-                    if (panel.Children[1] is TextBlock textBlock &&
-                        _mainWindow._allFormDefinitions.ContainsKey(textBlock.Text))
-                    {
-                        formName = textBlock.Text;
-                        break;
-                    }
-                }
-                current = current.Parent as TreeViewItem;
-            }
-
-            if (view == null || formName == null)
-            {
-                MessageBox.Show("Could not determine the section context.",
-                               "Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
-                return;
-            }
-
-            var sectionInfo = view.Sections.FirstOrDefault(s => s.Name == sectionName);
-            if (sectionInfo == null)
-            {
-                MessageBox.Show("Section information not found.",
-                               "Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
-                return;
-            }
-
-            if (sectionInfo.Type == "repeating")
-            {
-                MessageBox.Show("This section is already a repeating section.",
-                               "Already Repeating",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Information);
-                return;
-            }
-
-            var result = MessageBox.Show(
-                $"Convert section '{sectionName}' to a repeating section?\n\n" +
-                "This will:\n" +
-                "• Make all controls in this section repeatable\n" +
-                "• Create a separate table in SQL generation\n" +
-                "• Allow multiple instances of this section\n\n" +
-                "Continue?",
-                "Convert to Repeating Section",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-
-            if (result == MessageBoxResult.Yes)
-            {
-                try
-                {
-                    // Update section type
-                    sectionInfo.Type = "repeating";
-
-                    // Update all controls in this section
-                    var controlsInSection = view.Controls
-                        .Where(c => c.ParentSection == sectionName)
-                        .ToList();
-
-                    foreach (var control in controlsInSection)
-                    {
-                        control.SectionType = "repeating";
-                        control.IsInRepeatingSection = true;
-                        control.RepeatingSectionName = sectionName;
-                        control.RepeatingSectionBinding = $"my:{sectionName.Replace(" ", "")}";
-                    }
-
-                    // Update data columns
-                    var formDef = _mainWindow._allFormDefinitions[formName];
-                    foreach (var control in controlsInSection)
-                    {
-                        var dataColumn = formDef.Data.FirstOrDefault(d => d.ColumnName == control.Name);
-                        if (dataColumn != null)
-                        {
-                            dataColumn.IsRepeating = true;
-                            dataColumn.RepeatingSection = sectionName;
-                            dataColumn.RepeatingSectionPath = $"my:{sectionName.Replace(" ", "")}";
-                        }
-                    }
-
-                    // Update metadata
-                    formDef.Metadata.RepeatingSectionCount++;
-
-                    // Refresh all displays including JSON
-                    RefreshAllDisplays();
-
-                    _mainWindow.UpdateStatus($"Section '{sectionName}' converted to repeating section", MessageSeverity.Info);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error converting section: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    _mainWindow.UpdateStatus($"Error converting section: {ex.Message}", MessageSeverity.Error);
-                }
+                MoveControlToSection(control, view);
             }
         }
 
-        #endregion
-
-        #region Reusable Views Methods - PUBLIC stubs for now
-
-        public async Task RefreshReusableViews()
-        {
-            // This would be implemented with the actual reusable views logic
-            await Task.CompletedTask;
-        }
-
-        public async Task SaveReusableViews()
-        {
-            // This would be implemented with the actual save logic
-            await Task.CompletedTask;
-        }
-
-        public void MinOccurrences_Changed()
-        {
-            // This would be implemented with the actual filter logic
-        }
-
-        public void GroupBy_Changed()
-        {
-            // This would be implemented with the actual grouping logic
-        }
-
-        public void FilterType_Changed()
-        {
-            // This would be implemented with the actual filter logic
-        }
-
-        public async Task CreateReusableView()
-        {
-            // This would be implemented with the actual create logic
-            await Task.CompletedTask;
-        }
-
-        public async Task ExportReusableControls()
-        {
-            // This would be implemented with the actual export logic
-            await Task.CompletedTask;
-        }
-
-        public void GroupNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            // This would be implemented with the actual text change logic
-        }
-
-        #endregion
-
-        #region Helper Methods - Continue in next part...
-
-        private void AddSectionHeader(StackPanel panel, string title)
-        {
-            var header = new TextBlock
-            {
-                Text = title,
-                FontSize = 16,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = (Brush)_mainWindow.FindResource("AccentColor"),
-                Margin = new Thickness(0, 10, 0, 5)
-            };
-            panel.Children.Add(header);
-
-            var separator = new Border
-            {
-                Height = 1,
-                Background = (Brush)_mainWindow.FindResource("BorderColor"),
-                Margin = new Thickness(0, 0, 0, 10)
-            };
-            panel.Children.Add(separator);
-        }
-
-       
-
-        #endregion
-    
-
-    // Add these methods to the MainWindowAnalysisHandlers class (Part 2):
-
-        #region Helper Methods for Editing
-
-        private void AddEditableProperty(StackPanel panel, string propertyName, string value, bool isReadOnly = false)
-        {
-            var grid = new Grid();
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-            var label = new TextBlock
-            {
-                Text = propertyName + ":",
-                VerticalAlignment = VerticalAlignment.Center,
-                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                Margin = new Thickness(0, 5, 0, 0)
-            };
-            Grid.SetColumn(label, 0);
-            grid.Children.Add(label);
-
-            var textBox = new TextBox
-            {
-                Text = value,
-                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
-                IsReadOnly = isReadOnly,
-                Background = isReadOnly
-                    ? (Brush)_mainWindow.FindResource("BackgroundLighter")
-                    : (Brush)_mainWindow.FindResource("BackgroundLight"),
-                Margin = new Thickness(0, 5, 0, 0)
-            };
-            Grid.SetColumn(textBox, 1);
-            grid.Children.Add(textBox);
-
-            _propertyEditors[propertyName] = textBox;
-            panel.Children.Add(grid);
-        }
-
-        private void AddDropdownEditor(StackPanel panel, ControlDefinition control)
-        {
-            var listBox = new ListBox
-            {
-                Background = (Brush)_mainWindow.FindResource("BackgroundLight"),
-                BorderBrush = (Brush)_mainWindow.FindResource("BorderColor"),
-                MaxHeight = 200
-            };
-
-            foreach (var option in control.DataOptions.OrderBy(o => o.Order))
-            {
-                var item = new ListBoxItem
-                {
-                    Content = $"{option.DisplayText} (Value: {option.Value}){(option.IsDefault ? " ⭐" : "")}",
-                    Tag = option
-                };
-                listBox.Items.Add(item);
-            }
-
-            panel.Children.Add(listBox);
-        }
-
-        private void SaveControlChanges(ControlDefinition control)
+        private void CopyControlAsJson(ControlDefinition control)
         {
             try
             {
-                // Update control properties from editors
-                bool hasChanges = false;
-
-                if (_propertyEditors.ContainsKey("Name") && control.Name != _propertyEditors["Name"].Text)
+                var json = JsonConvert.SerializeObject(new
                 {
-                    control.Name = _propertyEditors["Name"].Text;
-                    hasChanges = true;
-                }
+                    Name = control.Name,
+                    Type = control.Type,
+                    Label = control.Label,
+                    Binding = control.Binding,
+                    Section = control.ParentSection ?? control.RepeatingSectionName,
+                    SectionType = control.SectionType,
+                    IsInRepeatingSection = control.IsInRepeatingSection,
+                    GridPosition = control.GridPosition,
+                    HasDropdownValues = control.HasStaticData,
+                    DropdownCount = control.DataOptions?.Count ?? 0
+                }, Formatting.Indented);
 
-                if (_propertyEditors.ContainsKey("Label") && control.Label != _propertyEditors["Label"].Text)
-                {
-                    control.Label = _propertyEditors["Label"].Text;
-                    hasChanges = true;
-                }
-
-                if (_propertyEditors.ContainsKey("Binding") && control.Binding != _propertyEditors["Binding"].Text)
-                {
-                    control.Binding = _propertyEditors["Binding"].Text;
-                    hasChanges = true;
-                }
-
-                if (_propertyEditors.ContainsKey("GridPosition") && control.GridPosition != _propertyEditors["GridPosition"].Text)
-                {
-                    control.GridPosition = _propertyEditors["GridPosition"].Text;
-                    hasChanges = true;
-                }
-
-                if (_propertyEditors.ContainsKey("DocIndex") && int.TryParse(_propertyEditors["DocIndex"].Text, out int docIndex))
-                {
-                    if (control.DocIndex != docIndex)
-                    {
-                        control.DocIndex = docIndex;
-                        hasChanges = true;
-                    }
-                }
-
-                if (_propertyEditors.ContainsKey("DefaultValue"))
-                {
-                    if (control.Properties == null)
-                        control.Properties = new Dictionary<string, string>();
-
-                    var newDefaultValue = _propertyEditors["DefaultValue"].Text;
-                    if (!control.Properties.ContainsKey("DefaultValue") || control.Properties["DefaultValue"] != newDefaultValue)
-                    {
-                        control.Properties["DefaultValue"] = newDefaultValue;
-                        hasChanges = true;
-                    }
-                }
-
-                if (hasChanges)
-                {
-                    // Update the corresponding data column if name changed
-                    if (_selectedFormName != null && _mainWindow._allFormDefinitions.ContainsKey(_selectedFormName))
-                    {
-                        var formDef = _mainWindow._allFormDefinitions[_selectedFormName];
-                        var dataColumn = formDef.Data.FirstOrDefault(d => d.ColumnName == control.Name || d.DisplayName == control.Label);
-                        if (dataColumn != null)
-                        {
-                            dataColumn.ColumnName = control.Name;
-                            dataColumn.DisplayName = control.Label;
-                        }
-                    }
-
-                    // Refresh all displays
-                    RefreshAllDisplays();
-
-                    _mainWindow.UpdateStatus($"Control '{control.Label ?? control.Name}' updated successfully", MessageSeverity.Info);
-                }
-                else
-                {
-                    _mainWindow.UpdateStatus("No changes to save", MessageSeverity.Info);
-                }
+                System.Windows.Clipboard.SetText(json);
+                _mainWindow.UpdateStatus("Control JSON copied to clipboard", MessageSeverity.Info);
             }
             catch (Exception ex)
             {
-                _mainWindow.UpdateStatus($"Error saving changes: {ex.Message}", MessageSeverity.Error);
-            }
-            finally
-            {
-                _editWindow?.Close();
-            }
-        }
-
-        private void FindControlContext(ControlDefinition control)
-        {
-            foreach (var formKvp in _mainWindow._allFormDefinitions)
-            {
-                foreach (var view in formKvp.Value.Views)
-                {
-                    if (view.Controls.Contains(control))
-                    {
-                        _selectedView = view;
-                        _selectedFormName = formKvp.Key;
-                        return;
-                    }
-                }
-            }
-        }
-
-        private void RefreshTreeView()
-        {
-            // Save expansion state
-            var expandedItems = new List<string>();
-            SaveExpansionState(_mainWindow.StructureTreeView.Items, expandedItems);
-
-            // Rebuild tree
-            BuildEnhancedStructureTree(_mainWindow._allFormDefinitions);
-
-            // Restore expansion state
-            RestoreExpansionState(_mainWindow.StructureTreeView.Items, expandedItems);
-        }
-
-        private void SaveExpansionState(ItemCollection items, List<string> expandedItems)
-        {
-            foreach (TreeViewItem item in items)
-            {
-                if (item.IsExpanded)
-                {
-                    // Save a unique identifier for this item
-                    if (item.Tag != null)
-                        expandedItems.Add(item.Tag.ToString());
-                }
-                SaveExpansionState(item.Items, expandedItems);
-            }
-        }
-
-        private void RestoreExpansionState(ItemCollection items, List<string> expandedItems)
-        {
-            foreach (TreeViewItem item in items)
-            {
-                if (item.Tag != null && expandedItems.Contains(item.Tag.ToString()))
-                {
-                    item.IsExpanded = true;
-                }
-                RestoreExpansionState(item.Items, expandedItems);
+                _mainWindow.UpdateStatus($"Failed to copy JSON: {ex.Message}", MessageSeverity.Error);
             }
         }
 
         #endregion
 
-        #region Tree View Creation Methods
+        #region Helper Methods for Enhanced Display
 
-        private TreeViewItem CreateEnhancedMetadataItem(InfoPathFormDefinition formDef)
+        private void AddControlTypeBadge(StackPanel panel, string controlType)
         {
-            var metadataItem = new TreeViewItem
-            {
-                Header = "📊 Form Summary",
-                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                FontSize = 11,
-                IsExpanded = false
-            };
-
-            metadataItem.Items.Add(CreateInfoItem($"Views: {formDef.Views.Count}"));
-            metadataItem.Items.Add(CreateInfoItem($"Total Controls: {formDef.Metadata.TotalControls}"));
-            metadataItem.Items.Add(CreateInfoItem($"Data Columns: {formDef.Data.Count}"));
-
-            return metadataItem;
-        }
-
-        private TreeViewItem CreateEnhancedViewItem(ViewDefinition view)
-        {
-            var viewItem = new TreeViewItem
-            {
-                Header = $"📄 {view.ViewName}",
-                Tag = view,
-                IsExpanded = false
-            };
-
-            // Group controls by section
-            var controlsBySection = GroupControlsBySection(view.Controls);
-
-            // Add controls without sections first
-            if (controlsBySection.ContainsKey(""))
-            {
-                var rootControls = controlsBySection[""];
-                foreach (var control in rootControls.OrderBy(c => c.DocIndex))
-                {
-                    if (!control.IsMergedIntoParent)
-                    {
-                        viewItem.Items.Add(CreateEnhancedControlItem(control));
-                    }
-                }
-            }
-
-            // Add sectioned controls
-            foreach (var section in controlsBySection.Where(s => s.Key != "").OrderBy(s => s.Key))
-            {
-                var sectionItem = CreateEnhancedSectionItem(section.Key, section.Value, view);
-                viewItem.Items.Add(sectionItem);
-            }
-
-            return viewItem;
-        }
-
-        private TreeViewItem CreateEnhancedControlItem(ControlDefinition control)
-        {
-            var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
-
-            // Control icon
-            headerPanel.Children.Add(new TextBlock
-            {
-                Text = GetControlIcon(control.Type) + " ",
-                VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 14
-            });
-
-            // Control label/name
-            var displayName = !string.IsNullOrEmpty(control.Label) ? control.Label :
-                             !string.IsNullOrEmpty(control.Name) ? control.Name : "Unnamed";
-            headerPanel.Children.Add(new TextBlock
-            {
-                Text = displayName,
-                FontWeight = FontWeights.Medium,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 8, 0)
-            });
-
-            // Control type badge
             var typeBadge = new Border
             {
                 Background = new SolidColorBrush(Color.FromArgb(50, 100, 100, 100)),
@@ -1321,126 +1713,64 @@ namespace FormGenerator.Views
             };
             typeBadge.Child = new TextBlock
             {
-                Text = control.Type,
+                Text = controlType,
                 Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
                 FontSize = 10,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            headerPanel.Children.Add(typeBadge);
+            panel.Children.Add(typeBadge);
+        }
 
-            // CtrlId badge (if exists)
-            if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
+        private void AddSectionIndicator(StackPanel panel, ControlDefinition control)
+        {
+            var sectionText = control.ParentSection ?? control.RepeatingSectionName;
+            var sectionBadge = new Border
             {
-                var ctrlIdBadge = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(50, 156, 39, 176)), // Purple tint
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(5, 1, 5, 1),
-                    Margin = new Thickness(0, 0, 5, 0)
-                };
-                ctrlIdBadge.Child = new TextBlock
-                {
-                    Text = $"ID: {control.Properties["CtrlId"]}",
-                    Foreground = new SolidColorBrush(Color.FromRgb(156, 39, 176)), // Purple
-                    FontSize = 10,
-                    FontFamily = new FontFamily("Consolas"),
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                headerPanel.Children.Add(ctrlIdBadge);
-            }
-
-            // Grid position badge
-            if (!string.IsNullOrEmpty(control.GridPosition))
+                Background = control.IsInRepeatingSection
+                    ? new SolidColorBrush(Color.FromArgb(30, 3, 169, 244))
+                    : new SolidColorBrush(Color.FromArgb(30, 76, 175, 80)),
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(5, 1, 5, 1),
+                Margin = new Thickness(0, 0, 5, 0)
+            };
+            sectionBadge.Child = new TextBlock
             {
-                var gridBadge = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(50, 76, 175, 80)), // Green tint
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(5, 1, 5, 1),
-                    Margin = new Thickness(0, 0, 5, 0)
-                };
-                gridBadge.Child = new TextBlock
-                {
-                    Text = $"Grid: {control.GridPosition}",
-                    Foreground = new SolidColorBrush(Color.FromRgb(76, 175, 80)), // Green
-                    FontSize = 10,
-                    FontFamily = new FontFamily("Consolas"),
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                headerPanel.Children.Add(gridBadge);
-            }
+                Text = $"📍 {sectionText}",
+                Foreground = control.IsInRepeatingSection
+                    ? (Brush)_mainWindow.FindResource("InfoColor")
+                    : (Brush)_mainWindow.FindResource("SuccessColor"),
+                FontSize = 10,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            panel.Children.Add(sectionBadge);
+        }
 
-            // Section indicator (if in a section)
-            if (!string.IsNullOrEmpty(control.ParentSection) || control.IsInRepeatingSection)
+        private void AddDropdownIndicator(StackPanel panel, ControlDefinition control)
+        {
+            var dropdownPanel = new StackPanel { Orientation = Orientation.Horizontal };
+
+            dropdownPanel.Children.Add(new TextBlock
             {
-                var sectionText = control.ParentSection ?? control.RepeatingSectionName;
-                var sectionBadge = new Border
-                {
-                    Background = control.IsInRepeatingSection
-                        ? new SolidColorBrush(Color.FromArgb(30, 3, 169, 244))  // Blue tint for repeating
-                        : new SolidColorBrush(Color.FromArgb(30, 255, 152, 0)), // Orange tint for regular
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(5, 1, 5, 1),
-                    Margin = new Thickness(0, 0, 5, 0)
-                };
-                sectionBadge.Child = new TextBlock
-                {
-                    Text = $"📍 {sectionText}",
-                    Foreground = control.IsInRepeatingSection
-                        ? (Brush)_mainWindow.FindResource("InfoColor")
-                        : (Brush)_mainWindow.FindResource("WarningColor"),
-                    FontSize = 10,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                headerPanel.Children.Add(sectionBadge);
-            }
+                Text = " 📋",
+                Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center
+            });
 
-            // Dropdown indicator with count
-            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any())
+            dropdownPanel.Children.Add(new TextBlock
             {
-                var dropdownBadge = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(30, 139, 195, 74)), // Light green
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(5, 1, 5, 1),
-                    Margin = new Thickness(0, 0, 5, 0)
-                };
+                Text = $"({control.DataOptions.Count})",
+                Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
+                ToolTip = $"Has {control.DataOptions.Count} dropdown options",
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center
+            });
 
-                var dropdownPanel = new StackPanel { Orientation = Orientation.Horizontal };
-                dropdownPanel.Children.Add(new TextBlock
-                {
-                    Text = "📋",
-                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
-                    FontSize = 11,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-                dropdownPanel.Children.Add(new TextBlock
-                {
-                    Text = $" ({control.DataOptions.Count})",
-                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
-                    FontSize = 10,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
+            panel.Children.Add(dropdownPanel);
+        }
 
-                dropdownBadge.Child = dropdownPanel;
-                headerPanel.Children.Add(dropdownBadge);
-            }
-
-            // Default value indicator
-            if (control.Properties != null && control.Properties.ContainsKey("DefaultValue") &&
-                !string.IsNullOrEmpty(control.Properties["DefaultValue"]))
-            {
-                headerPanel.Children.Add(new TextBlock
-                {
-                    Text = " 🎯",
-                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
-                    ToolTip = $"Has default value: {control.Properties["DefaultValue"]}",
-                    FontSize = 11,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-            }
-
-            // Edit button
+        private void AddEditButton(StackPanel panel, ControlDefinition control)
+        {
             var editButton = new Button
             {
                 Content = "✏️",
@@ -1451,65 +1781,18 @@ namespace FormGenerator.Views
                 ToolTip = "Edit control properties",
                 Tag = control,
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(5, 0, 0, 0),
-                FontSize = 12
+                Margin = new Thickness(5, 0, 0, 0)
             };
-            editButton.Click += (s, e) => ShowEditPanel(control, null);
-            headerPanel.Children.Add(editButton);
-
-            var item = new TreeViewItem
-            {
-                Header = headerPanel,
-                Tag = control
-            };
-
-            // Add detailed properties as child items
-            AddControlPropertiesWithDetails(item, control);
-
-            return item;
+            editButton.Click += EditControl_Click;
+            panel.Children.Add(editButton);
         }
 
-        private void AddControlPropertiesWithDetails(TreeViewItem item, ControlDefinition control)
+        private void AddControlProperties(TreeViewItem item, ControlDefinition control)
         {
-            // CtrlId (show first if exists)
-            if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
-            {
-                item.Items.Add(CreatePropertyItem("Control ID", control.Properties["CtrlId"], "🔑"));
-            }
-
-            // Name (if different from label)
-            if (!string.IsNullOrEmpty(control.Name) && control.Name != control.Label)
-            {
-                item.Items.Add(CreatePropertyItem("Name", control.Name, "📛"));
-            }
-
             // Binding
             if (!string.IsNullOrEmpty(control.Binding))
             {
-                item.Items.Add(CreatePropertyItem("Binding", control.Binding, "🔗"));
-            }
-
-            // Grid Position
-            if (!string.IsNullOrEmpty(control.GridPosition))
-            {
-                item.Items.Add(CreatePropertyItem("Grid Position", control.GridPosition, "📍"));
-            }
-
-            // Document Index
-            if (control.DocIndex > 0)
-            {
-                item.Items.Add(CreatePropertyItem("Doc Index", control.DocIndex.ToString(), "📑"));
-            }
-
-            // Section information
-            if (!string.IsNullOrEmpty(control.ParentSection))
-            {
-                item.Items.Add(CreatePropertyItem("Parent Section", control.ParentSection, "📦"));
-            }
-
-            if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
-            {
-                item.Items.Add(CreatePropertyItem("Repeating Section", control.RepeatingSectionName, "🔁"));
+                item.Items.Add(CreateInfoItem($"Binding: {control.Binding}", 10));
             }
 
             // Dropdown values
@@ -1517,7 +1800,8 @@ namespace FormGenerator.Views
             {
                 var dropdownItem = new TreeViewItem
                 {
-                    Header = CreatePropertyHeader($"📋 Dropdown Values ({control.DataOptions.Count})", (Brush)_mainWindow.FindResource("SuccessColor")),
+                    Header = $"📋 Dropdown Values ({control.DataOptions.Count})",
+                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
                     FontSize = 11,
                     IsExpanded = false
                 };
@@ -1528,160 +1812,125 @@ namespace FormGenerator.Views
                     if (option.IsDefault)
                         optionText += " ⭐ (default)";
 
-                    var optionItem = new TreeViewItem
+                    dropdownItem.Items.Add(new TreeViewItem
                     {
                         Header = $"  • {optionText}",
                         Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
                         FontSize = 10,
                         ToolTip = $"Value: {option.Value}"
-                    };
-                    dropdownItem.Items.Add(optionItem);
+                    });
                 }
 
                 item.Items.Add(dropdownItem);
             }
 
             // Default value
-            if (control.Properties != null && control.Properties.ContainsKey("DefaultValue") &&
-                !string.IsNullOrEmpty(control.Properties["DefaultValue"]))
+            if (control.Properties.ContainsKey("DefaultValue") && !string.IsNullOrEmpty(control.Properties["DefaultValue"]))
             {
-                item.Items.Add(CreatePropertyItem("Default Value", control.Properties["DefaultValue"], "🎯"));
-            }
-
-            // Column and Row Span
-            if (control.ColumnSpan > 1)
-            {
-                item.Items.Add(CreatePropertyItem("Column Span", control.ColumnSpan.ToString(), "↔️"));
-            }
-
-            if (control.RowSpan > 1)
-            {
-                item.Items.Add(CreatePropertyItem("Row Span", control.RowSpan.ToString(), "↕️"));
-            }
-
-            // Other properties (if any)
-            if (control.Properties != null && control.Properties.Count > 2)
-            {
-                var otherProps = control.Properties.Where(p =>
-                    p.Key != "CtrlId" &&
-                    p.Key != "DefaultValue" &&
-                    !string.IsNullOrEmpty(p.Value)).ToList();
-
-                if (otherProps.Any())
-                {
-                    var otherPropsItem = new TreeViewItem
-                    {
-                        Header = CreatePropertyHeader($"⚙️ Additional Properties ({otherProps.Count})", (Brush)_mainWindow.FindResource("TextDim")),
-                        FontSize = 11,
-                        IsExpanded = false
-                    };
-
-                    foreach (var prop in otherProps)
-                    {
-                        otherPropsItem.Items.Add(new TreeViewItem
-                        {
-                            Header = $"  {prop.Key}: {prop.Value}",
-                            Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                            FontSize = 10
-                        });
-                    }
-
-                    item.Items.Add(otherPropsItem);
-                }
+                item.Items.Add(CreateInfoItem($"Default: {control.Properties["DefaultValue"]}", 10));
             }
         }
 
-        private TreeViewItem CreatePropertyItem(string propertyName, string value, string icon)
+        private object CreateEnhancedSectionHeader(string sectionName, string sectionType, int controlCount)
         {
             var panel = new StackPanel { Orientation = Orientation.Horizontal };
 
+            // Section icon
             panel.Children.Add(new TextBlock
             {
-                Text = $"{icon} ",
-                FontSize = 11,
+                Text = GetSectionIcon(sectionType) + " ",
+                FontSize = 16,
                 VerticalAlignment = VerticalAlignment.Center
             });
 
+            // Section name
             panel.Children.Add(new TextBlock
             {
-                Text = $"{propertyName}: ",
-                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                FontSize = 11,
-                VerticalAlignment = VerticalAlignment.Center
+                Text = sectionName,
+                FontWeight = FontWeights.Medium,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
             });
 
-            panel.Children.Add(new TextBlock
+            // Section type badge
+            var typeBadge = new Border
             {
-                Text = value,
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                FontSize = 11,
-                FontFamily = new FontFamily("Consolas"),
-                VerticalAlignment = VerticalAlignment.Center
-            });
-
-            return new TreeViewItem
-            {
-                Header = panel,
-                Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                FontSize = 11
+                Background = GetSectionTypeBrush(sectionType),
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(6, 2, 6, 2),
+                Margin = new Thickness(0, 0, 8, 0)
             };
-        }
-
-        // Helper method to create styled headers
-        private object CreatePropertyHeader(string text, Brush foreground)
-        {
-            return new TextBlock
+            typeBadge.Child = new TextBlock
             {
-                Text = text,
-                Foreground = foreground,
+                Text = FormatSectionType(sectionType),
+                Foreground = Brushes.White,
+                FontSize = 10,
                 FontWeight = FontWeights.Medium
             };
+            panel.Children.Add(typeBadge);
+
+            // Control count
+            panel.Children.Add(new TextBlock
+            {
+                Text = $"({controlCount} controls)",
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                FontStyle = FontStyles.Italic,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            return panel;
         }
 
-        private TreeViewItem CreateEnhancedSectionItem(string sectionName, List<ControlDefinition> controls, ViewDefinition view)
+        private TreeViewItem CreateViewStatisticsItem(ViewDefinition view)
         {
-            var sectionInfo = view.Sections.FirstOrDefault(s => s.Name == sectionName);
-            string sectionType = sectionInfo?.Type ?? "section";
-
-            var sectionItem = new TreeViewItem
+            var statsItem = new TreeViewItem
             {
-                Header = $"{GetSectionIcon(sectionType)} {sectionName}",
-                IsExpanded = false,
-                Tag = sectionName
+                Header = "📈 View Statistics",
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                FontSize = 11,
+                IsExpanded = false
             };
 
-            foreach (var control in controls.OrderBy(c => c.DocIndex))
+            var controlTypeGroups = view.Controls
+                .Where(c => !c.IsMergedIntoParent)
+                .GroupBy(c => c.Type)
+                .OrderByDescending(g => g.Count());
+
+            foreach (var typeGroup in controlTypeGroups)
             {
-                if (!control.IsMergedIntoParent)
+                statsItem.Items.Add(new TreeViewItem
                 {
-                    sectionItem.Items.Add(CreateEnhancedControlItem(control));
-                }
+                    Header = $"{GetControlIcon(typeGroup.Key)} {typeGroup.Key}: {typeGroup.Count()}",
+                    Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                    FontSize = 10
+                });
             }
 
-            return sectionItem;
-        }
-
-        private TreeViewItem CreateEnhancedDynamicSectionsItem(List<DynamicSection> dynamicSections)
-        {
-            var dynamicItem = new TreeViewItem
+            // Add dropdown controls count
+            var dropdownControls = view.Controls.Count(c => c.HasStaticData);
+            if (dropdownControls > 0)
             {
-                Header = $"🔄 Dynamic Sections ({dynamicSections.Count})",
-                IsExpanded = false,
-                Foreground = (Brush)_mainWindow.FindResource("AccentColor")
-            };
-
-            foreach (var dynSection in dynamicSections)
-            {
-                var sectionName = !string.IsNullOrEmpty(dynSection.Caption) ? dynSection.Caption : dynSection.Mode;
-                var sectionItem = new TreeViewItem
+                statsItem.Items.Add(new TreeViewItem
                 {
-                    Header = $"🔀 {sectionName}",
-                    Tag = dynSection
-                };
-                dynamicItem.Items.Add(sectionItem);
+                    Header = $"📋 Controls with dropdown values: {dropdownControls}",
+                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
+                    FontSize = 10
+                });
             }
 
-            return dynamicItem;
+            // Add repeating controls count
+            var repeatingControls = view.Controls.Count(c => c.IsInRepeatingSection);
+            if (repeatingControls > 0)
+            {
+                statsItem.Items.Add(new TreeViewItem
+                {
+                    Header = $"🔁 Controls in repeating sections: {repeatingControls}",
+                    Foreground = (Brush)_mainWindow.FindResource("InfoColor"),
+                    FontSize = 10
+                });
+            }
+
+            return statsItem;
         }
 
         private TreeViewItem CreateInfoItem(string text, int fontSize = 11)
@@ -1694,36 +1943,83 @@ namespace FormGenerator.Views
             };
         }
 
-        #endregion
-
-        #region Helper Methods
-
-        private Dictionary<string, List<ControlDefinition>> GroupControlsBySection(List<ControlDefinition> controls)
+        private HashSet<string> GetRepeatingSectionNames(InfoPathFormDefinition formDef)
         {
-            var grouped = new Dictionary<string, List<ControlDefinition>>();
+            var names = new HashSet<string>();
 
-            foreach (var control in controls)
+            foreach (var view in formDef.Views)
             {
-                string sectionKey = "";
-
-                if (!string.IsNullOrEmpty(control.ParentSection))
+                // From sections
+                foreach (var section in view.Sections.Where(s => s.Type == "repeating"))
                 {
-                    sectionKey = control.ParentSection;
-                }
-                else if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
-                {
-                    sectionKey = control.RepeatingSectionName;
+                    names.Add(section.Name);
                 }
 
-                if (!grouped.ContainsKey(sectionKey))
+                // From controls
+                foreach (var control in view.Controls.Where(c => c.IsInRepeatingSection && !string.IsNullOrEmpty(c.RepeatingSectionName)))
                 {
-                    grouped[sectionKey] = new List<ControlDefinition>();
+                    names.Add(control.RepeatingSectionName);
                 }
-
-                grouped[sectionKey].Add(control);
             }
 
-            return grouped;
+            return names;
+        }
+
+        private Brush GetSectionTypeBrush(string sectionType)
+        {
+            return sectionType?.ToLower() switch
+            {
+                "repeating" => new SolidColorBrush(Color.FromRgb(3, 169, 244)),
+                "optional" => new SolidColorBrush(Color.FromRgb(255, 152, 0)),
+                "dynamic" => new SolidColorBrush(Color.FromRgb(156, 39, 176)),
+                _ => new SolidColorBrush(Color.FromRgb(76, 175, 80))
+            };
+        }
+
+        private string FormatSectionType(string sectionType)
+        {
+            return sectionType?.ToLower() switch
+            {
+                "repeating" => "Repeating",
+                "optional" => "Optional",
+                "dynamic" => "Dynamic",
+                _ => "Section"
+            };
+        }
+
+        private string GetSectionIcon(string sectionType)
+        {
+            return sectionType?.ToLower() switch
+            {
+                "repeating" => "🔁",
+                "optional" => "❓",
+                "dynamic" => "🔄",
+                _ => "📦"
+            };
+        }
+
+        private string GetControlIcon(string controlType)
+        {
+            return controlType?.ToLower() switch
+            {
+                "textfield" => "📝",
+                "richtext" => "📄",
+                "dropdown" => "📋",
+                "combobox" => "🔽",
+                "checkbox" => "☑️",
+                "datepicker" => "📅",
+                "peoplepicker" => "👤",
+                "fileattachment" => "📎",
+                "button" => "🔘",
+                "repeatingtable" => "🔁",
+                "repeatingsection" => "🔂",
+                "label" => "🏷️",
+                "radiobutton" => "⭕",
+                "hyperlink" => "🔗",
+                "inlinepicture" => "🖼️",
+                "signatureline" => "✍️",
+                _ => "🎛️"
+            };
         }
 
         private void AddSummaryCard(string title, string value, string icon, string description, Brush accentColor = null)
@@ -1817,45 +2113,69 @@ namespace FormGenerator.Views
             return panel;
         }
 
-        private string GetControlIcon(string controlType)
+        private void ApplySectionColor(TreeViewItem item, string sectionType)
         {
-            return controlType?.ToLower() switch
+            item.Foreground = sectionType?.ToLower() switch
             {
-                "textfield" => "📝",
-                "richtext" => "📄",
-                "dropdown" => "📋",
-                "combobox" => "🔽",
-                "checkbox" => "☑️",
-                "datepicker" => "📅",
-                "peoplepicker" => "👤",
-                "fileattachment" => "📎",
-                "button" => "🔘",
-                "repeatingtable" => "🔁",
-                "repeatingsection" => "🔂",
-                "label" => "🏷️",
-                "radiobutton" => "⭕",
-                "hyperlink" => "🔗",
-                "inlinepicture" => "🖼️",
-                "signatureline" => "✍️",
-                _ => "🎛️"
+                "repeating" => (Brush)_mainWindow.FindResource("InfoColor"),
+                "optional" => (Brush)_mainWindow.FindResource("WarningColor"),
+                "dynamic" => (Brush)_mainWindow.FindResource("AccentColor"),
+                _ => (Brush)_mainWindow.FindResource("TextPrimary")
             };
         }
-
-        private string GetSectionIcon(string sectionType)
-        {
-            return sectionType?.ToLower() switch
-            {
-                "repeating" => "🔁",
-                "optional" => "❓",
-                "dynamic" => "🔄",
-                _ => "📦"
-            };
-        }
-    }
 
         #endregion
 
-        #region Enhanced Model Classes
+        #region Reusable Views Methods (Stubs for now)
+
+        public async Task RefreshReusableViews()
+        {
+            // Implementation for reusable views analysis
+            await Task.CompletedTask;
+        }
+
+        public async Task SaveReusableViews()
+        {
+            // Implementation for saving reusable views
+            await Task.CompletedTask;
+        }
+
+        public async Task CreateReusableView()
+        {
+            // Implementation for creating reusable view
+            await Task.CompletedTask;
+        }
+
+        public async Task ExportReusableControls()
+        {
+            // Implementation for exporting reusable controls
+            await Task.CompletedTask;
+        }
+
+        public void MinOccurrences_Changed()
+        {
+            // Implementation for min occurrences change
+        }
+
+        public void GroupBy_Changed()
+        {
+            // Implementation for group by change
+        }
+
+        public void FilterType_Changed()
+        {
+            // Implementation for filter type change
+        }
+
+        public void GroupNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            // Implementation for group name text change
+        }
+
+        #endregion
+    }
+
+    #region Enhanced Model Classes
 
     public class EnhancedDataColumn
     {
@@ -1881,6 +2201,22 @@ namespace FormGenerator.Views
         public string Name { get; set; }
         public int OccurrenceCount { get; set; }
         public List<string> AppearingInForms { get; set; } = new List<string>();
+        public List<ControlOccurrence> Occurrences { get; set; } = new List<ControlOccurrence>();
+        public Dictionary<string, string> CommonProperties { get; set; } = new Dictionary<string, string>();
+
+        public string DisplayName => !string.IsNullOrEmpty(CustomName) ? CustomName :
+                                 !string.IsNullOrEmpty(Label) ? Label :
+                                 !string.IsNullOrEmpty(Name) ? Name :
+                                 GroupKey;
+    }
+
+    public class ControlOccurrence
+    {
+        public string FormName { get; set; }
+        public string ViewName { get; set; }
+        public string Section { get; set; }
+        public string GridPosition { get; set; }
+        public ControlDefinition Control { get; set; }
     }
 
     #endregion
