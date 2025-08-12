@@ -786,6 +786,20 @@ namespace FormGenerator.Analyzers.Infopath
                 var mode = elem.Attribute("mode").Value;
                 var select = elem.Attribute("select")?.Value;
                 Debug.WriteLine($"Found apply-templates with mode: {mode}, select: {select}");
+
+                // Find and process the corresponding template
+                var doc = elem.Document;
+                if (doc != null)
+                {
+                    var ns = elem.Name.Namespace;
+                    var matchingTemplate = doc.Descendants(ns + "template")
+                        .FirstOrDefault(t => t.Attribute("mode")?.Value == mode);
+
+                    if (matchingTemplate != null)
+                    {
+                        ProcessXslTemplate(matchingTemplate);
+                    }
+                }
                 return;
             }
 
@@ -868,19 +882,35 @@ namespace FormGenerator.Analyzers.Infopath
                 }
             }
 
-            // Only apply section context if we're NOT in a repeating section
-            // This prevents controls from getting both section and repeating attributes
-            if (sectionStack != null && sectionStack.Count > 0 && repeatingContextStack.Count == 0)
+            // Apply section context (including conditional sections)
+            if (sectionStack != null && sectionStack.Count > 0)
             {
                 var currentSection = sectionStack.Peek();
-                control.ParentSection = currentSection.DisplayName;
-                control.SectionType = currentSection.Type;
 
-                if (!string.IsNullOrEmpty(currentSection.CtrlId))
-                    control.Properties["SectionCtrlId"] = currentSection.CtrlId;
+                // If this is a conditional section within a repeating section
+                if (currentSection.Type == "conditional-in-repeating")
+                {
+                    control.Properties["ConditionalSection"] = currentSection.DisplayName;
+                    control.Properties["ConditionalSectionId"] = currentSection.CtrlId;
+
+                    // Also maintain the parent section info
+                    if (!string.IsNullOrEmpty(control.RepeatingSectionName))
+                    {
+                        control.ParentSection = $"{control.RepeatingSectionName} > {currentSection.DisplayName}";
+                        control.SectionType = "conditional-in-repeating";
+                    }
+                }
+                else if (repeatingContextStack.Count == 0)
+                {
+                    // Only apply regular section context if we're NOT in a repeating section
+                    control.ParentSection = currentSection.DisplayName;
+                    control.SectionType = currentSection.Type;
+
+                    if (!string.IsNullOrEmpty(currentSection.CtrlId))
+                        control.Properties["SectionCtrlId"] = currentSection.CtrlId;
+                }
             }
         }
-
         private void ProcessXslTemplate(XElement templateElem)
         {
             var mode = templateElem.Attribute("mode")?.Value;
@@ -891,8 +921,21 @@ namespace FormGenerator.Analyzers.Infopath
             currentTemplateMode = mode;
             insideXslTemplate = true;
 
+            // Check if this is a conditional section (like Round Trip with mode="_3")
+            bool isConditionalSection = false;
+            var ifElement = templateElem.Descendants(templateElem.Name.Namespace + "if").FirstOrDefault();
+            if (ifElement != null)
+            {
+                var testCondition = ifElement.Attribute("test")?.Value;
+                if (!string.IsNullOrEmpty(testCondition))
+                {
+                    isConditionalSection = true;
+                    Debug.WriteLine($"Found conditional section with condition: {testCondition}");
+                }
+            }
+
             // Determine if this template represents a truly repeating structure
-            bool isRepeating = IsActuallyRepeatingPattern(match, templateElem);
+            bool isRepeating = IsActuallyRepeatingPattern(match, templateElem) && !isConditionalSection;
 
             var hasRepeatingSection = templateElem.Descendants().Any(IsRepeatingSection);
 
@@ -901,6 +944,68 @@ namespace FormGenerator.Analyzers.Infopath
                 // Let the repeating section handler deal with it
                 foreach (var child in templateElem.Elements())
                     ProcessElement(child);
+            }
+            else if (isConditionalSection)
+            {
+                // This is a conditional section (like Round Trip)
+                // It should inherit the repeating context from its parent
+                Debug.WriteLine($"Processing conditional section with mode: {mode}");
+
+                // Process the conditional content
+                if (ifElement != null)
+                {
+                    // Look for section divs within the conditional
+                    var sectionDiv = ifElement.Descendants()
+                        .FirstOrDefault(e => e.Attribute("class")?.Value?.Contains("xdSection") == true);
+
+                    if (sectionDiv != null)
+                    {
+                        var ctrlId = GetAttributeValue(sectionDiv, "CtrlId");
+                        var sectionName = "Round Trip"; // Or extract from caption
+
+                        // Create a conditional section context
+                        var conditionalSection = new SectionContext
+                        {
+                            Name = sectionName,
+                            Type = "conditional",
+                            StartRow = currentRow,
+                            CtrlId = ctrlId,
+                            DisplayName = sectionName
+                        };
+
+                        // Check if we're inside a repeating context
+                        if (repeatingContextStack.Count > 0)
+                        {
+                            var parentRepeating = repeatingContextStack.Peek();
+                            Debug.WriteLine($"Conditional section '{sectionName}' is nested within repeating section '{parentRepeating.Name}'");
+
+                            // Mark this section as being within a repeating context
+                            conditionalSection.Type = "conditional-in-repeating";
+                        }
+
+                        sectionStack.Push(conditionalSection);
+
+                        var sectionInfo = new SectionInfo
+                        {
+                            Name = sectionName,
+                            Type = conditionalSection.Type,
+                            CtrlId = ctrlId,
+                            StartRow = currentRow
+                        };
+                        sections.Add(sectionInfo);
+
+                        // Process the contents of the conditional section
+                        ProcessElement(ifElement);
+
+                        sectionStack.Pop();
+                        sectionInfo.EndRow = currentRow;
+                    }
+                    else
+                    {
+                        // Process the conditional content without creating a section
+                        ProcessElement(ifElement);
+                    }
+                }
             }
             else if (isRepeating)
             {
@@ -925,9 +1030,7 @@ namespace FormGenerator.Analyzers.Infopath
             }
             else
             {
-                // This is either a conditional section or just a regular template
-                // Don't create any section context - just process children
-                // Controls will inherit any existing repeating context from the stack
+                // Regular template - just process children
                 foreach (var child in templateElem.Elements())
                     ProcessElement(child);
             }

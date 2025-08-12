@@ -296,7 +296,7 @@ namespace FormGenerator.Views
             var sectionNodes = new Dictionary<string, SectionNode>();
             var rootSections = new List<SectionNode>();
 
-            // First, create nodes for all sections (including repeating tables/sections from controls)
+            // First, create nodes for all sections
             foreach (var section in view.Sections)
             {
                 if (!sectionNodes.ContainsKey(section.Name))
@@ -329,13 +329,33 @@ namespace FormGenerator.Views
                 }
             }
 
-            // Now assign controls to their sections and build parent-child relationships
+            // Handle the Trips repeating section specially
+            if (sectionNodes.ContainsKey("Trips"))
+            {
+                var tripsSection = sectionNodes["Trips"];
+
+                // Look for Round Trip conditional section
+                if (sectionNodes.ContainsKey("Round Trip"))
+                {
+                    var roundTripSection = sectionNodes["Round Trip"];
+                    roundTripSection.ParentSection = "Trips";
+                    roundTripSection.Type = "conditional"; // Mark as conditional
+                    tripsSection.ChildSections.Add(roundTripSection);
+                }
+            }
+
+            // Now assign controls to their sections
             foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent))
             {
                 string sectionKey = null;
 
-                // Determine which section this control belongs to
-                if (!string.IsNullOrEmpty(control.ParentSection))
+                // Check for nested section structure (e.g., "Trips > Round Trip")
+                if (!string.IsNullOrEmpty(control.ParentSection) && control.ParentSection.Contains(" > "))
+                {
+                    var parts = control.ParentSection.Split(new[] { " > " }, StringSplitOptions.None);
+                    sectionKey = parts.Last(); // Use the innermost section
+                }
+                else if (!string.IsNullOrEmpty(control.ParentSection))
                 {
                     sectionKey = control.ParentSection;
                 }
@@ -344,33 +364,22 @@ namespace FormGenerator.Views
                     sectionKey = control.RepeatingSectionName;
                 }
 
+                // Also check for conditional section property
+                if (control.Properties != null && control.Properties.ContainsKey("ConditionalSection"))
+                {
+                    sectionKey = control.Properties["ConditionalSection"];
+                }
+
                 if (!string.IsNullOrEmpty(sectionKey) && sectionNodes.ContainsKey(sectionKey))
                 {
                     sectionNodes[sectionKey].Controls.Add(control);
                 }
-            }
-
-            // Build parent-child relationships based on control nesting
-            foreach (var sectionNode in sectionNodes.Values)
-            {
-                // Check if this section's controls indicate it's nested within another section
-                var firstControl = sectionNode.Controls.FirstOrDefault();
-                if (firstControl != null)
+                else if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
                 {
-                    // Check if the controls in this section have a parent repeating section
-                    if (firstControl.Properties != null &&
-                        firstControl.Properties.ContainsKey("ParentRepeatingSections"))
+                    // Add to the repeating section even if not in a sub-section
+                    if (sectionNodes.ContainsKey(control.RepeatingSectionName))
                     {
-                        var parentSections = firstControl.Properties["ParentRepeatingSections"].Split('|');
-                        if (parentSections.Length > 0)
-                        {
-                            var immediateParent = parentSections[0];
-                            if (sectionNodes.ContainsKey(immediateParent) && immediateParent != sectionNode.Name)
-                            {
-                                sectionNodes[immediateParent].ChildSections.Add(sectionNode);
-                                sectionNode.ParentSection = immediateParent;
-                            }
-                        }
+                        sectionNodes[control.RepeatingSectionName].Controls.Add(control);
                     }
                 }
             }
@@ -403,17 +412,20 @@ namespace FormGenerator.Views
             // Apply color based on section type
             ApplySectionColor(sectionItem, sectionNode.Type);
 
-            // Add context menu for section operations
+            // Add section metadata
             var sectionInfo = view.Sections.FirstOrDefault(s => s.Name == sectionNode.Name);
             if (sectionInfo != null)
             {
-                AddSectionContextMenu(sectionItem, sectionInfo, view);
-
-                // Add section metadata
                 sectionItem.Items.Add(CreateInfoItem($"Type: {sectionNode.Type}", 10));
                 if (!string.IsNullOrEmpty(sectionInfo.CtrlId))
                 {
                     sectionItem.Items.Add(CreateInfoItem($"ID: {sectionInfo.CtrlId}", 10));
+                }
+
+                // Add conditional indicator if this is a conditional section
+                if (sectionNode.Type == "conditional" || sectionNode.Type == "conditional-in-repeating")
+                {
+                    sectionItem.Items.Add(CreateInfoItem($"⚡ Conditionally visible section", 10));
                 }
             }
 
@@ -423,27 +435,34 @@ namespace FormGenerator.Views
                 sectionItem.Items.Add(CreateInfoItem($"📊 Repeating Table", 10));
             }
 
-            // Add child sections first (nested sections)
+            // Add child sections first (nested sections like Round Trip within Trips)
             foreach (var childSection in sectionNode.ChildSections)
             {
-                sectionItem.Items.Add(CreateSectionTreeItem(childSection, view));
-            }
+                var childItem = CreateSectionTreeItem(childSection, view);
 
-            // Then add controls in this section (but not in child sections)
-            foreach (var control in sectionNode.Controls.OrderBy(c => c.DocIndex))
-            {
-                // Skip controls that are in child sections
-                bool isInChildSection = false;
-                foreach (var childSection in sectionNode.ChildSections)
+                // Add visual indicator for conditional child sections
+                if (childSection.Type == "conditional")
                 {
-                    if (IsControlInSection(control, childSection))
+                    var headerPanel = childItem.Header as StackPanel;
+                    if (headerPanel == null)
                     {
-                        isInChildSection = true;
-                        break;
+                        headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
+                        headerPanel.Children.Add(new TextBlock { Text = "⚡ " }); // Lightning bolt for conditional
+                        if (childItem.Header is string headerText)
+                        {
+                            headerPanel.Children.Add(new TextBlock { Text = headerText });
+                        }
+                        childItem.Header = headerPanel;
                     }
                 }
 
-                if (!isInChildSection && !control.IsMergedIntoParent)
+                sectionItem.Items.Add(childItem);
+            }
+
+            // Then add controls in this section
+            foreach (var control in sectionNode.Controls.OrderBy(c => c.DocIndex))
+            {
+                if (!control.IsMergedIntoParent)
                 {
                     sectionItem.Items.Add(CreateEnhancedControlItem(control));
                 }
