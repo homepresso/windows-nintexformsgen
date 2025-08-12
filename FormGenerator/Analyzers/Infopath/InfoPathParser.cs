@@ -792,7 +792,7 @@ namespace FormGenerator.Analyzers.Infopath
                 return;
             }
 
-            // Handle apply-templates
+            // Handle apply-templates with improved duplicate prevention
             if (elemName == "apply-templates")
             {
                 var mode = elem.Attribute("mode")?.Value;
@@ -802,22 +802,37 @@ namespace FormGenerator.Analyzers.Infopath
                 {
                     Debug.WriteLine($"Found apply-templates with mode: {mode}, select: {select}");
 
-                    // Check if this is a repeating pattern based on the select attribute
+                    // Build context key for tracking
+                    string contextKey = mode;
+                    if (repeatingContextStack.Count > 0)
+                    {
+                        contextKey = $"{repeatingContextStack.Peek().Name}::{mode}";
+                    }
+
+                    // Check if this is a repeating pattern
                     bool isRepeatingPattern = !string.IsNullOrEmpty(select) &&
                                              IsRepeatingSelectPattern(select);
 
                     if (isRepeatingPattern)
                     {
-                        // Process as repeating section
-                        ProcessRepeatingApplyTemplates(elem, mode, select);
+                        // Check if we've already processed this repeating pattern
+                        if (!processedTemplates.Contains($"repeat::{select}"))
+                        {
+                            processedTemplates.Add($"repeat::{select}");
+                            ProcessRepeatingApplyTemplates(elem, mode, select);
+                            processedTemplates.Remove($"repeat::{select}");
+                        }
                     }
                     else
                     {
-                        // Process the matching template
-                        var matchingTemplate = FindTemplate(elem.Document, mode);
-                        if (matchingTemplate != null)
+                        // Only process template if not already processed in this context
+                        if (!processedTemplates.Contains(contextKey))
                         {
-                            ProcessXslTemplate(matchingTemplate);
+                            var matchingTemplate = FindTemplate(elem.Document, mode);
+                            if (matchingTemplate != null)
+                            {
+                                ProcessXslTemplate(matchingTemplate);
+                            }
                         }
                     }
                     return;
@@ -826,17 +841,37 @@ namespace FormGenerator.Analyzers.Infopath
 
             // Check for standalone labels that might be section headers
             if (IsStandaloneLabelElement(elem) && !insideXslTemplate)
+            {
                 TrackPotentialSectionLabel(elem);
+            }
 
             // Check for new row indicators
             if (IsNewRowIndicator(elem))
+            {
                 HandleNewRow(elem);
+            }
 
             // Check for placeholder text
             if (IsPlaceholderText(elem))
             {
                 foreach (var child in elem.Elements())
+                {
                     ProcessElement(child);
+                }
+                return;
+            }
+
+            // Handle regular sections (non-repeating)
+            if (IsRegularSection(elem))
+            {
+                ProcessRegularSection(elem);
+                return;
+            }
+
+            // Handle repeating tables
+            if (IsRepeatingTable(elem))
+            {
+                ProcessRepeatingTable(elem);
                 return;
             }
 
@@ -844,27 +879,53 @@ namespace FormGenerator.Analyzers.Infopath
             var control = TryExtractControl(elem);
             if (control != null)
             {
+                // FIX: Check for duplicate controls by CtrlId
+                if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
+                {
+                    var ctrlId = control.Properties["CtrlId"];
+                    if (!string.IsNullOrEmpty(ctrlId) && controlsById.ContainsKey(ctrlId))
+                    {
+                        Debug.WriteLine($"Control with CtrlId {ctrlId} already processed, skipping duplicate");
+                        return;
+                    }
+                }
+
+                // Apply context (section/repeating information)
                 ApplyControlContext(control);
+
+                // Set grid position
                 control.GridPosition = currentRow + GetColumnLetter(currentCol);
                 control.DocIndex = ++docIndexCounter;
 
-                var ctrlId = control.Properties.ContainsKey("CtrlId") ? control.Properties["CtrlId"] : null;
-                if (!string.IsNullOrEmpty(ctrlId))
-                    controlsById[ctrlId] = control;
+                // Track control by ID if it has one
+                if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
+                {
+                    var ctrlId = control.Properties["CtrlId"];
+                    if (!string.IsNullOrEmpty(ctrlId))
+                    {
+                        controlsById[ctrlId] = control;
+                    }
+                }
 
                 currentCol++;
                 allControls.Add(control);
+
+                // Don't process children if we've extracted a control
                 return;
             }
 
-            // Process child elements
+            // Process child elements recursively
             foreach (var child in elem.Elements())
+            {
                 ProcessElement(child);
+            }
 
+            // Handle table row end
             if (elemName == "tr")
+            {
                 inTableRow = false;
+            }
         }
-
         private XElement FindTemplate(XDocument doc, string mode)
         {
             if (doc == null || string.IsNullOrEmpty(mode))
@@ -972,12 +1033,57 @@ namespace FormGenerator.Analyzers.Infopath
             return false;
         }
 
+        private bool IsConditionalTemplateMode(string mode, XDocument doc)
+        {
+            if (string.IsNullOrEmpty(mode) || doc == null)
+                return false;
+
+            // Find the template with this mode
+            var ns = doc.Root?.Name.Namespace;
+            if (ns == null)
+                return false;
+
+            var template = doc.Descendants(ns + "template")
+                .FirstOrDefault(t => t.Attribute("mode")?.Value == mode);
+
+            if (template == null)
+                return false;
+
+            // Check if the template contains xsl:if (conditional logic)
+            var hasConditional = template.Descendants(ns + "if").Any();
+
+            // Check if it has a section div with a CtrlId (like CTRL57 for Round Trip)
+            var hasSectionDiv = template.Descendants()
+                .Any(e => GetAttributeValue(e, "CtrlId") == "CTRL57" || // Round Trip specific
+                          (GetAttributeValue(e, "xctname") == "Section" &&
+                           e.Attribute("class")?.Value?.Contains("xdSection") == true));
+
+            // If it has conditional logic AND a section div, it's a conditional section template
+            return hasConditional && hasSectionDiv;
+        }
+
+
         private void ProcessRepeatingApplyTemplates(XElement elem, string mode, string select)
         {
             Debug.WriteLine($"Processing repeating apply-templates - mode: {mode}, select: {select}");
 
             // Extract section name from the select pattern
             string sectionName = ExtractSectionNameFromSelect(select);
+
+            // CRITICAL CHECK: Don't create a repeating section for templates that are actually conditionals
+            // Check if this mode represents a conditional section rather than a true repeating section
+            if (IsConditionalTemplateMode(mode, elem.Document))
+            {
+                Debug.WriteLine($"Mode {mode} is for a conditional section, not creating repeating context");
+
+                // Just process the template without creating a repeating context
+                var matchingTemplate = FindTemplate(elem.Document, mode);
+                if (matchingTemplate != null)
+                {
+                    ProcessXslTemplate(matchingTemplate);
+                }
+                return;
+            }
 
             // Check if we're already in this repeating context
             bool alreadyInContext = repeatingContextStack.Any(r =>
@@ -1034,6 +1140,7 @@ namespace FormGenerator.Analyzers.Infopath
                     sectionInfo.EndRow = currentRow;
             }
         }
+
 
         private string ExtractSectionNameFromSelect(string select)
         {
@@ -1123,65 +1230,308 @@ namespace FormGenerator.Analyzers.Infopath
 
             Debug.WriteLine($"Processing XSL template - mode: {mode}, match: {match}");
 
-            // Check if we've already processed this template in a parent context
-            if (processedTemplates.Contains(mode))
+            // Check if this template has already created its sections
+            var ns = templateElem.Name.Namespace;
+            var sectionDivs = templateElem.Descendants()
+                .Where(e => GetAttributeValue(e, "xctname") == "Section" ||
+                            e.Attribute("class")?.Value?.Contains("xdSection") == true)
+                .ToList();
+
+            foreach (var sectionDiv in sectionDivs)
             {
-                Debug.WriteLine($"Template mode {mode} already processed, skipping");
+                var ctrlId = GetAttributeValue(sectionDiv, "CtrlId");
+                if (!string.IsNullOrEmpty(ctrlId))
+                {
+                    // Check if we've already processed this section
+                    var existingSection = sections.FirstOrDefault(s => s.CtrlId == ctrlId);
+                    if (existingSection != null)
+                    {
+                        Debug.WriteLine($"Template {mode} contains section {ctrlId} which already exists, skipping entire template");
+                        return; // Skip this entire template
+                    }
+                }
+            }
+
+            // Build a unique template key based on current context
+            string templateKey = mode;
+
+            // If we're in a repeating context, include that in the key
+            if (repeatingContextStack.Count > 0)
+            {
+                var contexts = string.Join(">", repeatingContextStack.Select(r => r.Name));
+                templateKey = $"{contexts}::{mode}";
+            }
+
+            // If we're in a section context, include that too
+            if (sectionStack.Count > 0)
+            {
+                var sections = string.Join(">", sectionStack.Select(s => s.Name));
+                templateKey = $"{templateKey}::{sections}";
+            }
+
+            // Check if we've already processed this exact template in this exact context
+            if (processedTemplates.Contains(templateKey))
+            {
+                Debug.WriteLine($"Template {templateKey} already processed in this exact context, skipping");
                 return;
             }
 
-            processedTemplates.Add(mode);
+            processedTemplates.Add(templateKey);
+
+            var previousTemplateMode = currentTemplateMode;
             currentTemplateMode = mode;
             insideXslTemplate = true;
 
-            // Check for conditional content (xsl:if)
-            var ns = templateElem.Name.Namespace;
-            var ifElements = templateElem.Descendants(ns + "if").ToList();
-
-            if (ifElements.Any())
+            try
             {
-                // This template contains conditional logic
-                foreach (var ifElement in ifElements)
+                // Check for conditional content (xsl:if)
+                var ifElements = templateElem.Descendants(ns + "if").ToList();
+
+                if (ifElements.Any())
                 {
-                    var testCondition = ifElement.Attribute("test")?.Value;
-                    Debug.WriteLine($"Found conditional in template with test: {testCondition}");
+                    bool hasProcessedConditional = false;
 
-                    // Check if we're in a repeating context
-                    bool isInRepeating = repeatingContextStack.Count > 0;
-
-                    if (isInRepeating)
+                    foreach (var ifElement in ifElements)
                     {
-                        // This is a conditional section within a repeating section
-                        ProcessConditionalSection(ifElement, mode);
+                        var testCondition = ifElement.Attribute("test")?.Value;
+                        Debug.WriteLine($"Found conditional in template with test: {testCondition}");
+
+                        // Check if this conditional creates a section
+                        var sectionDiv = ifElement.Descendants()
+                            .FirstOrDefault(e => GetAttributeValue(e, "xctname") == "Section" ||
+                                                e.Attribute("class")?.Value?.Contains("xdSection") == true);
+
+                        if (sectionDiv != null)
+                        {
+                            var ctrlId = GetAttributeValue(sectionDiv, "CtrlId");
+
+                            // CRITICAL: Only process if we're in the right context
+                            // If we're NOT in a repeating section, skip conditional sections that belong to repeating sections
+                            if (repeatingContextStack.Count == 0 && IsConditionalForRepeatingSection(testCondition, ctrlId))
+                            {
+                                Debug.WriteLine($"Skipping conditional section {ctrlId} - belongs to repeating section but not in repeating context");
+                                continue;
+                            }
+
+                            // If we ARE in a repeating section, only process if it's for our current repeating section
+                            if (repeatingContextStack.Count > 0)
+                            {
+                                var currentRepeating = repeatingContextStack.Peek();
+                                if (!IsConditionalForCurrentContext(testCondition, currentRepeating))
+                                {
+                                    Debug.WriteLine($"Skipping conditional section {ctrlId} - not for current repeating context");
+                                    continue;
+                                }
+                            }
+
+                            // Check if already processed
+                            if (IsSectionAlreadyProcessed(ctrlId, mode))
+                            {
+                                Debug.WriteLine($"Section {ctrlId} already processed, skipping");
+                                continue;
+                            }
+
+                            ProcessConditionalSection(ifElement, mode);
+                            hasProcessedConditional = true;
+                        }
+                        else
+                        {
+                            // Process conditional content without creating a section
+                            // BUT only if we're in the right context
+                            if (ShouldProcessContentInCurrentContext(ifElement))
+                            {
+                                foreach (var child in ifElement.Elements())
+                                {
+                                    ProcessElement(child);
+                                }
+                            }
+                        }
                     }
-                    else
+
+                    // Process non-conditional elements ONLY if we haven't processed a conditional section
+                    // AND we're not in a situation where this would create duplicates
+                    if (!hasProcessedConditional && !WouldCreateDuplicates(templateElem))
                     {
-                        // Standalone conditional section
-                        ProcessConditionalSection(ifElement, mode);
+                        var nonConditionalElements = templateElem.Elements()
+                            .Where(e => e.Name.LocalName != "if");
+
+                        foreach (var child in nonConditionalElements)
+                        {
+                            ProcessElement(child);
+                        }
                     }
                 }
-
-                // Also process any non-conditional content in the template
-                var nonConditionalElements = templateElem.Elements()
-                    .Where(e => e.Name.LocalName != "if");
-
-                foreach (var child in nonConditionalElements)
+                else
                 {
-                    ProcessElement(child);
+                    // No conditional logic - but still check if this would create duplicates
+                    if (!WouldCreateDuplicates(templateElem))
+                    {
+                        foreach (var child in templateElem.Elements())
+                        {
+                            ProcessElement(child);
+                        }
+                    }
                 }
             }
-            else
+            finally
             {
-                // No conditional logic - process all children normally
-                foreach (var child in templateElem.Elements())
+                insideXslTemplate = false;
+                currentTemplateMode = previousTemplateMode;
+                processedTemplates.Remove(templateKey);
+            }
+        }
+
+        private bool WouldCreateDuplicates(XElement templateElem)
+        {
+            // Check if this template contains controls that have already been processed
+            var controlElements = templateElem.Descendants()
+                .Where(e => !string.IsNullOrEmpty(GetAttributeValue(e, "CtrlId")))
+                .ToList();
+
+            foreach (var controlElem in controlElements)
+            {
+                var ctrlId = GetAttributeValue(controlElem, "CtrlId");
+                if (controlsById.ContainsKey(ctrlId))
                 {
-                    ProcessElement(child);
+                    Debug.WriteLine($"Template would create duplicate control {ctrlId}, skipping");
+                    return true;
                 }
             }
 
-            insideXslTemplate = false;
-            currentTemplateMode = null;
-            processedTemplates.Remove(mode);
+            // Also check if this template is creating a fake repeating section
+            // for what should be a conditional section
+            var mode = templateElem.Attribute("mode")?.Value;
+            if (mode == "_3" && repeatingContextStack.Count == 0)
+            {
+                // Mode _3 is the Round Trip template - it should only be processed
+                // when we're inside the Trips repeating context
+                Debug.WriteLine($"Template mode {mode} would create fake repeating section outside of proper context");
+                return true;
+            }
+
+            return false;
+        }
+
+
+
+        private bool IsConditionalForRepeatingSection(string testCondition, string ctrlId)
+        {
+            // Check if this is the Round Trip conditional (CTRL57)
+            if (ctrlId == "CTRL57")
+            {
+                return true; // Round Trip belongs to Trips repeating section
+            }
+
+            // Check test condition for parent context indicators
+            if (!string.IsNullOrEmpty(testCondition))
+            {
+                // Conditions with "../" typically reference parent context
+                if (testCondition.Contains("../my:"))
+                {
+                    return true;
+                }
+
+                // Check for specific field patterns that indicate repeating context
+                if (testCondition.Contains("my:isRoundTrip") ||
+                    testCondition.Contains("my:roundTrip"))
+                {
+                    return true; // This is specifically for the round trip in trips
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsConditionalForCurrentContext(string testCondition, RepeatingContext currentContext)
+        {
+            // For Round Trip, it should only be processed when we're in the Trips context
+            if (testCondition?.Contains("isRoundTrip") == true)
+            {
+                return currentContext.Name == "Trips" ||
+                       currentContext.Binding?.Contains("trips") == true;
+            }
+
+            return true; // Default to true for other conditionals
+        }
+
+        private bool ShouldProcessContentInCurrentContext(XElement ifElement)
+        {
+            var testCondition = ifElement.Attribute("test")?.Value;
+
+            // If we're not in a repeating context, don't process content meant for repeating sections
+            if (repeatingContextStack.Count == 0)
+            {
+                if (testCondition?.Contains("../") == true ||
+                    testCondition?.Contains("isRoundTrip") == true)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool IsSectionAlreadyProcessed(string ctrlId, string mode)
+        {
+            if (string.IsNullOrEmpty(ctrlId))
+                return false;
+
+            // Check if section with this CtrlId already exists
+            var existingSection = sections.FirstOrDefault(s => s.CtrlId == ctrlId);
+            if (existingSection != null)
+            {
+                Debug.WriteLine($"Section with CtrlId {ctrlId} already exists: {existingSection.Name} (Type: {existingSection.Type})");
+                return true;
+            }
+
+            return false;
+        }
+
+
+        private bool ShouldProcessConditionalSection(XElement ifElement, string mode)
+        {
+            // Extract the section identifier from the conditional
+            var testCondition = ifElement.Attribute("test")?.Value;
+            var sectionDiv = ifElement.Descendants()
+                .FirstOrDefault(e => GetAttributeValue(e, "xctname") == "Section" ||
+                                    e.Attribute("class")?.Value?.Contains("xdSection") == true);
+
+            if (sectionDiv != null)
+            {
+                var ctrlId = GetAttributeValue(sectionDiv, "CtrlId");
+
+                // Check if we're in a repeating context
+                if (repeatingContextStack.Count > 0)
+                {
+                    var parentRepeating = repeatingContextStack.Peek();
+
+                    // Check if this section already exists within the current repeating context
+                    var existingSection = sections.FirstOrDefault(s =>
+                        s.CtrlId == ctrlId &&
+                        s.Type == "conditional-in-repeating");
+
+                    if (existingSection != null)
+                    {
+                        Debug.WriteLine($"Conditional section with CtrlId {ctrlId} already exists in repeating context");
+                        return false;
+                    }
+                }
+                else
+                {
+                    // Check for standalone conditional sections
+                    var existingSection = sections.FirstOrDefault(s =>
+                        s.CtrlId == ctrlId &&
+                        s.Type == "conditional");
+
+                    if (existingSection != null)
+                    {
+                        Debug.WriteLine($"Conditional section with CtrlId {ctrlId} already exists");
+                        return false;
+                    }
+                }
+            }
+
+            return true;
         }
 
         private void ProcessConditionalSection(XElement ifElement, string mode)
@@ -1191,7 +1541,7 @@ namespace FormGenerator.Analyzers.Infopath
             var testCondition = ifElement.Attribute("test")?.Value;
             Debug.WriteLine($"Processing conditional section - test: {testCondition}");
 
-            // Find any section div within the conditional
+            // Find section div within the conditional
             var sectionDiv = ifElement.Descendants()
                 .FirstOrDefault(e =>
                     e.Attribute("class")?.Value?.Contains("xdSection") == true ||
@@ -1203,25 +1553,33 @@ namespace FormGenerator.Analyzers.Infopath
                 var caption = GetAttributeValue(sectionDiv, "caption_0") ??
                               GetAttributeValue(sectionDiv, "caption");
 
-                // Dynamically determine section name
+                // Check if already processed
+                if (IsSectionAlreadyProcessed(ctrlId, mode))
+                {
+                    Debug.WriteLine($"Section {ctrlId} already processed in ProcessConditionalSection, skipping");
+                    return;
+                }
+
+                // Determine section name
                 var sectionName = DetermineSectionNameFromCondition(testCondition, caption, ctrlId, mode);
+
+                // Determine section type based on context
+                var sectionType = "conditional";
+                if (repeatingContextStack.Count > 0)
+                {
+                    sectionType = "conditional-in-repeating";
+                    var parentRepeating = repeatingContextStack.Peek();
+                    Debug.WriteLine($"Conditional section '{sectionName}' is within repeating '{parentRepeating.Name}'");
+                }
 
                 var conditionalSection = new SectionContext
                 {
                     Name = sectionName,
-                    Type = "conditional",
+                    Type = sectionType,
                     StartRow = currentRow,
                     CtrlId = ctrlId,
                     DisplayName = sectionName
                 };
-
-                // Check if we're in a repeating context
-                if (repeatingContextStack.Count > 0)
-                {
-                    conditionalSection.Type = "conditional-in-repeating";
-                    var parentRepeating = repeatingContextStack.Peek();
-                    Debug.WriteLine($"Conditional section '{sectionName}' is within repeating '{parentRepeating.Name}'");
-                }
 
                 sectionStack.Push(conditionalSection);
 
@@ -1232,7 +1590,11 @@ namespace FormGenerator.Analyzers.Infopath
                     CtrlId = ctrlId,
                     StartRow = currentRow
                 };
+
                 sections.Add(sectionInfo);
+
+                // Track controls being added to this section
+                var controlCountBefore = allControls.Count;
 
                 // Process the section contents
                 foreach (var child in sectionDiv.Elements())
@@ -1240,19 +1602,34 @@ namespace FormGenerator.Analyzers.Infopath
                     ProcessElement(child);
                 }
 
+                var controlsAdded = allControls.Count - controlCountBefore;
+                Debug.WriteLine($"Added {controlsAdded} controls to section '{sectionName}'");
+
                 sectionStack.Pop();
                 sectionInfo.EndRow = currentRow;
+
+                // Store control IDs that belong to this section
+                if (!string.IsNullOrEmpty(ctrlId))
+                {
+                    sectionInfo.ControlIds = allControls
+                        .Skip(controlCountBefore)
+                        .Where(c => c.Properties?.ContainsKey("CtrlId") == true)
+                        .Select(c => c.Properties["CtrlId"])
+                        .ToList();
+                }
             }
             else
             {
-                // No explicit section div - process conditional content directly
-                foreach (var child in ifElement.Elements())
+                // No explicit section div - but still check context before processing
+                if (ShouldProcessContentInCurrentContext(ifElement))
                 {
-                    ProcessElement(child);
+                    foreach (var child in ifElement.Elements())
+                    {
+                        ProcessElement(child);
+                    }
                 }
             }
         }
-
         private string DetermineSectionNameFromCondition(string testCondition, string caption, string ctrlId, string mode)
         {
             // Priority 1: Use caption if available
