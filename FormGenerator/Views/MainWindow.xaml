@@ -796,9 +796,7 @@
 
                                 <!-- Add Control Button -->
                                 <Button Name="AddControlButton"
-                        ToolTip="Add New Control (Ctrl+Shift+A)"
-                        Click="AddControlButton_Click">
-                                    <!-- ADD this Click handler -->
+                                ToolTip="Add New Control (Ctrl+Shift+A)">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="➕" 
                                    FontSize="16" 
@@ -815,8 +813,8 @@
 
                                 <!-- Edit Button -->
                                 <Button Name="EditControlButton"
-                        ToolTip="Edit Selected Control (F2)"
-                        Click="EditControlButton_Click">
+                        ToolTip="Edit Selected Control (F2)">
+
                                     <!-- ADD this Click handler -->
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="✏️" 
@@ -831,8 +829,8 @@
 
                                 <!-- Delete Button -->
                                 <Button Name="DeleteControlButton"
-                        ToolTip="Delete Selected Control (Delete)"
-                        Click="DeleteControlButton_Click">
+                        ToolTip="Delete Selected Control (Delete)">
+
                                     <!-- ADD this Click handler -->
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="🗑️" 
@@ -850,8 +848,8 @@
 
                                 <!-- Convert to Repeating Button -->
                                 <Button Name="ConvertToRepeatingButton"
-                        ToolTip="Convert Section to Repeating (Ctrl+Shift+R)"
-                        Click="ConvertToRepeatingButton_Click">
+                        ToolTip="Convert Section to Repeating (Ctrl+Shift+R)">
+
                                     <!-- ADD this Click handler -->
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="🔁" 
@@ -869,8 +867,8 @@
 
                                 <!-- Collapse All Button -->
                                 <Button Name="CollapseAllButton"
-                        ToolTip="Collapse All"
-                        Click="CollapseAllButton_Click">
+                        ToolTip="Collapse All">
+
                                     <!-- ADD this Click handler -->
                                     <TextBlock Text="⊟" 
                                FontSize="18"
@@ -879,8 +877,8 @@
 
                                 <!-- Expand All Button -->
                                 <Button Name="ExpandAllButton"
-                        ToolTip="Expand All"
-                        Click="ExpandAllButton_Click">
+                        ToolTip="Expand All">
+
                                     <!-- ADD this Click handler -->
                                     <TextBlock Text="⊞" 
                                FontSize="18"

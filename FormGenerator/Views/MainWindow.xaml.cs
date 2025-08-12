@@ -68,66 +68,53 @@ namespace FormGenerator.Views
 
         private void WireUpEditingControls()
         {
-            // Check if toolbar buttons exist (they might not if XAML hasn't been updated)
-            var addButton = FindName("AddControlButton") as Button;
-            var editButton = FindName("EditControlButton") as Button;
-            var deleteButton = FindName("DeleteControlButton") as Button;
-            var convertButton = FindName("ConvertToRepeatingButton") as Button;
-            var collapseButton = FindName("CollapseAllButton") as Button;
-            var expandButton = FindName("ExpandAllButton") as Button;
-            var searchButton = FindName("TreeSearchButton") as Button;
-            var searchBox = FindName("TreeSearchBox") as TextBox;
+            // Wire up toolbar buttons directly without null checks first
+            // This ensures they get wired up properly
 
-            // Wire up toolbar buttons if they exist
-            if (addButton != null)
-                addButton.Click += (s, e) =>
+            // Add Control Button
+            AddControlButton.Click += (s, e) =>
+            {
+                var (view, section) = GetSelectedViewAndSection();
+                if (view == null)
                 {
-                    var (view, section) = GetSelectedViewAndSection();
-                    if (view == null)
-                    {
-                        UpdateStatus("Select a view (or a section within a view) first.", MessageSeverity.Warning);
-                        return;
-                    }
-                    _analysisHandlers?.ShowAddControlDialog(view, section);
-                };
+                    UpdateStatus("Select a view (or a section within a view) first.", MessageSeverity.Warning);
+                    MessageBox.Show("Please select a view or section first.", "No Selection",
+                                  MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                _analysisHandlers?.ShowAddControlDialog(view, section);
+            };
 
-            if (editButton != null)
-                editButton.Click += (s, e) => EditSelectedControl();
+            // Edit Button
+            EditControlButton.Click += (s, e) => EditSelectedControl();
 
-            if (deleteButton != null)
-                deleteButton.Click += (s, e) => DeleteSelectedControl();
+            // Delete Button
+            DeleteControlButton.Click += (s, e) => DeleteSelectedControl();
 
-            if (convertButton != null)
-                convertButton.Click += (s, e) =>
+            // Convert to Repeating Button
+            ConvertToRepeatingButton.Click += (s, e) =>
+            {
+                var control = GetSelectedControl();
+                if (control == null)
                 {
-                    var control = GetSelectedControl();
-                    if (control == null)
-                    {
-                        UpdateStatus("Select a control to move/convert.", MessageSeverity.Warning);
-                        return;
-                    }
-                    _analysisHandlers?.ShowMoveSectionDialog(control);
-                };
+                    UpdateStatus("Select a control to move/convert.", MessageSeverity.Warning);
+                    return;
+                }
+                _analysisHandlers?.ShowMoveSectionDialog(control);
+            };
 
             // Tree manipulation buttons
-            if (collapseButton != null)
-                collapseButton.Click += (s, e) => CollapseAllTreeItems(StructureTreeView.Items);
-
-            if (expandButton != null)
-                expandButton.Click += (s, e) => ExpandAllTreeItems(StructureTreeView.Items);
+            CollapseAllButton.Click += (s, e) => CollapseAllTreeItems(StructureTreeView.Items);
+            ExpandAllButton.Click += (s, e) => ExpandAllTreeItems(StructureTreeView.Items);
 
             // Search functionality
-            if (searchButton != null)
-                searchButton.Click += (s, e) => SearchInTree();
+            TreeSearchButton.Click += (s, e) => SearchInTree();
 
-            if (searchBox != null)
+            TreeSearchBox.KeyDown += (s, e) =>
             {
-                searchBox.KeyDown += (s, e) =>
-                {
-                    if (e.Key == Key.Enter)
-                        SearchInTree();
-                };
-            }
+                if (e.Key == Key.Enter)
+                    SearchInTree();
+            };
 
             // Setup context menu for StructureTreeView
             SetupTreeViewContextMenu();
