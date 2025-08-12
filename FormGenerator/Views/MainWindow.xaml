@@ -796,7 +796,9 @@
 
                                 <!-- Add Control Button -->
                                 <Button Name="AddControlButton"
-                        ToolTip="Add New Control (Ctrl+Shift+A)">
+                        ToolTip="Add New Control (Ctrl+Shift+A)"
+                        Click="AddControlButton_Click">
+                                    <!-- ADD this Click handler -->
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="➕" 
                                    FontSize="16" 
@@ -813,7 +815,9 @@
 
                                 <!-- Edit Button -->
                                 <Button Name="EditControlButton"
-                        ToolTip="Edit Selected Control (F2)">
+                        ToolTip="Edit Selected Control (F2)"
+                        Click="EditControlButton_Click">
+                                    <!-- ADD this Click handler -->
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="✏️" 
                                    FontSize="16" 
@@ -827,7 +831,9 @@
 
                                 <!-- Delete Button -->
                                 <Button Name="DeleteControlButton"
-                        ToolTip="Delete Selected Control (Delete)">
+                        ToolTip="Delete Selected Control (Delete)"
+                        Click="DeleteControlButton_Click">
+                                    <!-- ADD this Click handler -->
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="🗑️" 
                                    FontSize="16" 
@@ -844,7 +850,9 @@
 
                                 <!-- Convert to Repeating Button -->
                                 <Button Name="ConvertToRepeatingButton"
-                        ToolTip="Convert Section to Repeating (Ctrl+Shift+R)">
+                        ToolTip="Convert Section to Repeating (Ctrl+Shift+R)"
+                        Click="ConvertToRepeatingButton_Click">
+                                    <!-- ADD this Click handler -->
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="🔁" 
                                    FontSize="16" 
@@ -861,7 +869,9 @@
 
                                 <!-- Collapse All Button -->
                                 <Button Name="CollapseAllButton"
-                        ToolTip="Collapse All">
+                        ToolTip="Collapse All"
+                        Click="CollapseAllButton_Click">
+                                    <!-- ADD this Click handler -->
                                     <TextBlock Text="⊟" 
                                FontSize="18"
                                Foreground="{StaticResource TextSecondary}"/>
@@ -869,7 +879,9 @@
 
                                 <!-- Expand All Button -->
                                 <Button Name="ExpandAllButton"
-                        ToolTip="Expand All">
+                        ToolTip="Expand All"
+                        Click="ExpandAllButton_Click">
+                                    <!-- ADD this Click handler -->
                                     <TextBlock Text="⊞" 
                                FontSize="18"
                                Foreground="{StaticResource TextSecondary}"/>
@@ -892,14 +904,19 @@
                          Foreground="{StaticResource TextPrimary}"
                          BorderBrush="{StaticResource BorderColor}"
                          Padding="5,0"
-                         Margin="0,0,5,0"/>
+                         Margin="0,0,5,0"
+                         TextChanged="TreeSearchBox_TextChanged"/>
+                                <!-- ADD this TextChanged handler -->
 
                                 <Button Name="TreeSearchButton"
-                        ToolTip="Search">
+                        ToolTip="Search"
+                        Click="TreeSearchButton_Click">
+                                    <!-- ADD this Click handler -->
                                     <TextBlock Text="🔍" 
                                FontSize="16"
                                Foreground="{StaticResource AccentColor}"/>
                                 </Button>
+
                             </ToolBar>
                         </Border>
 
@@ -908,10 +925,12 @@
                       VerticalScrollBarVisibility="Auto" 
                       Background="{StaticResource BackgroundDark}">
                             <TreeView Name="StructureTreeView"
-                      Background="{StaticResource BackgroundDark}"
-                      Foreground="{StaticResource TextPrimary}"
-                      BorderThickness="0"
-                      Padding="20">
+                          Background="{StaticResource BackgroundDark}"
+                          Foreground="{StaticResource TextPrimary}"
+                          BorderThickness="0"
+                          Padding="20"
+                          SelectedItemChanged="StructureTreeView_SelectedItemChanged">
+                                <!-- ADD this handler -->
                                 <TreeView.ItemContainerStyle>
                                     <Style TargetType="TreeViewItem">
                                         <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -929,6 +948,7 @@
                                     </Style>
                                 </TreeView.ItemContainerStyle>
                             </TreeView>
+
                         </ScrollViewer>
                     </Grid>
                 </TabItem>
@@ -1030,16 +1050,17 @@
                             </DataGrid.CellStyle>
                             <DataGrid.Columns>
                                 <!-- Form Name Column -->
-                                <DataGridTemplateColumn Header="Form" Width="180">
+                                <DataGridTemplateColumn Header="Form" Width="150" CanUserSort="True" SortMemberPath="FormName">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal">
                                                 <TextBlock Text="📁" 
-                                                          Foreground="{StaticResource AccentColor}"
-                                                          Margin="0,0,5,0"/>
+                                              Foreground="{StaticResource AccentColor}"
+                                              Margin="0,0,5,0"/>
                                                 <TextBlock Text="{Binding FormName}" 
-                                                          Foreground="{StaticResource TextPrimary}"
-                                                          FontWeight="Medium"/>
+                                              Foreground="{StaticResource TextPrimary}"
+                                              FontWeight="Medium"
+                                              ToolTip="{Binding FormName}"/>
                                             </StackPanel>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
@@ -1047,28 +1068,29 @@
 
                                 <!-- Column Name -->
                                 <DataGridTextColumn Header="Column Name" 
-                                                   Binding="{Binding ColumnName}" 
-                                                   Width="200">
+                                       Binding="{Binding ColumnName}" 
+                                       Width="180">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
                                             <Setter Property="VerticalAlignment" Value="Center"/>
+                                            <Setter Property="FontWeight" Value="Medium"/>
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
 
                                 <!-- Type -->
-                                <DataGridTemplateColumn Header="Type" Width="150">
+                                <DataGridTemplateColumn Header="Type" Width="120">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <Border Background="{StaticResource BackgroundLighter}"
-                                                   CornerRadius="3"
-                                                   Padding="5,2"
-                                                   HorizontalAlignment="Left">
+                                       CornerRadius="3"
+                                       Padding="5,2"
+                                       HorizontalAlignment="Left">
                                                 <TextBlock Text="{Binding Type}" 
-                                                          Foreground="{StaticResource AccentLight}"
-                                                          FontSize="11"
-                                                          FontFamily="Consolas"/>
+                                              Foreground="{StaticResource AccentLight}"
+                                              FontSize="11"
+                                              FontFamily="Consolas"/>
                                             </Border>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
@@ -1076,12 +1098,25 @@
 
                                 <!-- Display Name -->
                                 <DataGridTextColumn Header="Display Name" 
-                                                   Binding="{Binding DisplayName}" 
-                                                   Width="200">
+                                       Binding="{Binding DisplayName}" 
+                                       Width="180">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
                                             <Setter Property="VerticalAlignment" Value="Center"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+
+                                <!-- Section -->
+                                <DataGridTextColumn Header="Section" 
+                                       Binding="{Binding Section}" 
+                                       Width="150">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                            <Setter Property="FontStyle" Value="Italic"/>
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
@@ -1091,8 +1126,8 @@
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="{Binding IsRepeating, Converter={StaticResource BoolToIconConverter}}"
-                                                      HorizontalAlignment="Center"
-                                                      FontSize="16"/>
+                                          HorizontalAlignment="Center"
+                                          FontSize="16"/>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
@@ -1102,13 +1137,49 @@
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="{Binding IsConditional, Converter={StaticResource BoolToIconConverter}}"
-                                                      HorizontalAlignment="Center"
-                                                      FontSize="16"/>
+                                          HorizontalAlignment="Center"
+                                          FontSize="16"/>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
 
-                                <!-- Section -->
+                                <!-- Has Constraints -->
+                                <DataGridTemplateColumn Header="Constraints" Width="90">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock HorizontalAlignment="Center"
+                                          VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Text" Value=""/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasConstraints}" Value="True">
+                                                                <Setter Property="Text" Value="✅"/>
+                                                                <Setter Property="ToolTip" Value="{Binding ValidValuesCount, StringFormat='Has {0} valid values'}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+
+                                <!-- Default Value -->
+                                <DataGridTextColumn Header="Default" 
+                                       Binding="{Binding DefaultValue}" 
+                                       Width="*">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                            <Setter Property="FontSize" Value="11"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                           
+
+                            <!-- Section -->
                                 <DataGridTextColumn Header="Section" 
                                                    Binding="{Binding RepeatingSection}" 
                                                    Width="*">

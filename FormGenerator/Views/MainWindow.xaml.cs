@@ -1028,34 +1028,489 @@ namespace FormGenerator.Views
         }
 
         #endregion
-    }
 
-    /// <summary>
-    /// Factory for creating form analyzers
-    /// </summary>
-    public class AnalyzerFactory
-    {
-        private readonly Dictionary<string, IFormAnalyzer> _analyzers;
 
-        public AnalyzerFactory()
+        #region Form Structure Tab Event Handlers
+
+        /// <summary>
+        /// Handles Add Control button click
+        /// </summary>
+        private void AddControlButton_Click(object sender, RoutedEventArgs e)
         {
-            _analyzers = new Dictionary<string, IFormAnalyzer>
+            try
+            {
+                // Get the currently selected view
+                var view = GetSelectedView();
+                if (view != null)
+                {
+                    // Get selected section if any
+                    string parentSection = null;
+                    var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+
+                    if (selectedItem?.Tag is string sectionName)
+                    {
+                        parentSection = sectionName;
+                    }
+                    else if (selectedItem?.Tag is ViewDefinition)
+                    {
+                        // View is selected, no parent section
+                        parentSection = null;
+                    }
+
+                    // Call the handler to show add control dialog
+                    _analysisHandlers.ShowAddControlDialog(view, parentSection);
+                }
+                else
+                {
+                    MessageBox.Show("Please select a form view first.", "No View Selected",
+                                  MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error adding control: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Handles Edit Control button click
+        /// </summary>
+        private void EditControlButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+                if (selectedItem?.Tag is ControlDefinition control)
+                {
+                    _analysisHandlers.ShowEditPanel(control, selectedItem);
+                }
+                else
+                {
+                    MessageBox.Show("Please select a control to edit.", "No Control Selected",
+                                  MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error editing control: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Handles Delete Control button click
+        /// </summary>
+        private void DeleteControlButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+                if (selectedItem?.Tag is ControlDefinition control)
+                {
+                    _analysisHandlers.DeleteControl(control);
+                }
+                else
+                {
+                    MessageBox.Show("Please select a control to delete.", "No Control Selected",
+                                  MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error deleting control: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Handles Convert to Repeating button click
+        /// </summary>
+        private void ConvertToRepeatingButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+
+                // Check if a section is selected
+                if (selectedItem?.Tag is string sectionName)
+                {
+                    var view = GetSelectedView();
+                    if (view != null)
+                    {
+                        var section = view.Sections.FirstOrDefault(s => s.Name == sectionName);
+                        if (section != null && section.Type != "repeating")
+                        {
+                            var result = MessageBox.Show(
+                                $"Convert '{section.Name}' to a repeating section?\n\n" +
+                                "This will make all controls in this section repeatable.",
+                                "Convert to Repeating Section",
+                                MessageBoxButton.YesNo,
+                                MessageBoxImage.Question);
+
+                            if (result == MessageBoxResult.Yes)
+                            {
+                                // Update section type
+                                section.Type = "repeating";
+
+                                // Update all controls in this section
+                                foreach (var control in view.Controls.Where(c => c.ParentSection == section.Name))
+                                {
+                                    control.IsInRepeatingSection = true;
+                                    control.RepeatingSectionName = section.Name;
+                                    control.SectionType = "repeating";
+                                }
+
+                                // Refresh the tree view
+                                if (_allFormDefinitions != null)
+                                {
+                                    _analysisHandlers.DisplayCombinedAnalysisResults(_allAnalysisResults);
+                                }
+
+                                UpdateStatus($"Converted '{section.Name}' to repeating section", MessageSeverity.Info);
+                            }
+                        }
+                        else if (section?.Type == "repeating")
+                        {
+                            MessageBox.Show("This section is already a repeating section.",
+                                          "Already Repeating",
+                                          MessageBoxButton.OK,
+                                          MessageBoxImage.Information);
+                        }
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("Please select a section to convert to repeating.",
+                                  "No Section Selected",
+                                  MessageBoxButton.OK,
+                                  MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error converting section: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Handles Collapse All button click
+        /// </summary>
+        private void CollapseAllButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                CollapseAllTreeViewItems(StructureTreeView.Items);
+                UpdateStatus("Collapsed all tree items", MessageSeverity.Info);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error collapsing tree: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Handles Expand All button click
+        /// </summary>
+        private void ExpandAllButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                ExpandAllTreeViewItems(StructureTreeView.Items);
+                UpdateStatus("Expanded all tree items", MessageSeverity.Info);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error expanding tree: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Handles Tree Search button click
+        /// </summary>
+        private void TreeSearchButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(TreeSearchBox.Text))
+                {
+                    SearchTreeView(TreeSearchBox.Text);
+                }
+                else
+                {
+                    MessageBox.Show("Please enter a search term.", "Search",
+                                  MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error searching tree: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Handles Tree Search text changed
+        /// </summary>
+        private void TreeSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(TreeSearchBox.Text))
+                {
+                    // Clear search highlighting
+                    ResetTreeViewHighlight(StructureTreeView.Items);
+                }
+                else if (TreeSearchBox.Text.Length >= 3)
+                {
+                    // Auto-search after 3 characters
+                    SearchTreeView(TreeSearchBox.Text);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error in search: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Handles TreeView selection changed
+        /// </summary>
+        private void StructureTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+        {
+            try
+            {
+                var selectedItem = e.NewValue as TreeViewItem;
+
+                // Enable/disable buttons based on selection
+                bool isControlSelected = selectedItem?.Tag is ControlDefinition;
+                bool isSectionSelected = selectedItem?.Tag is string || selectedItem?.Tag is SectionInfo;
+                bool isViewSelected = selectedItem?.Tag is ViewDefinition;
+
+                EditControlButton.IsEnabled = isControlSelected;
+                DeleteControlButton.IsEnabled = isControlSelected;
+                ConvertToRepeatingButton.IsEnabled = isSectionSelected;
+                AddControlButton.IsEnabled = isViewSelected || isSectionSelected;
+
+                // Update status bar with selection info
+                if (isControlSelected)
+                {
+                    var control = selectedItem.Tag as ControlDefinition;
+                    UpdateStatus($"Selected control: {control?.Label ?? control?.Name}", MessageSeverity.Info);
+                }
+                else if (isSectionSelected)
+                {
+                    UpdateStatus($"Selected section", MessageSeverity.Info);
+                }
+                else if (isViewSelected)
+                {
+                    var view = selectedItem.Tag as ViewDefinition;
+                    UpdateStatus($"Selected view: {view?.ViewName}", MessageSeverity.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error in selection: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        #endregion
+
+        #region Helper Methods for Form Structure Tab
+
+        /// <summary>
+        /// Gets the currently selected view from the tree
+        /// </summary>
+        private ViewDefinition GetSelectedView()
+        {
+            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
+
+            // Walk up the tree to find the view
+            while (selectedItem != null)
+            {
+                if (selectedItem.Tag is ViewDefinition view)
+                {
+                    return view;
+                }
+                selectedItem = selectedItem.Parent as TreeViewItem;
+            }
+
+            // If no selection, try to find the first view
+            if (_allFormDefinitions?.Values?.FirstOrDefault()?.Views?.FirstOrDefault() != null)
+            {
+                return _allFormDefinitions.Values.First().Views.First();
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Collapses all tree view items recursively
+        /// </summary>
+        private void CollapseAllTreeViewItems(ItemCollection items)
+        {
+            foreach (TreeViewItem item in items)
+            {
+                item.IsExpanded = false;
+                if (item.Items.Count > 0)
+                {
+                    CollapseAllTreeViewItems(item.Items);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Expands all tree view items recursively
+        /// </summary>
+        private void ExpandAllTreeViewItems(ItemCollection items)
+        {
+            foreach (TreeViewItem item in items)
+            {
+                item.IsExpanded = true;
+                if (item.Items.Count > 0)
+                {
+                    ExpandAllTreeViewItems(item.Items);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Searches the tree view for matching items
+        /// </summary>
+        private void SearchTreeView(string searchText)
+        {
+            if (string.IsNullOrWhiteSpace(searchText))
+                return;
+
+            searchText = searchText.ToLower();
+            int matchCount = 0;
+
+            // Reset all highlights first
+            ResetTreeViewHighlight(StructureTreeView.Items);
+
+            // Search and highlight matches
+            matchCount = SearchTreeViewItems(StructureTreeView.Items, searchText);
+
+            UpdateStatus($"Found {matchCount} matches for '{searchText}'", MessageSeverity.Info);
+        }
+
+        /// <summary>
+        /// Recursively searches tree view items
+        /// </summary>
+        private int SearchTreeViewItems(ItemCollection items, string searchText)
+        {
+            int matchCount = 0;
+
+            foreach (TreeViewItem item in items)
+            {
+                bool isMatch = false;
+
+                // Check if header contains search text
+                if (item.Header != null)
+                {
+                    string headerText = "";
+
+                    if (item.Header is string str)
+                    {
+                        headerText = str;
+                    }
+                    else if (item.Header is StackPanel panel)
+                    {
+                        // Extract text from StackPanel children
+                        foreach (var child in panel.Children)
+                        {
+                            if (child is TextBlock textBlock)
+                            {
+                                headerText += textBlock.Text + " ";
+                            }
+                        }
+                    }
+
+                    if (headerText.ToLower().Contains(searchText))
+                    {
+                        isMatch = true;
+                        matchCount++;
+                    }
+                }
+
+                // Check tag for ControlDefinition
+                if (item.Tag is ControlDefinition control)
+                {
+                    if ((control.Name?.ToLower().Contains(searchText) ?? false) ||
+                        (control.Label?.ToLower().Contains(searchText) ?? false) ||
+                        (control.Type?.ToLower().Contains(searchText) ?? false))
+                    {
+                        isMatch = true;
+                        if (!isMatch) matchCount++;
+                    }
+                }
+
+                // Highlight if match found
+                if (isMatch)
+                {
+                    item.Background = new SolidColorBrush(Color.FromArgb(50, 0, 120, 212));
+                    item.IsExpanded = true;
+
+                    // Expand parent items
+                    var parent = item.Parent as TreeViewItem;
+                    while (parent != null)
+                    {
+                        parent.IsExpanded = true;
+                        parent = parent.Parent as TreeViewItem;
+                    }
+                }
+
+                // Search children
+                if (item.Items.Count > 0)
+                {
+                    matchCount += SearchTreeViewItems(item.Items, searchText);
+                }
+            }
+
+            return matchCount;
+        }
+
+        /// <summary>
+        /// Resets tree view highlight
+        /// </summary>
+        private void ResetTreeViewHighlight(ItemCollection items)
+        {
+            foreach (TreeViewItem item in items)
+            {
+                item.Background = Brushes.Transparent;
+
+                if (item.Items.Count > 0)
+                {
+                    ResetTreeViewHighlight(item.Items);
+                }
+            }
+        }
+
+
+        #endregion
+        /// <summary>
+        /// Factory for creating form analyzers
+        /// </summary>
+        public class AnalyzerFactory
+        {
+            private readonly Dictionary<string, IFormAnalyzer> _analyzers;
+
+            public AnalyzerFactory()
+            {
+                _analyzers = new Dictionary<string, IFormAnalyzer>
             {
                 { "InfoPath2013", new InfoPath2013Analyzer() },
                 { "InfoPath2010", new InfoPath2010Analyzer() },
                 { "InfoPath2007", null }, // Not implemented yet
                 { "NintexForms", new NintexFormsAnalyzer() }
             };
-        }
+            }
 
-        public IFormAnalyzer GetAnalyzer(string formType)
-        {
-            return _analyzers.TryGetValue(formType, out var analyzer) ? analyzer : null;
-        }
+            public IFormAnalyzer GetAnalyzer(string formType)
+            {
+                return _analyzers.TryGetValue(formType, out var analyzer) ? analyzer : null;
+            }
 
-        public IEnumerable<string> GetAvailableAnalyzers()
-        {
-            return _analyzers.Where(a => a.Value != null).Select(a => a.Key);
+            public IEnumerable<string> GetAvailableAnalyzers()
+            {
+                return _analyzers.Where(a => a.Value != null).Select(a => a.Key);
+            }
         }
     }
 }
