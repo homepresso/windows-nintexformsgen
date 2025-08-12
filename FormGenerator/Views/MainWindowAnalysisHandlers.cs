@@ -184,6 +184,28 @@ namespace FormGenerator.Views
             _mainWindow.JsonOutput.Text = json;
         }
 
+        private void RefreshAllDisplays()
+        {
+            // Refresh the tree view
+            RefreshTreeView();
+
+            // Refresh the JSON display
+            DisplayEnhancedJson(_mainWindow._allFormDefinitions);
+
+            // Refresh the data columns grid
+            DisplayEnhancedDataColumns(_mainWindow._allFormDefinitions);
+
+            // Force UI update
+            _mainWindow.Dispatcher.Invoke(() =>
+            {
+                // Ensure JSON tab is updated
+                if (_mainWindow.JsonOutput != null)
+                {
+                    _mainWindow.JsonOutput.Text = _mainWindow.JsonOutput.Text; // Force refresh
+                }
+            }, System.Windows.Threading.DispatcherPriority.Render);
+        }
+
         /// <summary>
         /// Displays enhanced data columns with section context
         /// </summary>
@@ -383,24 +405,66 @@ namespace FormGenerator.Views
 
             if (result == MessageBoxResult.Yes)
             {
-                // Find and remove the control from the view
-                if (_selectedView != null)
+                try
                 {
-                    _selectedView.Controls.Remove(control);
+                    // Find the form and view containing this control
+                    string formName = null;
+                    ViewDefinition containingView = null;
 
-                    // Also remove from data columns if exists
-                    var formDef = _mainWindow._allFormDefinitions[_selectedFormName];
-                    formDef.Data.RemoveAll(d => d.ColumnName == control.Name);
+                    foreach (var formKvp in _mainWindow._allFormDefinitions)
+                    {
+                        foreach (var view in formKvp.Value.Views)
+                        {
+                            if (view.Controls.Contains(control))
+                            {
+                                formName = formKvp.Key;
+                                containingView = view;
+                                break;
+                            }
+                        }
+                        if (containingView != null) break;
+                    }
 
-                    // Update metadata
-                    formDef.Metadata.TotalControls--;
+                    if (containingView != null && formName != null)
+                    {
+                        // Remove from view
+                        containingView.Controls.Remove(control);
 
-                    // Refresh displays
-                    RefreshTreeView();
-                    DisplayEnhancedJson(_mainWindow._allFormDefinitions);
+                        // Remove from data columns
+                        var formDef = _mainWindow._allFormDefinitions[formName];
+                        formDef.Data.RemoveAll(d => d.ColumnName == control.Name);
 
-                    _editWindow?.Close();
-                    _mainWindow.UpdateStatus($"Control '{control.Label ?? control.Name}' deleted", MessageSeverity.Info);
+                        // Update metadata
+                        formDef.Metadata.TotalControls--;
+
+                        // If control was in a section, update section control count
+                        if (!string.IsNullOrEmpty(control.ParentSection))
+                        {
+                            var section = containingView.Sections.FirstOrDefault(s => s.Name == control.ParentSection);
+                            if (section != null && section.ControlIds != null)
+                            {
+                                var ctrlId = control.Properties?.ContainsKey("CtrlId") == true ? control.Properties["CtrlId"] : null;
+                                if (!string.IsNullOrEmpty(ctrlId))
+                                {
+                                    section.ControlIds.Remove(ctrlId);
+                                }
+                            }
+                        }
+
+                        // Refresh all displays
+                        RefreshAllDisplays();
+
+                        _editWindow?.Close();
+                        _mainWindow.UpdateStatus($"Control '{control.Label ?? control.Name}' deleted successfully", MessageSeverity.Info);
+                    }
+                    else
+                    {
+                        _mainWindow.UpdateStatus("Could not find control in form structure", MessageSeverity.Error);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _mainWindow.UpdateStatus($"Error deleting control: {ex.Message}", MessageSeverity.Error);
                 }
             }
         }
@@ -415,25 +479,85 @@ namespace FormGenerator.Views
 
             if (result == MessageBoxResult.Yes)
             {
-                control.IsInRepeatingSection = false;
-                control.RepeatingSectionName = null;
-                control.RepeatingSectionBinding = null;
-                control.SectionType = null;
-                control.ParentSection = null;
-
-                // Update the data column if exists
-                var formDef = _mainWindow._allFormDefinitions[_selectedFormName];
-                var dataColumn = formDef.Data.FirstOrDefault(d => d.ColumnName == control.Name);
-                if (dataColumn != null)
+                try
                 {
-                    dataColumn.IsRepeating = false;
-                    dataColumn.RepeatingSection = null;
-                }
+                    // Store original values for rollback if needed
+                    var originalIsInRepeating = control.IsInRepeatingSection;
+                    var originalRepeatingSectionName = control.RepeatingSectionName;
+                    var originalRepeatingSectionBinding = control.RepeatingSectionBinding;
+                    var originalSectionType = control.SectionType;
+                    var originalParentSection = control.ParentSection;
 
-                RefreshTreeView();
-                DisplayEnhancedJson(_mainWindow._allFormDefinitions);
-                _editWindow?.Close();
-                _mainWindow.UpdateStatus("Control removed from repeating section", MessageSeverity.Info);
+                    // Update control properties
+                    control.IsInRepeatingSection = false;
+                    control.RepeatingSectionName = null;
+                    control.RepeatingSectionBinding = null;
+
+                    // Keep it in the section but not as repeating
+                    if (control.SectionType == "repeating")
+                    {
+                        control.SectionType = "section";
+                    }
+
+                    // Find the form containing this control
+                    string formName = null;
+                    foreach (var formKvp in _mainWindow._allFormDefinitions)
+                    {
+                        foreach (var view in formKvp.Value.Views)
+                        {
+                            if (view.Controls.Contains(control))
+                            {
+                                formName = formKvp.Key;
+                                break;
+                            }
+                        }
+                        if (formName != null) break;
+                    }
+
+                    if (formName != null)
+                    {
+                        // Update the data column
+                        var formDef = _mainWindow._allFormDefinitions[formName];
+                        var dataColumn = formDef.Data.FirstOrDefault(d => d.ColumnName == control.Name);
+                        if (dataColumn != null)
+                        {
+                            dataColumn.IsRepeating = false;
+                            dataColumn.RepeatingSection = null;
+                        }
+
+                        // Update metadata if needed
+                        var remainingRepeatingControls = formDef.Views
+                            .SelectMany(v => v.Controls)
+                            .Count(c => c.IsInRepeatingSection && c.RepeatingSectionName == originalRepeatingSectionName);
+
+                        if (remainingRepeatingControls == 0)
+                        {
+                            // No more controls in this repeating section
+                            formDef.Metadata.RepeatingSectionCount = Math.Max(0, formDef.Metadata.RepeatingSectionCount - 1);
+                        }
+
+                        // Refresh all displays
+                        RefreshAllDisplays();
+
+                        _editWindow?.Close();
+                        _mainWindow.UpdateStatus($"Control removed from repeating section '{originalRepeatingSectionName}'", MessageSeverity.Info);
+                    }
+                    else
+                    {
+                        // Rollback changes if we couldn't find the form
+                        control.IsInRepeatingSection = originalIsInRepeating;
+                        control.RepeatingSectionName = originalRepeatingSectionName;
+                        control.RepeatingSectionBinding = originalRepeatingSectionBinding;
+                        control.SectionType = originalSectionType;
+                        control.ParentSection = originalParentSection;
+
+                        _mainWindow.UpdateStatus("Could not find control in form structure", MessageSeverity.Error);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _mainWindow.UpdateStatus($"Error removing from repeating section: {ex.Message}", MessageSeverity.Error);
+                }
             }
         }
 
@@ -613,83 +737,89 @@ namespace FormGenerator.Views
             };
             addButton.Click += (s, args) =>
             {
-                // Create new control
-                var newControl = new ControlDefinition
+                try
                 {
-                    Name = propertyEditors["Name"].Text,
-                    Label = propertyEditors["Label"].Text,
-                    Type = (typeCombo.SelectedItem as ComboBoxItem)?.Content.ToString(),
-                    Binding = propertyEditors["Binding"].Text,
-                    GridPosition = propertyEditors["Grid Position"].Text,
-                    DocIndex = targetView.Controls.Count + 1,
-                    Properties = new Dictionary<string, string>
+                    // Create new control with unique ID
+                    var newControl = new ControlDefinition
                     {
-                        ["CtrlId"] = "CTRL_" + Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper()
-                    }
-                };
-
-                // Set section information if adding to a section
-                if (!string.IsNullOrEmpty(targetSection))
-                {
-                    var sectionInfo = targetView.Sections.FirstOrDefault(s => s.Name == targetSection);
-                    if (sectionInfo != null)
-                    {
-                        newControl.ParentSection = targetSection;
-                        newControl.SectionType = sectionInfo.Type;
-
-                        if (sectionInfo.Type == "repeating")
+                        Name = propertyEditors["Name"].Text,
+                        Label = propertyEditors["Label"].Text,
+                        Type = (typeCombo.SelectedItem as ComboBoxItem)?.Content.ToString(),
+                        Binding = propertyEditors["Binding"].Text,
+                        GridPosition = propertyEditors["Grid Position"].Text,
+                        DocIndex = targetView.Controls.Count + 1,
+                        Properties = new Dictionary<string, string>
                         {
-                            newControl.IsInRepeatingSection = true;
-                            newControl.RepeatingSectionName = targetSection;
+                            ["CtrlId"] = "CTRL_" + Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper()
+                        }
+                    };
+
+                    // Validate required fields
+                    if (string.IsNullOrWhiteSpace(newControl.Name))
+                    {
+                        MessageBox.Show("Control name is required.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    // Set section information if adding to a section
+                    if (!string.IsNullOrEmpty(targetSection))
+                    {
+                        var sectionInfo = targetView.Sections.FirstOrDefault(s => s.Name == targetSection);
+                        if (sectionInfo != null)
+                        {
+                            newControl.ParentSection = targetSection;
+                            newControl.SectionType = sectionInfo.Type;
+
+                            if (sectionInfo.Type == "repeating")
+                            {
+                                newControl.IsInRepeatingSection = true;
+                                newControl.RepeatingSectionName = targetSection;
+                                newControl.RepeatingSectionBinding = $"my:{targetSection.Replace(" ", "")}";
+                            }
+
+                            // Add control ID to section
+                            if (sectionInfo.ControlIds == null)
+                                sectionInfo.ControlIds = new List<string>();
+                            sectionInfo.ControlIds.Add(newControl.Properties["CtrlId"]);
                         }
                     }
+
+                    // Add to view
+                    targetView.Controls.Add(newControl);
+
+                    // Add to data columns
+                    var formDef = _mainWindow._allFormDefinitions[formName];
+                    var newDataColumn = new DataColumn
+                    {
+                        ColumnName = newControl.Name,
+                        Type = newControl.Type,
+                        DisplayName = newControl.Label,
+                        IsRepeating = newControl.IsInRepeatingSection,
+                        RepeatingSection = newControl.RepeatingSectionName
+                    };
+                    formDef.Data.Add(newDataColumn);
+
+                    // Update metadata
+                    formDef.Metadata.TotalControls++;
+
+                    // Refresh all displays including JSON
+                    RefreshAllDisplays();
+
+                    addWindow.Close();
+                    _mainWindow.UpdateStatus($"Control '{newControl.Label}' added successfully", MessageSeverity.Info);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error adding control: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    _mainWindow.UpdateStatus($"Error adding control: {ex.Message}", MessageSeverity.Error);
                 }
 
-                // Add to view
-                targetView.Controls.Add(newControl);
-
-                // Add to data columns
-                var formDef = _mainWindow._allFormDefinitions[formName];
-                formDef.Data.Add(new DataColumn
-                {
-                    ColumnName = newControl.Name,
-                    Type = newControl.Type,
-                    DisplayName = newControl.Label,
-                    IsRepeating = newControl.IsInRepeatingSection,
-                    RepeatingSection = newControl.RepeatingSectionName
-                });
-
-                // Update metadata
-                formDef.Metadata.TotalControls++;
-
-                // Refresh displays
-                RefreshTreeView();
-                DisplayEnhancedJson(_mainWindow._allFormDefinitions);
-
-                addWindow.Close();
-                _mainWindow.UpdateStatus($"Control '{newControl.Label}' added successfully", MessageSeverity.Info);
             };
-            buttonPanel.Children.Add(addButton);
-
-            var cancelButton = new Button
-            {
-                Content = "Cancel",
-                Style = (Style)_mainWindow.FindResource("ModernButton"),
-                Width = 100
-            };
-            cancelButton.Click += (s, args) => addWindow.Close();
-            buttonPanel.Children.Add(cancelButton);
-
-            Grid.SetRow(buttonPanel, 1);
-            mainGrid.Children.Add(buttonPanel);
-
-            addWindow.Content = mainGrid;
-            addWindow.ShowDialog();
         }
 
         #endregion
 
-        #region Move Section to Repeating
+            #region Move Section to Repeating
 
         public void ShowMoveSectionDialog()
         {
@@ -776,42 +906,50 @@ namespace FormGenerator.Views
 
             if (result == MessageBoxResult.Yes)
             {
-                // Update section type
-                sectionInfo.Type = "repeating";
-
-                // Update all controls in this section
-                var controlsInSection = view.Controls
-                    .Where(c => c.ParentSection == sectionName)
-                    .ToList();
-
-                foreach (var control in controlsInSection)
+                try
                 {
-                    control.SectionType = "repeating";
-                    control.IsInRepeatingSection = true;
-                    control.RepeatingSectionName = sectionName;
-                    control.RepeatingSectionBinding = $"my:{sectionName.Replace(" ", "")}";
-                }
+                    // Update section type
+                    sectionInfo.Type = "repeating";
 
-                // Update data columns
-                var formDef = _mainWindow._allFormDefinitions[formName];
-                foreach (var control in controlsInSection)
-                {
-                    var dataColumn = formDef.Data.FirstOrDefault(d => d.ColumnName == control.Name);
-                    if (dataColumn != null)
+                    // Update all controls in this section
+                    var controlsInSection = view.Controls
+                        .Where(c => c.ParentSection == sectionName)
+                        .ToList();
+
+                    foreach (var control in controlsInSection)
                     {
-                        dataColumn.IsRepeating = true;
-                        dataColumn.RepeatingSection = sectionName;
+                        control.SectionType = "repeating";
+                        control.IsInRepeatingSection = true;
+                        control.RepeatingSectionName = sectionName;
+                        control.RepeatingSectionBinding = $"my:{sectionName.Replace(" ", "")}";
                     }
+
+                    // Update data columns
+                    var formDef = _mainWindow._allFormDefinitions[formName];
+                    foreach (var control in controlsInSection)
+                    {
+                        var dataColumn = formDef.Data.FirstOrDefault(d => d.ColumnName == control.Name);
+                        if (dataColumn != null)
+                        {
+                            dataColumn.IsRepeating = true;
+                            dataColumn.RepeatingSection = sectionName;
+                            dataColumn.RepeatingSectionPath = $"my:{sectionName.Replace(" ", "")}";
+                        }
+                    }
+
+                    // Update metadata
+                    formDef.Metadata.RepeatingSectionCount++;
+
+                    // Refresh all displays including JSON
+                    RefreshAllDisplays();
+
+                    _mainWindow.UpdateStatus($"Section '{sectionName}' converted to repeating section", MessageSeverity.Info);
                 }
-
-                // Update metadata
-                formDef.Metadata.RepeatingSectionCount++;
-
-                // Refresh displays
-                RefreshTreeView();
-                DisplayEnhancedJson(_mainWindow._allFormDefinitions);
-
-                _mainWindow.UpdateStatus($"Section '{sectionName}' converted to repeating section", MessageSeverity.Info);
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error converting section: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    _mainWindow.UpdateStatus($"Error converting section: {ex.Message}", MessageSeverity.Error);
+                }
             }
         }
 
@@ -954,37 +1092,89 @@ namespace FormGenerator.Views
 
         private void SaveControlChanges(ControlDefinition control)
         {
-            // Update control properties from editors
-            if (_propertyEditors.ContainsKey("Name"))
-                control.Name = _propertyEditors["Name"].Text;
-
-            if (_propertyEditors.ContainsKey("Label"))
-                control.Label = _propertyEditors["Label"].Text;
-
-            if (_propertyEditors.ContainsKey("Binding"))
-                control.Binding = _propertyEditors["Binding"].Text;
-
-            if (_propertyEditors.ContainsKey("GridPosition"))
-                control.GridPosition = _propertyEditors["GridPosition"].Text;
-
-            if (_propertyEditors.ContainsKey("DocIndex") && int.TryParse(_propertyEditors["DocIndex"].Text, out int docIndex))
-                control.DocIndex = docIndex;
-
-            if (_propertyEditors.ContainsKey("DefaultValue"))
+            try
             {
-                if (control.Properties == null)
-                    control.Properties = new Dictionary<string, string>();
-                control.Properties["DefaultValue"] = _propertyEditors["DefaultValue"].Text;
+                // Update control properties from editors
+                bool hasChanges = false;
+
+                if (_propertyEditors.ContainsKey("Name") && control.Name != _propertyEditors["Name"].Text)
+                {
+                    control.Name = _propertyEditors["Name"].Text;
+                    hasChanges = true;
+                }
+
+                if (_propertyEditors.ContainsKey("Label") && control.Label != _propertyEditors["Label"].Text)
+                {
+                    control.Label = _propertyEditors["Label"].Text;
+                    hasChanges = true;
+                }
+
+                if (_propertyEditors.ContainsKey("Binding") && control.Binding != _propertyEditors["Binding"].Text)
+                {
+                    control.Binding = _propertyEditors["Binding"].Text;
+                    hasChanges = true;
+                }
+
+                if (_propertyEditors.ContainsKey("GridPosition") && control.GridPosition != _propertyEditors["GridPosition"].Text)
+                {
+                    control.GridPosition = _propertyEditors["GridPosition"].Text;
+                    hasChanges = true;
+                }
+
+                if (_propertyEditors.ContainsKey("DocIndex") && int.TryParse(_propertyEditors["DocIndex"].Text, out int docIndex))
+                {
+                    if (control.DocIndex != docIndex)
+                    {
+                        control.DocIndex = docIndex;
+                        hasChanges = true;
+                    }
+                }
+
+                if (_propertyEditors.ContainsKey("DefaultValue"))
+                {
+                    if (control.Properties == null)
+                        control.Properties = new Dictionary<string, string>();
+
+                    var newDefaultValue = _propertyEditors["DefaultValue"].Text;
+                    if (!control.Properties.ContainsKey("DefaultValue") || control.Properties["DefaultValue"] != newDefaultValue)
+                    {
+                        control.Properties["DefaultValue"] = newDefaultValue;
+                        hasChanges = true;
+                    }
+                }
+
+                if (hasChanges)
+                {
+                    // Update the corresponding data column if name changed
+                    if (_selectedFormName != null && _mainWindow._allFormDefinitions.ContainsKey(_selectedFormName))
+                    {
+                        var formDef = _mainWindow._allFormDefinitions[_selectedFormName];
+                        var dataColumn = formDef.Data.FirstOrDefault(d => d.ColumnName == control.Name || d.DisplayName == control.Label);
+                        if (dataColumn != null)
+                        {
+                            dataColumn.ColumnName = control.Name;
+                            dataColumn.DisplayName = control.Label;
+                        }
+                    }
+
+                    // Refresh all displays
+                    RefreshAllDisplays();
+
+                    _mainWindow.UpdateStatus($"Control '{control.Label ?? control.Name}' updated successfully", MessageSeverity.Info);
+                }
+                else
+                {
+                    _mainWindow.UpdateStatus("No changes to save", MessageSeverity.Info);
+                }
             }
-
-            // Refresh the tree view
-            RefreshTreeView();
-
-            // Refresh JSON
-            DisplayEnhancedJson(_mainWindow._allFormDefinitions);
-
-            _editWindow.Close();
-            _mainWindow.UpdateStatus("Control changes saved", MessageSeverity.Info);
+            catch (Exception ex)
+            {
+                _mainWindow.UpdateStatus($"Error saving changes: {ex.Message}", MessageSeverity.Error);
+            }
+            finally
+            {
+                _editWindow?.Close();
+            }
         }
 
         private void FindControlContext(ControlDefinition control)
