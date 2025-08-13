@@ -18,6 +18,7 @@ namespace FormGenerator.Services
 
         public async Task<SqlGenerationResult> GenerateFromAnalysisAsync(FormAnalysisResult analysis)
         {
+
             return await GenerateFromAnalysisAsync(analysis, null);
         }
 
@@ -71,6 +72,11 @@ namespace FormGenerator.Services
 
                     // Generate indexes
                     scripts.Add(GenerateIndexes(formDef, repeatingSectionAnalysis));
+
+                    scripts.AddRange(GenerateTableTypes(formDef, repeatingSectionAnalysis));
+
+                    scripts.AddRange(GenerateRepeatingSectionProcedures(formDef, repeatingSectionAnalysis));
+
 
                     // Order scripts by execution order
                     result.Scripts = scripts.OrderBy(s => s.ExecutionOrder).ToList();
@@ -235,7 +241,7 @@ namespace FormGenerator.Services
             // Drop lookup tables
             var controlsWithLookups = formDef.Views
                 .SelectMany(v => v.Controls)
-                .Where(c => c.HasStaticData && c.DataOptions != null && c.DataOptions.Count > 5)
+                .Where(c => c.HasStaticData && c.DataOptions != null && c.DataOptions.Count > 0)
                 .GroupBy(c => c.Name)
                 .ToList();
 
@@ -538,10 +544,13 @@ namespace FormGenerator.Services
             int order = 50;
 
             var controlsWithData = formDef.Views
-                .SelectMany(v => v.Controls)
-                .Where(c => c.HasStaticData && c.DataOptions != null && c.DataOptions.Count > 5)
-                .GroupBy(c => c.Name)
-                .ToList();
+      .SelectMany(v => v.Controls)
+      .Where(c => c.HasStaticData &&
+             c.DataOptions != null &&
+             c.DataOptions.Count > 0 &&
+             c.DataOptions.Any(o => !string.IsNullOrWhiteSpace(o.DisplayText))) // Also check for non-empty options
+      .GroupBy(c => c.Name)
+      .ToList();
 
             foreach (var controlGroup in controlsWithData)
             {
@@ -624,23 +633,28 @@ namespace FormGenerator.Services
             var sb = new StringBuilder();
 
             sb.AppendLine("-- ===============================================");
-            sb.AppendLine($"-- Insert procedure for {tableName}");
+            sb.AppendLine($"-- Insert procedure for {tableName} with repeating sections");
             sb.AppendLine("-- ===============================================");
             sb.AppendLine();
 
             sb.AppendLine($"CREATE PROCEDURE [dbo].[sp_{tableName}_Insert]");
-
-            // Add output parameter for FormId
             sb.AppendLine("    @FormId UNIQUEIDENTIFIER OUTPUT,");
             sb.AppendLine("    @CreatedBy NVARCHAR(255) = NULL,");
             sb.AppendLine("    @Status NVARCHAR(50) = 'Draft'");
 
-            // Add parameters for each main table column
+            // Add parameters for main table columns
             foreach (var control in analysis.MainTableColumns.OrderBy(c => c.Name))
             {
                 var columnName = SanitizeColumnName(control.Name);
                 var sqlType = GetSqlType(control.Type);
                 sb.AppendLine($"    ,@{columnName} {sqlType} = NULL");
+            }
+
+            // Add table-valued parameters for repeating sections
+            foreach (var section in analysis.RepeatingSections)
+            {
+                var sectionTableName = SanitizeTableName(section.Key);
+                sb.AppendLine($"    ,@{sectionTableName}Data {sectionTableName}TableType READONLY");
             }
 
             sb.AppendLine("AS");
@@ -654,6 +668,9 @@ namespace FormGenerator.Services
             sb.AppendLine("    BEGIN TRY");
             sb.AppendLine("        BEGIN TRANSACTION;");
             sb.AppendLine();
+
+            // Insert main record
+            sb.AppendLine("        -- Insert main form record");
             sb.AppendLine($"        INSERT INTO [dbo].[{tableName}] (");
             sb.AppendLine("            [FormId],");
             sb.AppendLine("            [CreatedBy],");
@@ -661,7 +678,6 @@ namespace FormGenerator.Services
             sb.AppendLine("            [CreatedDate],");
             sb.AppendLine("            [ModifiedDate]");
 
-            // Add column names
             foreach (var control in analysis.MainTableColumns)
             {
                 var columnName = SanitizeColumnName(control.Name);
@@ -675,7 +691,6 @@ namespace FormGenerator.Services
             sb.AppendLine("            GETDATE(),");
             sb.AppendLine("            GETDATE()");
 
-            // Add parameter values
             foreach (var control in analysis.MainTableColumns)
             {
                 var columnName = SanitizeColumnName(control.Name);
@@ -684,6 +699,44 @@ namespace FormGenerator.Services
 
             sb.AppendLine("        );");
             sb.AppendLine();
+
+            // Insert repeating section records
+            foreach (var section in analysis.RepeatingSections)
+            {
+                var sectionTableName = SanitizeTableName(section.Key);
+                var fullTableName = $"{tableName}_{sectionTableName}";
+
+                sb.AppendLine($"        -- Insert {section.Key} repeating section records");
+                sb.AppendLine($"        INSERT INTO [dbo].[{fullTableName}] (");
+                sb.AppendLine("            [ParentFormId],");
+                sb.AppendLine("            [ItemOrder],");
+                sb.AppendLine("            [CreatedDate],");
+                sb.AppendLine("            [ModifiedDate]");
+
+                // Add columns for this section
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    sb.AppendLine($"            ,[{columnName}]");
+                }
+
+                sb.AppendLine("        )");
+                sb.AppendLine($"        SELECT");
+                sb.AppendLine("            @FormId,");
+                sb.AppendLine("            ItemOrder,");
+                sb.AppendLine("            GETDATE(),");
+                sb.AppendLine("            GETDATE()");
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    sb.AppendLine($"            ,[{columnName}]");
+                }
+
+                sb.AppendLine($"        FROM @{sectionTableName}Data;");
+                sb.AppendLine();
+            }
+
             sb.AppendLine("        COMMIT TRANSACTION;");
             sb.AppendLine("    END TRY");
             sb.AppendLine("    BEGIN CATCH");
@@ -699,7 +752,7 @@ namespace FormGenerator.Services
                 Type = ScriptType.StoredProcedure,
                 Content = sb.ToString(),
                 ExecutionOrder = 100,
-                Description = $"Insert procedure for {tableName}"
+                Description = $"Insert procedure for {tableName} with repeating sections"
             };
         }
 
@@ -823,6 +876,222 @@ namespace FormGenerator.Services
             };
         }
 
+        private List<SqlScript> GenerateTableTypes(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
+        {
+            var scripts = new List<SqlScript>();
+            var mainTableName = SanitizeTableName(formDef.FormName);
+            int order = 3; // Execute after tables but before stored procedures
+
+            foreach (var section in analysis.RepeatingSections)
+            {
+                var sectionTableName = SanitizeTableName(section.Key);
+                var sb = new StringBuilder();
+
+                sb.AppendLine("-- ===============================================");
+                sb.AppendLine($"-- Table Type for {section.Key} repeating section");
+                sb.AppendLine("-- ===============================================");
+                sb.AppendLine();
+
+                // Drop if exists
+                sb.AppendLine($"IF TYPE_ID(N'{sectionTableName}TableType') IS NOT NULL");
+                sb.AppendLine($"    DROP TYPE {sectionTableName}TableType;");
+                sb.AppendLine();
+
+                sb.AppendLine($"CREATE TYPE {sectionTableName}TableType AS TABLE (");
+                sb.AppendLine("    [ItemOrder] INT NOT NULL");
+
+                // Add columns for this section
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    var sqlType = GetSqlType(control.Type);
+                    sb.AppendLine($"    ,[{columnName}] {sqlType} NULL");
+                }
+
+                sb.AppendLine(");");
+
+                scripts.Add(new SqlScript
+                {
+                    Name = $"Create_{sectionTableName}_TableType",
+                    Type = ScriptType.Other,
+                    Content = sb.ToString(),
+                    ExecutionOrder = order++,
+                    Description = $"Table type for bulk insert of {section.Key} repeating section"
+                });
+            }
+
+            return scripts;
+        }
+
+        private List<SqlScript> GenerateRepeatingSectionProcedures(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
+        {
+            var scripts = new List<SqlScript>();
+            var mainTableName = SanitizeTableName(formDef.FormName);
+            int order = 105;
+
+            foreach (var section in analysis.RepeatingSections)
+            {
+                var sectionTableName = SanitizeTableName(section.Key);
+                var fullTableName = $"{mainTableName}_{sectionTableName}";
+
+                // INSERT procedure for individual repeating section item
+                var insertSb = new StringBuilder();
+                insertSb.AppendLine($"-- Insert procedure for {section.Key} repeating section item");
+                insertSb.AppendLine($"CREATE PROCEDURE [dbo].[sp_{fullTableName}_InsertItem]");
+                insertSb.AppendLine("    @ParentFormId UNIQUEIDENTIFIER,");
+                insertSb.AppendLine("    @ItemOrder INT = NULL");
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    var sqlType = GetSqlType(control.Type);
+                    insertSb.AppendLine($"    ,@{columnName} {sqlType} = NULL");
+                }
+
+                insertSb.AppendLine("AS");
+                insertSb.AppendLine("BEGIN");
+                insertSb.AppendLine("    SET NOCOUNT ON;");
+                insertSb.AppendLine();
+                insertSb.AppendLine("    -- Auto-generate ItemOrder if not provided");
+                insertSb.AppendLine("    IF @ItemOrder IS NULL");
+                insertSb.AppendLine("    BEGIN");
+                insertSb.AppendLine($"        SELECT @ItemOrder = ISNULL(MAX(ItemOrder), 0) + 1");
+                insertSb.AppendLine($"        FROM [dbo].[{fullTableName}]");
+                insertSb.AppendLine("        WHERE [ParentFormId] = @ParentFormId;");
+                insertSb.AppendLine("    END");
+                insertSb.AppendLine();
+                insertSb.AppendLine($"    INSERT INTO [dbo].[{fullTableName}] (");
+                insertSb.AppendLine("        [ParentFormId],");
+                insertSb.AppendLine("        [ItemOrder],");
+                insertSb.AppendLine("        [CreatedDate],");
+                insertSb.AppendLine("        [ModifiedDate]");
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    insertSb.AppendLine($"        ,[{columnName}]");
+                }
+
+                insertSb.AppendLine("    ) VALUES (");
+                insertSb.AppendLine("        @ParentFormId,");
+                insertSb.AppendLine("        @ItemOrder,");
+                insertSb.AppendLine("        GETDATE(),");
+                insertSb.AppendLine("        GETDATE()");
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    insertSb.AppendLine($"        ,@{columnName}");
+                }
+
+                insertSb.AppendLine("    );");
+                insertSb.AppendLine();
+                insertSb.AppendLine("    SELECT SCOPE_IDENTITY() AS NewId;");
+                insertSb.AppendLine("END");
+
+                scripts.Add(new SqlScript
+                {
+                    Name = $"sp_{fullTableName}_InsertItem",
+                    Type = ScriptType.StoredProcedure,
+                    Content = insertSb.ToString(),
+                    ExecutionOrder = order++,
+                    Description = $"Insert individual item for {section.Key} repeating section"
+                });
+
+                // UPDATE procedure for repeating section item
+                var updateSb = new StringBuilder();
+                updateSb.AppendLine($"-- Update procedure for {section.Key} repeating section item");
+                updateSb.AppendLine($"CREATE PROCEDURE [dbo].[sp_{fullTableName}_UpdateItem]");
+                updateSb.AppendLine("    @Id INT");
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    var sqlType = GetSqlType(control.Type);
+                    updateSb.AppendLine($"    ,@{columnName} {sqlType} = NULL");
+                }
+
+                updateSb.AppendLine("AS");
+                updateSb.AppendLine("BEGIN");
+                updateSb.AppendLine("    SET NOCOUNT ON;");
+                updateSb.AppendLine();
+                updateSb.AppendLine($"    UPDATE [dbo].[{fullTableName}]");
+                updateSb.AppendLine("    SET");
+                updateSb.AppendLine("        [ModifiedDate] = GETDATE()");
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var columnName = SanitizeColumnName(control.Name);
+                    updateSb.AppendLine($"        ,[{columnName}] = ISNULL(@{columnName}, [{columnName}])");
+                }
+
+                updateSb.AppendLine("    WHERE [Id] = @Id;");
+                updateSb.AppendLine();
+                updateSb.AppendLine("    IF @@ROWCOUNT = 0");
+                updateSb.AppendLine("        RAISERROR('Record not found', 16, 1);");
+                updateSb.AppendLine("END");
+
+                scripts.Add(new SqlScript
+                {
+                    Name = $"sp_{fullTableName}_UpdateItem",
+                    Type = ScriptType.StoredProcedure,
+                    Content = updateSb.ToString(),
+                    ExecutionOrder = order++,
+                    Description = $"Update individual item for {section.Key} repeating section"
+                });
+
+                // DELETE procedure for repeating section item
+                var deleteSb = new StringBuilder();
+                deleteSb.AppendLine($"-- Delete procedure for {section.Key} repeating section item");
+                deleteSb.AppendLine($"CREATE PROCEDURE [dbo].[sp_{fullTableName}_DeleteItem]");
+                deleteSb.AppendLine("    @Id INT");
+                deleteSb.AppendLine("AS");
+                deleteSb.AppendLine("BEGIN");
+                deleteSb.AppendLine("    SET NOCOUNT ON;");
+                deleteSb.AppendLine();
+                deleteSb.AppendLine($"    DELETE FROM [dbo].[{fullTableName}]");
+                deleteSb.AppendLine("    WHERE [Id] = @Id;");
+                deleteSb.AppendLine();
+                deleteSb.AppendLine("    IF @@ROWCOUNT = 0");
+                deleteSb.AppendLine("        RAISERROR('Record not found', 16, 1);");
+                deleteSb.AppendLine("END");
+
+                scripts.Add(new SqlScript
+                {
+                    Name = $"sp_{fullTableName}_DeleteItem",
+                    Type = ScriptType.StoredProcedure,
+                    Content = deleteSb.ToString(),
+                    ExecutionOrder = order++,
+                    Description = $"Delete individual item for {section.Key} repeating section"
+                });
+
+                // GET ALL items for a parent form
+                var getAllSb = new StringBuilder();
+                getAllSb.AppendLine($"-- Get all {section.Key} items for a form");
+                getAllSb.AppendLine($"CREATE PROCEDURE [dbo].[sp_{fullTableName}_GetByParent]");
+                getAllSb.AppendLine("    @ParentFormId UNIQUEIDENTIFIER");
+                getAllSb.AppendLine("AS");
+                getAllSb.AppendLine("BEGIN");
+                getAllSb.AppendLine("    SET NOCOUNT ON;");
+                getAllSb.AppendLine();
+                getAllSb.AppendLine("    SELECT *");
+                getAllSb.AppendLine($"    FROM [dbo].[{fullTableName}]");
+                getAllSb.AppendLine("    WHERE [ParentFormId] = @ParentFormId");
+                getAllSb.AppendLine("    ORDER BY [ItemOrder];");
+                getAllSb.AppendLine("END");
+
+                scripts.Add(new SqlScript
+                {
+                    Name = $"sp_{fullTableName}_GetByParent",
+                    Type = ScriptType.StoredProcedure,
+                    Content = getAllSb.ToString(),
+                    ExecutionOrder = order++,
+                    Description = $"Get all {section.Key} items for a parent form"
+                });
+            }
+
+            return scripts;
+        }
         private SqlScript GenerateDeleteProcedure(InfoPathFormDefinition formDef, string tableName, RepeatingSectionAnalysis analysis)
         {
             var sb = new StringBuilder();
