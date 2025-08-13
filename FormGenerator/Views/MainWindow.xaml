@@ -743,192 +743,129 @@
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
 
-                        <!-- Enhanced Toolbar with proper styling -->
+                        <!-- Fixed Toolbar with proper styling -->
                         <Border Grid.Row="0" 
                 Background="{StaticResource BackgroundLight}"
                 BorderBrush="{StaticResource BorderColor}"
-                BorderThickness="0,0,0,1"
-                Margin="0">
+                BorderThickness="0,0,0,1">
                             <ToolBar Background="Transparent" 
                      BorderThickness="0"
                      Height="45"
                      ToolBarTray.IsLocked="True">
                                 <ToolBar.Resources>
                                     <Style TargetType="Button">
-                                        <Setter Property="Background" Value="Transparent"/>
-                                        <Setter Property="BorderThickness" Value="0"/>
-                                        <Setter Property="Padding" Value="8,5"/>
+                                        <Setter Property="Background" Value="{StaticResource BackgroundMedium}"/>
+                                        <Setter Property="BorderThickness" Value="1"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+                                        <Setter Property="Padding" Value="12,6"/>
                                         <Setter Property="Margin" Value="2,0"/>
                                         <Setter Property="Cursor" Value="Hand"/>
-                                        <Setter Property="Template">
-                                            <Setter.Value>
-                                                <ControlTemplate TargetType="Button">
-                                                    <Border Background="{TemplateBinding Background}"
-                                            BorderBrush="{TemplateBinding BorderBrush}"
-                                            BorderThickness="{TemplateBinding BorderThickness}"
-                                            CornerRadius="3"
-                                            Padding="{TemplateBinding Padding}">
-                                                        <ContentPresenter HorizontalAlignment="Center" 
-                                                        VerticalAlignment="Center"/>
-                                                    </Border>
-                                                    <ControlTemplate.Triggers>
-                                                        <Trigger Property="IsMouseOver" Value="True">
-                                                            <Setter Property="Background" Value="{StaticResource BackgroundLighter}"/>
-                                                        </Trigger>
-                                                        <Trigger Property="IsPressed" Value="True">
-                                                            <Setter Property="Background" Value="{StaticResource BackgroundMedium}"/>
-                                                        </Trigger>
-                                                        <Trigger Property="IsEnabled" Value="False">
-                                                            <Setter Property="Opacity" Value="0.5"/>
-                                                        </Trigger>
-                                                    </ControlTemplate.Triggers>
-                                                </ControlTemplate>
-                                            </Setter.Value>
-                                        </Setter>
+                                        <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                                        <Setter Property="FontSize" Value="13"/>
+                                        <Setter Property="MinWidth" Value="80"/>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource BackgroundLighter}"/>
+                                                <Setter Property="BorderBrush" Value="{StaticResource AccentColor}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource AccentColor}"/>
+                                                <Setter Property="Foreground" Value="White"/>
+                                            </Trigger>
+                                            <Trigger Property="IsEnabled" Value="False">
+                                                <Setter Property="Opacity" Value="0.5"/>
+                                                <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+                                            </Trigger>
+                                        </Style.Triggers>
                                     </Style>
 
                                     <Style TargetType="Separator">
                                         <Setter Property="Background" Value="{StaticResource BorderColor}"/>
                                         <Setter Property="Width" Value="1"/>
-                                        <Setter Property="Margin" Value="5,8"/>
+                                        <Setter Property="Margin" Value="8,10"/>
+                                    </Style>
+
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+                                    </Style>
+
+                                    <Style TargetType="TextBox">
+                                        <Setter Property="Background" Value="{StaticResource BackgroundDark}"/>
+                                        <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                                        <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+                                        <Setter Property="BorderThickness" Value="1"/>
+                                        <Setter Property="Padding" Value="5,0"/>
+                                        <Setter Property="VerticalContentAlignment" Value="Center"/>
                                     </Style>
                                 </ToolBar.Resources>
 
-                                <!-- Add Control Button -->
+                                <!-- Toolbar Items with proper spacing -->
                                 <Button Name="AddControlButton"
-                                ToolTip="Add New Control (Ctrl+Shift+A)">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="➕" 
-                                   FontSize="16" 
-                                   Foreground="{StaticResource SuccessColor}"
-                                   Margin="0,0,5,0"
-                                   VerticalAlignment="Center"/>
-                                        <TextBlock Text="Add Control" 
-                                   Foreground="{StaticResource TextPrimary}"
-                                   VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Button>
+                        Content="Add Control"
+                        ToolTip="Add New Control (Ctrl+Shift+A)"
+                        Click="AddControlButton_Click"/>
 
                                 <Separator/>
 
-                                <!-- Edit Button -->
                                 <Button Name="EditControlButton"
-                        ToolTip="Edit Selected Control (F2)">
+                        Content="Edit"
+                        ToolTip="Edit Selected Control (F2)"
+                        Click="EditControlButton_Click"/>
 
-                                    <!-- ADD this Click handler -->
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="✏️" 
-                                   FontSize="16" 
-                                   Margin="0,0,5,0"
-                                   VerticalAlignment="Center"/>
-                                        <TextBlock Text="Edit" 
-                                   Foreground="{StaticResource TextPrimary}"
-                                   VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Button>
-
-                                <!-- Delete Button -->
                                 <Button Name="DeleteControlButton"
-                        ToolTip="Delete Selected Control (Delete)">
-
-                                    <!-- ADD this Click handler -->
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="🗑️" 
-                                   FontSize="16" 
-                                   Foreground="{StaticResource ErrorColor}"
-                                   Margin="0,0,5,0"
-                                   VerticalAlignment="Center"/>
-                                        <TextBlock Text="Delete" 
-                                   Foreground="{StaticResource TextPrimary}"
-                                   VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Button>
+                        Content="Delete"
+                        ToolTip="Delete Selected Control (Delete)"
+                        Click="DeleteControlButton_Click"/>
 
                                 <Separator/>
 
-                                <!-- Convert to Repeating Button -->
                                 <Button Name="ConvertToRepeatingButton"
-                        ToolTip="Convert Section to Repeating (Ctrl+Shift+R)">
-
-                                    <!-- ADD this Click handler -->
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="🔁" 
-                                   FontSize="16" 
-                                   Foreground="{StaticResource InfoColor}"
-                                   Margin="0,0,5,0"
-                                   VerticalAlignment="Center"/>
-                                        <TextBlock Text="Make Repeating" 
-                                   Foreground="{StaticResource TextPrimary}"
-                                   VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Button>
+                        Content="Make Repeating"
+                        ToolTip="Convert Section to Repeating (Ctrl+Shift+R)"
+                        Click="ConvertToRepeatingButton_Click"/>
 
                                 <Separator/>
 
-                                <!-- Collapse All Button -->
                                 <Button Name="CollapseAllButton"
-                        ToolTip="Collapse All">
+                        Content="Collapse All"
+                        ToolTip="Collapse All"
+                        Click="CollapseAllButton_Click"/>
 
-                                    <!-- ADD this Click handler -->
-                                    <TextBlock Text="⊟" 
-                               FontSize="18"
-                               Foreground="{StaticResource TextSecondary}"/>
-                                </Button>
-
-                                <!-- Expand All Button -->
                                 <Button Name="ExpandAllButton"
-                        ToolTip="Expand All">
-
-                                    <!-- ADD this Click handler -->
-                                    <TextBlock Text="⊞" 
-                               FontSize="18"
-                               Foreground="{StaticResource TextSecondary}"/>
-                                </Button>
+                        Content="Expand All"
+                        ToolTip="Expand All"
+                        Click="ExpandAllButton_Click"/>
 
                                 <Separator/>
 
-                                <!-- Search Section -->
                                 <TextBlock Text="Search:" 
-                           VerticalAlignment="Center" 
-                           Margin="5,0"
-                           Foreground="{StaticResource TextSecondary}"/>
+                           Margin="5,0"/>
 
                                 <TextBox Name="TreeSearchBox"
                          Width="200"
                          Height="26"
-                         VerticalAlignment="Center"
-                         VerticalContentAlignment="Center"
-                         Background="{StaticResource BackgroundMedium}"
-                         Foreground="{StaticResource TextPrimary}"
-                         BorderBrush="{StaticResource BorderColor}"
-                         Padding="5,0"
                          Margin="0,0,5,0"
                          TextChanged="TreeSearchBox_TextChanged"/>
-                                <!-- ADD this TextChanged handler -->
 
                                 <Button Name="TreeSearchButton"
+                        Content="Search"
                         ToolTip="Search"
-                        Click="TreeSearchButton_Click">
-                                    <!-- ADD this Click handler -->
-                                    <TextBlock Text="🔍" 
-                               FontSize="16"
-                               Foreground="{StaticResource AccentColor}"/>
-                                </Button>
+                        Click="TreeSearchButton_Click"/>
 
                             </ToolBar>
                         </Border>
 
-                        <!-- TreeView with simpler styling (no custom template that references undefined styles) -->
+                        <!-- TreeView -->
                         <ScrollViewer Grid.Row="1" 
                       VerticalScrollBarVisibility="Auto" 
                       Background="{StaticResource BackgroundDark}">
                             <TreeView Name="StructureTreeView"
-                          Background="{StaticResource BackgroundDark}"
-                          Foreground="{StaticResource TextPrimary}"
-                          BorderThickness="0"
-                          Padding="20"
-                          SelectedItemChanged="StructureTreeView_SelectedItemChanged">
-                                <!-- ADD this handler -->
+                      Background="{StaticResource BackgroundDark}"
+                      Foreground="{StaticResource TextPrimary}"
+                      BorderThickness="0"
+                      Padding="20"
+                      SelectedItemChanged="StructureTreeView_SelectedItemChanged">
                                 <TreeView.ItemContainerStyle>
                                     <Style TargetType="TreeViewItem">
                                         <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -946,7 +883,6 @@
                                     </Style>
                                 </TreeView.ItemContainerStyle>
                             </TreeView>
-
                         </ScrollViewer>
                     </Grid>
                 </TabItem>

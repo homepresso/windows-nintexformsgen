@@ -127,13 +127,7 @@ namespace FormGenerator.Analyzers.InfoPath
             return baseName;
         }
 
-        private static string BuildDataColumnNameWithSection(DataColumn dataColumn)
-        {
-            var baseName = dataColumn.ColumnName;
-
-            // Just return the original name - section info is already in the properties
-            return baseName;
-        }
+     
 
         private static string GetSectionLabel(string sectionType)
         {
@@ -198,60 +192,7 @@ namespace FormGenerator.Analyzers.InfoPath
             };
         }
 
-        private static string BuildFullyQualifiedControlName(string viewName, ControlDefinition control)
-        {
-            var parts = new System.Collections.Generic.List<string>();
+       
 
-            // Add view context (optional)
-            // parts.Add($"[{viewName}]");
-
-            // Add section context if exists
-            if (!string.IsNullOrEmpty(control.ParentSection))
-            {
-                var sectionLabel = control.SectionType switch
-                {
-                    "repeating" => "Repeating Section",
-                    "optional" => "Optional Section",
-                    "dynamic" => "Dynamic Section",
-                    _ => "Section"
-                };
-                parts.Add($"{control.ParentSection} ({sectionLabel})");
-            }
-            else if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
-            {
-                parts.Add($"{control.RepeatingSectionName} (Repeating)");
-            }
-
-            // Add control name
-            parts.Add(control.Name ?? control.Binding ?? "Unnamed");
-
-            return string.Join(" - ", parts);
-        }
-
-        /// <summary>
-        /// Builds a fully qualified column name with all context
-        /// </summary>
-        private static string BuildFullyQualifiedColumnName(DataColumn column)
-        {
-            var parts = new System.Collections.Generic.List<string>();
-
-            // Add section context if exists
-            if (!string.IsNullOrEmpty(column.RepeatingSection))
-            {
-                var sectionType = column.IsRepeating ? "Repeating Section" : "Section";
-                parts.Add($"{column.RepeatingSection} ({sectionType})");
-            }
-
-            // Add column name
-            parts.Add(column.ColumnName);
-
-            // Add conditional marker if applicable
-            if (column.IsConditional)
-            {
-                parts.Add("[Conditional]");
-            }
-
-            return string.Join(" - ", parts);
-        }
     }
 }

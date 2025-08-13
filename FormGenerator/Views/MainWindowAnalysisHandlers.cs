@@ -876,6 +876,8 @@ namespace FormGenerator.Views
         /// <summary>
         /// Adds a new control to the form structure
         /// </summary>
+        // Replace the AddNewControl method in MainWindowAnalysisHandlers.cs with this properly formatted version:
+
         private void AddNewControl(ViewDefinition view, string parentSection = null)
         {
             // Create dialog for control properties
@@ -883,20 +885,29 @@ namespace FormGenerator.Views
             {
                 Title = "Add New Control",
                 Width = 500,
-                Height = 650,
+                Height = 700,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = _mainWindow,
                 Background = (Brush)_mainWindow.FindResource("BackgroundMedium")
             };
 
-            // Main scroll viewer for content
-            var scrollViewer = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Margin = new Thickness(20)
-            };
+            // Main grid with proper row definitions
+            var mainGrid = new Grid { Margin = new Thickness(20) };
 
-            var mainStack = new StackPanel {};
+            // Define rows for each field
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Title
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Control Type
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Control Name
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Label
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Binding
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Section
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Required
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Default Value
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Options
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Buttons
+
+            int currentRow = 0;
 
             // Title
             var titleText = new TextBlock
@@ -905,16 +916,21 @@ namespace FormGenerator.Views
                 FontSize = 18,
                 FontWeight = FontWeights.Bold,
                 Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                Margin = new Thickness(0, 0, 0, 10)
+                Margin = new Thickness(0, 0, 0, 20)
             };
-            mainStack.Children.Add(titleText);
+            Grid.SetRow(titleText, currentRow++);
+            mainGrid.Children.Add(titleText);
 
             // Control Type
-            var typePanel = CreateLabeledControl("Control Type:");
+            var typeLabel = CreateLabel("Control Type:");
+            Grid.SetRow(typeLabel, currentRow++);
+            mainGrid.Children.Add(typeLabel);
+
             var typeCombo = new ComboBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernComboBox"),
-                Height = 32
+                Height = 32,
+                Margin = new Thickness(0, 0, 0, 15)
             };
             var controlTypes = new[] {
         "TextField", "DropDown", "DatePicker", "CheckBox", "RadioButton",
@@ -922,73 +938,87 @@ namespace FormGenerator.Views
     };
             typeCombo.ItemsSource = controlTypes;
             typeCombo.SelectedIndex = 0;
-            typePanel.Children.Add(typeCombo);
-            mainStack.Children.Add(typePanel);
+            Grid.SetRow(typeCombo, currentRow++);
+            mainGrid.Children.Add(typeCombo);
 
             // Control Name
-            var namePanel = CreateLabeledControl("Control Name:");
+            var nameLabel = CreateLabel("Control Name:");
+            Grid.SetRow(nameLabel, currentRow++);
+            mainGrid.Children.Add(nameLabel);
+
             var nameText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = $"NewControl{++_autoNameCounter}",
-                Height = 32
+                Height = 32,
+                Margin = new Thickness(0, 0, 0, 15)
             };
-            namePanel.Children.Add(nameText);
-            mainStack.Children.Add(namePanel);
+            Grid.SetRow(nameText, currentRow++);
+            mainGrid.Children.Add(nameText);
 
             // Control Label
-            var labelPanel = CreateLabeledControl("Label:");
+            var labelLabel = CreateLabel("Label:");
+            Grid.SetRow(labelLabel, currentRow++);
+            mainGrid.Children.Add(labelLabel);
+
             var labelText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = "New Control",
-                Height = 32
+                Height = 32,
+                Margin = new Thickness(0, 0, 0, 15)
             };
-            labelPanel.Children.Add(labelText);
-            mainStack.Children.Add(labelPanel);
+            Grid.SetRow(labelText, currentRow++);
+            mainGrid.Children.Add(labelText);
 
             // Binding
-            var bindingPanel = CreateLabeledControl("Binding:");
+            var bindingLabel = CreateLabel("Binding:");
+            Grid.SetRow(bindingLabel, currentRow++);
+            mainGrid.Children.Add(bindingLabel);
+
             var bindingText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
-                Height = 32
+                Height = 32,
+                Margin = new Thickness(0, 0, 0, 15)
             };
-            bindingPanel.Children.Add(bindingText);
-            mainStack.Children.Add(bindingPanel);
+            Grid.SetRow(bindingText, currentRow++);
+            mainGrid.Children.Add(bindingText);
 
-            // Section Selection (including repeating sections)
-            var sectionPanel = CreateLabeledControl("Add to Section:");
+            // Section Selection
+            var sectionLabel = CreateLabel("Add to Section:");
+            Grid.SetRow(sectionLabel, currentRow++);
+            mainGrid.Children.Add(sectionLabel);
+
             var sectionCombo = new ComboBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernComboBox"),
-                Height = 32
+                Height = 32,
+                Margin = new Thickness(0, 0, 0, 15)
             };
 
             // Get all sections including repeating ones
             var sections = new List<SectionOption>();
             sections.Add(new SectionOption { Display = "(No Section)", Name = "", Type = "" });
 
-            // Add regular and repeating sections
             foreach (var section in view.Sections)
             {
-                var icon = section.Type == "repeating" ? "🔁" :
-                           section.Type == "optional" ? "❓" :
-                           section.Type == "dynamic" ? "🔄" : "📦";
+                var typeText = section.Type == "repeating" ? " (repeating)" :
+                               section.Type == "optional" ? " (optional)" :
+                               section.Type == "dynamic" ? " (dynamic)" : "";
                 sections.Add(new SectionOption
                 {
-                    Display = $"{icon} {section.Name} ({section.Type})",
+                    Display = $"{section.Name}{typeText}",
                     Name = section.Name,
                     Type = section.Type
                 });
             }
 
-            // Add repeating tables
             foreach (var control in view.Controls.Where(c => c.Type == "RepeatingTable"))
             {
                 sections.Add(new SectionOption
                 {
-                    Display = $"🔁 {control.Label ?? control.Name} (repeating table)",
+                    Display = $"{control.Label ?? control.Name} (repeating table)",
                     Name = control.Label ?? control.Name,
                     Type = "repeating"
                 });
@@ -996,7 +1026,6 @@ namespace FormGenerator.Views
 
             sectionCombo.ItemsSource = sections.Select(s => s.Display);
 
-            // Pre-select parent section if provided
             if (!string.IsNullOrEmpty(parentSection))
             {
                 var matchingSection = sections.FindIndex(s => s.Name == parentSection);
@@ -1008,43 +1037,55 @@ namespace FormGenerator.Views
                 sectionCombo.SelectedIndex = 0;
             }
 
-            sectionPanel.Children.Add(sectionCombo);
-            mainStack.Children.Add(sectionPanel);
+            Grid.SetRow(sectionCombo, currentRow++);
+            mainGrid.Children.Add(sectionCombo);
 
-            // Is Required checkbox
-            var requiredPanel = new StackPanel { Orientation = Orientation.Horizontal };
+            // Required checkbox
             var requiredCheck = new CheckBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernCheckBox"),
                 Content = "Required Field",
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 5, 0, 15)
             };
-            requiredPanel.Children.Add(requiredCheck);
-            mainStack.Children.Add(requiredPanel);
+            Grid.SetRow(requiredCheck, currentRow++);
+            mainGrid.Children.Add(requiredCheck);
 
             // Default Value
-            var defaultPanel = CreateLabeledControl("Default Value:");
+            var defaultLabel = CreateLabel("Default Value:");
+            Grid.SetRow(defaultLabel, currentRow++);
+            mainGrid.Children.Add(defaultLabel);
+
             var defaultText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
-                Height = 32
+                Height = 32,
+                Margin = new Thickness(0, 0, 0, 15)
             };
-            defaultPanel.Children.Add(defaultText);
-            mainStack.Children.Add(defaultPanel);
+            Grid.SetRow(defaultText, currentRow++);
+            mainGrid.Children.Add(defaultText);
 
             // Dropdown Options (shown only for dropdown types)
-            var optionsPanel = CreateLabeledControl("Options (one per line):");
+            var optionsPanel = new StackPanel
+            {
+                Visibility = Visibility.Collapsed
+            };
+
+            var optionsLabel = CreateLabel("Options (one per line):");
+            optionsPanel.Children.Add(optionsLabel);
+
             var optionsText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Height = 100,
                 AcceptsReturn = true,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Visibility = Visibility.Collapsed
+                Margin = new Thickness(0, 5, 0, 15)
             };
             optionsPanel.Children.Add(optionsText);
-            optionsPanel.Visibility = Visibility.Collapsed;
-            mainStack.Children.Add(optionsPanel);
+
+            Grid.SetRow(optionsPanel, currentRow++);
+            mainGrid.Children.Add(optionsPanel);
 
             // Show/hide options based on control type
             typeCombo.SelectionChanged += (s, e) =>
@@ -1053,14 +1094,15 @@ namespace FormGenerator.Views
                 if (selectedType == "DropDown" || selectedType == "RadioButton" || selectedType == "ComboBox")
                 {
                     optionsPanel.Visibility = Visibility.Visible;
-                    optionsText.Visibility = Visibility.Visible;
                 }
                 else
                 {
                     optionsPanel.Visibility = Visibility.Collapsed;
-                    optionsText.Visibility = Visibility.Collapsed;
                 }
             };
+
+            // Spacer row takes remaining space
+            currentRow++; // Skip the star-sized row
 
             // Buttons
             var buttonPanel = new StackPanel
@@ -1089,7 +1131,7 @@ namespace FormGenerator.Views
 
             addButton.Click += (s, e) =>
             {
-                // Create new control with unique CtrlId
+                // Create new control
                 var newControl = new ControlDefinition
                 {
                     Name = nameText.Text,
@@ -1097,7 +1139,8 @@ namespace FormGenerator.Views
                     Label = labelText.Text,
                     Binding = bindingText.Text,
                     DocIndex = view.Controls.Count + 1,
-                    GridPosition = $"{view.Controls.Count + 1}A"
+                    GridPosition = $"{view.Controls.Count + 1}A",
+                    Properties = new Dictionary<string, string>()
                 };
 
                 // Generate unique CtrlId
@@ -1114,11 +1157,8 @@ namespace FormGenerator.Views
                 } while (existingCtrlIds.Contains(newCtrlId));
 
                 newControl.Properties["CtrlId"] = newCtrlId;
-
-                // Set required property
                 newControl.Properties["Required"] = requiredCheck.IsChecked?.ToString() ?? "false";
 
-                // Set default value
                 if (!string.IsNullOrEmpty(defaultText.Text))
                 {
                     newControl.Properties["DefaultValue"] = defaultText.Text;
@@ -1132,14 +1172,12 @@ namespace FormGenerator.Views
 
                     if (targetSection.Type == "repeating")
                     {
-                        // Add to repeating section
                         newControl.IsInRepeatingSection = true;
                         newControl.RepeatingSectionName = targetSection.Name;
                         newControl.SectionType = "repeating";
                     }
                     else
                     {
-                        // Add to regular section
                         newControl.ParentSection = targetSection.Name;
                         newControl.SectionType = targetSection.Type;
                     }
@@ -1161,6 +1199,7 @@ namespace FormGenerator.Views
                         });
                     }
                     newControl.DataOptionsString = string.Join(", ", newControl.DataOptions.Select(o => o.DisplayText));
+                    // HasStaticData is read-only - it's automatically determined by having DataOptions
                 }
 
                 // Add to view
@@ -1183,12 +1222,27 @@ namespace FormGenerator.Views
 
             buttonPanel.Children.Add(addButton);
             buttonPanel.Children.Add(cancelButton);
-            mainStack.Children.Add(buttonPanel);
 
-            scrollViewer.Content = mainStack;
-            dialog.Content = scrollViewer;
+            Grid.SetRow(buttonPanel, currentRow);
+            mainGrid.Children.Add(buttonPanel);
+
+            dialog.Content = mainGrid;
             dialog.ShowDialog();
         }
+
+        // Helper method to create consistent labels
+        private TextBlock CreateLabel(string text)
+        {
+            return new TextBlock
+            {
+                Text = text,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                FontWeight = FontWeights.Medium,
+                Margin = new Thickness(0, 0, 0, 5)
+            };
+        }
+        // Helper method to create consistent labels
+      
 
         private StackPanel CreateLabeledControl(string label)
         {
@@ -1204,7 +1258,11 @@ namespace FormGenerator.Views
             return panel;
         }
 
-        private void ShowControlEditDialog(ControlDefinition control)
+        // In MainWindowAnalysisHandlers.cs, make sure ShowControlEditDialog is public and properly updates JSON:
+
+        // In MainWindowAnalysisHandlers.cs, make sure ShowControlEditDialog is public and properly updates JSON:
+
+        public void ShowControlEditDialog(ControlDefinition control)
         {
             var dialog = new Window
             {
@@ -1216,16 +1274,38 @@ namespace FormGenerator.Views
                 Background = (Brush)_mainWindow.FindResource("BackgroundMedium")
             };
 
-            var scrollViewer = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Margin = new Thickness(20)
-            };
+            // Create a grid for better spacing
+            var mainGrid = new Grid { Margin = new Thickness(20) };
 
-            var mainStack = new StackPanel { };
+            // Define rows for proper spacing
+            int rowCount = 0;
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Title
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Type label
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Type input
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Name label
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Name input
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Label label
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Label input
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Binding label
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Binding input
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Section label
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Section input
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Required
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Default label
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Default input
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Options (conditional)
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Buttons
 
             // Title with control ID
-            var titlePanel = new StackPanel();
             var titleText = new TextBlock
             {
                 Text = "Edit Control Properties",
@@ -1233,7 +1313,8 @@ namespace FormGenerator.Views
                 FontWeight = FontWeights.Bold,
                 Foreground = (Brush)_mainWindow.FindResource("TextPrimary")
             };
-            titlePanel.Children.Add(titleText);
+            Grid.SetRow(titleText, rowCount++);
+            mainGrid.Children.Add(titleText);
 
             if (control.Properties?.ContainsKey("CtrlId") == true)
             {
@@ -1242,14 +1323,20 @@ namespace FormGenerator.Views
                     Text = $"Control ID: {control.Properties["CtrlId"]}",
                     FontSize = 12,
                     Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                    Margin = new Thickness(0, 5, 0, 10)
+                    Margin = new Thickness(0, 5, 0, 0)
                 };
-                titlePanel.Children.Add(idText);
+                Grid.SetRow(idText, rowCount - 1);
+                Grid.SetRowSpan(idText, 1);
+                mainGrid.Children.Add(idText);
             }
-            mainStack.Children.Add(titlePanel);
+
+            rowCount++; // Skip spacer
 
             // Control Type (read-only)
-            var typePanel = CreateLabeledControl("Control Type:");
+            var typeLabel = CreateLabel("Control Type:");
+            Grid.SetRow(typeLabel, rowCount++);
+            mainGrid.Children.Add(typeLabel);
+
             var typeText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
@@ -1258,58 +1345,79 @@ namespace FormGenerator.Views
                 Background = new SolidColorBrush(Color.FromArgb(20, 128, 128, 128)),
                 Height = 32
             };
-            typePanel.Children.Add(typeText);
-            mainStack.Children.Add(typePanel);
+            Grid.SetRow(typeText, rowCount++);
+            mainGrid.Children.Add(typeText);
+
+            rowCount++; // Skip spacer
 
             // Control Name
-            var namePanel = CreateLabeledControl("Control Name:");
+            var nameLabel = CreateLabel("Control Name:");
+            Grid.SetRow(nameLabel, rowCount++);
+            mainGrid.Children.Add(nameLabel);
+
             var nameText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.Name ?? "",
                 Height = 32
             };
-            namePanel.Children.Add(nameText);
-            mainStack.Children.Add(namePanel);
+            Grid.SetRow(nameText, rowCount++);
+            mainGrid.Children.Add(nameText);
+
+            rowCount++; // Skip spacer
 
             // Control Label
-            var labelPanel = CreateLabeledControl("Label:");
+            var labelLabel = CreateLabel("Label:");
+            Grid.SetRow(labelLabel, rowCount++);
+            mainGrid.Children.Add(labelLabel);
+
             var labelText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.Label ?? "",
                 Height = 32
             };
-            labelPanel.Children.Add(labelText);
-            mainStack.Children.Add(labelPanel);
+            Grid.SetRow(labelText, rowCount++);
+            mainGrid.Children.Add(labelText);
+
+            rowCount++; // Skip spacer
 
             // Binding
-            var bindingPanel = CreateLabeledControl("Binding:");
+            var bindingLabel = CreateLabel("Binding:");
+            Grid.SetRow(bindingLabel, rowCount++);
+            mainGrid.Children.Add(bindingLabel);
+
             var bindingText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.Binding ?? "",
                 Height = 32
             };
-            bindingPanel.Children.Add(bindingText);
-            mainStack.Children.Add(bindingPanel);
+            Grid.SetRow(bindingText, rowCount++);
+            mainGrid.Children.Add(bindingText);
+
+            rowCount++; // Skip spacer
 
             // Current Section (read-only)
-            var currentSectionPanel = CreateLabeledControl("Current Section:");
+            var currentSectionLabel = CreateLabel("Current Section:");
+            Grid.SetRow(currentSectionLabel, rowCount++);
+            mainGrid.Children.Add(currentSectionLabel);
+
             var currentSectionText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
-                Text = control.IsInRepeatingSection ? $"🔁 {control.RepeatingSectionName}" :
-                       !string.IsNullOrEmpty(control.ParentSection) ? $"📦 {control.ParentSection}" : "(No Section)",
+                Text = control.IsInRepeatingSection ? $"Repeating: {control.RepeatingSectionName}" :
+                       !string.IsNullOrEmpty(control.ParentSection) ? $"Section: {control.ParentSection}" : "(No Section)",
                 IsReadOnly = true,
                 Background = new SolidColorBrush(Color.FromArgb(20, 128, 128, 128)),
                 Height = 32
             };
-            currentSectionPanel.Children.Add(currentSectionText);
-            mainStack.Children.Add(currentSectionPanel);
+            Grid.SetRow(currentSectionText, rowCount++);
+            mainGrid.Children.Add(currentSectionText);
+
+            rowCount++; // Skip spacer
 
             // Required checkbox
-            var requiredPanel = new StackPanel { Orientation = Orientation.Horizontal };
             var requiredCheck = new CheckBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernCheckBox"),
@@ -1318,11 +1426,16 @@ namespace FormGenerator.Views
                            control.Properties["Required"] == "true",
                 VerticalAlignment = VerticalAlignment.Center
             };
-            requiredPanel.Children.Add(requiredCheck);
-            mainStack.Children.Add(requiredPanel);
+            Grid.SetRow(requiredCheck, rowCount++);
+            mainGrid.Children.Add(requiredCheck);
+
+            rowCount++; // Skip spacer
 
             // Default Value
-            var defaultPanel = CreateLabeledControl("Default Value:");
+            var defaultLabel = CreateLabel("Default Value:");
+            Grid.SetRow(defaultLabel, rowCount++);
+            mainGrid.Children.Add(defaultLabel);
+
             var defaultText = new TextBox
             {
                 Style = (Style)_mainWindow.FindResource("ModernTextBox"),
@@ -1330,52 +1443,43 @@ namespace FormGenerator.Views
                        control.Properties["DefaultValue"] : "",
                 Height = 32
             };
-            defaultPanel.Children.Add(defaultText);
-            mainStack.Children.Add(defaultPanel);
+            Grid.SetRow(defaultText, rowCount++);
+            mainGrid.Children.Add(defaultText);
+
+            rowCount++; // Skip spacer
 
             // Dropdown Options (if applicable)
+            TextBox optionsTextBox = null;
             if (control.Type == "DropDown" || control.Type == "RadioButton" || control.Type == "ComboBox")
             {
-                var optionsPanel = CreateLabeledControl("Options (one per line):");
-                var optionsText = new TextBox
+                var optionsPanel = new StackPanel();
+                var optionsLabel = CreateLabel("Options (one per line):");
+                optionsPanel.Children.Add(optionsLabel);
+
+                optionsTextBox = new TextBox
                 {
                     Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                     Height = 100,
                     AcceptsReturn = true,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                     Text = control.DataOptions != null ?
-                           string.Join("\r\n", control.DataOptions.Select(o => o.DisplayText)) : ""
+                           string.Join("\r\n", control.DataOptions.Select(o => o.DisplayText)) : "",
+                    Margin = new Thickness(0, 5, 0, 0)
                 };
-                optionsPanel.Children.Add(optionsText);
-                mainStack.Children.Add(optionsPanel);
+                optionsPanel.Children.Add(optionsTextBox);
+
+                Grid.SetRow(optionsPanel, rowCount++);
+                mainGrid.Children.Add(optionsPanel);
             }
 
-            // Additional Properties
-            if (control.Properties != null && control.Properties.Any())
-            {
-                var propsPanel = CreateLabeledControl($"Additional Properties ({control.Properties.Count}):");
-                var propsText = new TextBox
-                {
-                    Style = (Style)_mainWindow.FindResource("ModernTextBox"),
-                    Height = 100,
-                    AcceptsReturn = true,
-                    IsReadOnly = true,
-                    Background = new SolidColorBrush(Color.FromArgb(20, 128, 128, 128)),
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                    Text = string.Join("\r\n", control.Properties
-                        .Where(p => p.Key != "Required" && p.Key != "DefaultValue")
-                        .Select(p => $"{p.Key}: {p.Value}"))
-                };
-                propsPanel.Children.Add(propsText);
-                mainStack.Children.Add(propsPanel);
-            }
+            // Skip to buttons row
+            rowCount = mainGrid.RowDefinitions.Count - 1;
 
             // Buttons
             var buttonPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(0, 20, 0, 0)
+                HorizontalAlignment = HorizontalAlignment.Right
             };
 
             var saveButton = new Button
@@ -1422,11 +1526,6 @@ namespace FormGenerator.Views
                     control.Properties.Remove("DefaultValue");
 
                 // Update dropdown options if applicable
-                var optionsTextBox = mainStack.Children
-                    .OfType<StackPanel>()
-                    .SelectMany(p => p.Children.OfType<TextBox>())
-                    .FirstOrDefault(t => t.AcceptsReturn && t.Height == 100);
-
                 if (optionsTextBox != null && !string.IsNullOrEmpty(optionsTextBox.Text))
                 {
                     var options = optionsTextBox.Text.Split(new[] { '\r', '\n' },
@@ -1443,10 +1542,17 @@ namespace FormGenerator.Views
                         });
                     }
                     control.DataOptionsString = string.Join(", ", control.DataOptions.Select(o => o.DisplayText));
+                    // HasStaticData is read-only - it's automatically determined by having DataOptions
                 }
 
                 // Refresh tree view
                 RefreshStructureTree();
+
+                // UPDATE JSON OUTPUT - this is the key part
+                if (_mainWindow._allFormDefinitions != null && _mainWindow._allFormDefinitions.Any())
+                {
+                    DisplayEnhancedJson(_mainWindow._allFormDefinitions);
+                }
 
                 _mainWindow.UpdateStatus($"Updated control: {control.Label}", MessageSeverity.Info);
 
@@ -1471,12 +1577,16 @@ namespace FormGenerator.Views
             buttonPanel.Children.Add(saveButton);
             buttonPanel.Children.Add(moveButton);
             buttonPanel.Children.Add(cancelButton);
-            mainStack.Children.Add(buttonPanel);
 
-            scrollViewer.Content = mainStack;
-            dialog.Content = scrollViewer;
+            Grid.SetRow(buttonPanel, rowCount);
+            mainGrid.Children.Add(buttonPanel);
+
+            dialog.Content = mainGrid;
             dialog.ShowDialog();
         }
+
+   
+
 
 
         /// <summary>
@@ -1799,94 +1909,8 @@ namespace FormGenerator.Views
 
         #region Helper Methods for Control Management
 
-        private void AddDialogTextBox(Grid grid, int row, string label, out TextBox textBox)
-        {
-            var labelControl = new TextBlock
-            {
-                Text = label,
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                Margin = new Thickness(0, 5, 0, 5)
-            };
-            Grid.SetRow(labelControl, row);
-            Grid.SetColumn(labelControl, 0);
-            grid.Children.Add(labelControl);
 
-            textBox = new TextBox
-            {
-                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
-                Margin = new Thickness(0, 5, 0, 5),
-                Height = 28
-            };
-            Grid.SetRow(textBox, row);
-            Grid.SetColumn(textBox, 1);
-            grid.Children.Add(textBox);
-        }
-
-        private void AddDialogComboBox(Grid grid, int row, string label, out ComboBox comboBox)
-        {
-            var labelControl = new TextBlock
-            {
-                Text = label,
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                Margin = new Thickness(0, 5, 0, 5)
-            };
-            Grid.SetRow(labelControl, row);
-            Grid.SetColumn(labelControl, 0);
-            grid.Children.Add(labelControl);
-
-            comboBox = new ComboBox
-            {
-                Style = (Style)_mainWindow.FindResource("ModernComboBox"),
-                Margin = new Thickness(0, 5, 0, 5),
-                Height = 28
-            };
-            Grid.SetRow(comboBox, row);
-            Grid.SetColumn(comboBox, 1);
-            grid.Children.Add(comboBox);
-        }
-
-        private void AddDialogCheckBox(Grid grid, int row, string label, out CheckBox checkBox)
-        {
-            var labelControl = new TextBlock
-            {
-                Text = label,
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                Margin = new Thickness(0, 5, 0, 5)
-            };
-            Grid.SetRow(labelControl, row);
-            Grid.SetColumn(labelControl, 0);
-            grid.Children.Add(labelControl);
-
-            checkBox = new CheckBox
-            {
-                Style = (Style)_mainWindow.FindResource("ModernCheckBox"),
-                Margin = new Thickness(0, 5, 0, 5),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetRow(checkBox, row);
-            Grid.SetColumn(checkBox, 1);
-            grid.Children.Add(checkBox);
-        }
-
-        private List<string> GetAllSections(ViewDefinition view)
-        {
-            var sections = new List<string>();
-
-            // Regular sections
-            foreach (var section in view.Sections)
-            {
-                var type = section.Type == "repeating" ? "🔁" : "📦";
-                sections.Add($"{type} {section.Name}");
-            }
-
-            // Repeating tables
-            foreach (var control in view.Controls.Where(c => c.Type == "RepeatingTable"))
-            {
-                sections.Add($"🔁 {control.Label ?? control.Name}");
-            }
-
-            return sections;
-        }
+  
 
         private List<SectionOption> GetAllSectionsWithType(ViewDefinition view)
         {
@@ -1919,15 +1943,7 @@ namespace FormGenerator.Views
             return sections;
         }
 
-        private string ExtractSectionName(string displayText)
-        {
-            // Remove icon and return section name
-            if (displayText.Contains(" "))
-            {
-                return displayText.Substring(displayText.IndexOf(' ') + 1);
-            }
-            return displayText;
-        }
+    
 
         private string GetControlLocation(ControlDefinition control)
         {
@@ -2019,42 +2035,7 @@ namespace FormGenerator.Views
             item.ContextMenu = contextMenu;
         }
 
-        private void AddSectionContextMenu(TreeViewItem item, SectionInfo section, ViewDefinition view)
-        {
-            var contextMenu = new ContextMenu();
-
-            // Add Control to Section
-            var addControlMenuItem = new MenuItem
-            {
-                Header = "Add Control...",
-                Icon = new TextBlock { Text = "➕" }
-            };
-            addControlMenuItem.Click += (s, e) => AddNewControl(view, section.Name);
-            contextMenu.Items.Add(addControlMenuItem);
-
-            if (section.Type != "repeating")
-            {
-                // Convert to Repeating Section
-                var convertMenuItem = new MenuItem
-                {
-                    Header = "Convert to Repeating Section",
-                    Icon = new TextBlock { Text = "🔁" }
-                };
-                convertMenuItem.Click += (s, e) => ConvertSectionToRepeating(section, view);
-                contextMenu.Items.Add(convertMenuItem);
-
-                // Move to Repeating Section
-                var moveMenuItem = new MenuItem
-                {
-                    Header = "Move to Repeating Section...",
-                    Icon = new TextBlock { Text = "➡️" }
-                };
-                moveMenuItem.Click += (s, e) => MoveSectionToRepeatingSection(section, view);
-                contextMenu.Items.Add(moveMenuItem);
-            }
-
-            item.ContextMenu = contextMenu;
-        }
+    
 
         private ViewDefinition GetViewForControl(ControlDefinition control)
         {
@@ -2165,16 +2146,8 @@ namespace FormGenerator.Views
         // Made public for accessibility
         public void ShowEditPanel(ControlDefinition control, TreeViewItem treeItem)
         {
-            // TODO: Implementation for edit panel
-            _selectedControl = control;
-            _selectedTreeItem = treeItem;
-
-            MessageBox.Show($"Edit panel for control: {control.Label ?? control.Name}\n" +
-                          $"Type: {control.Type}\n" +
-                          $"Binding: {control.Binding}",
-                          "Edit Control Properties",
-                          MessageBoxButton.OK,
-                          MessageBoxImage.Information);
+            // Just redirect to ShowControlEditDialog
+            ShowControlEditDialog(control);
         }
 
         // Added missing method
@@ -2313,67 +2286,7 @@ namespace FormGenerator.Views
             panel.Children.Add(dropdownPanel);
         }
 
-        private void AddEditButton(StackPanel panel, ControlDefinition control)
-        {
-            var editButton = new Button
-            {
-                Content = "✏️",
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Cursor = System.Windows.Input.Cursors.Hand,
-                Padding = new Thickness(5, 0, 5, 0),
-                ToolTip = "Edit control properties",
-                Tag = control,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(5, 0, 0, 0)
-            };
-            editButton.Click += EditControl_Click;
-            panel.Children.Add(editButton);
-        }
-
-        private void AddControlProperties(TreeViewItem item, ControlDefinition control)
-        {
-            // Binding
-            if (!string.IsNullOrEmpty(control.Binding))
-            {
-                item.Items.Add(CreateInfoItem($"Binding: {control.Binding}", 10));
-            }
-
-            // Dropdown values
-            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any())
-            {
-                var dropdownItem = new TreeViewItem
-                {
-                    Header = $"📋 Dropdown Values ({control.DataOptions.Count})",
-                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
-                    FontSize = 11,
-                    IsExpanded = false
-                };
-
-                foreach (var option in control.DataOptions.OrderBy(o => o.Order))
-                {
-                    var optionText = option.DisplayText;
-                    if (option.IsDefault)
-                        optionText += " ⭐ (default)";
-
-                    dropdownItem.Items.Add(new TreeViewItem
-                    {
-                        Header = $"  • {optionText}",
-                        Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                        FontSize = 10,
-                        ToolTip = $"Value: {option.Value}"
-                    });
-                }
-
-                item.Items.Add(dropdownItem);
-            }
-
-            // Default value
-            if (control.Properties.ContainsKey("DefaultValue") && !string.IsNullOrEmpty(control.Properties["DefaultValue"]))
-            {
-                item.Items.Add(CreateInfoItem($"Default: {control.Properties["DefaultValue"]}", 10));
-            }
-        }
+  
 
         private object CreateEnhancedSectionHeader(string sectionName, string sectionType, int controlCount)
         {

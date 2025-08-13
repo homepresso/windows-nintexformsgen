@@ -1488,51 +1488,7 @@ namespace FormGenerator.Analyzers.Infopath
         }
 
 
-        private bool ShouldProcessConditionalSection(XElement ifElement, string mode)
-        {
-            // Extract the section identifier from the conditional
-            var testCondition = ifElement.Attribute("test")?.Value;
-            var sectionDiv = ifElement.Descendants()
-                .FirstOrDefault(e => GetAttributeValue(e, "xctname") == "Section" ||
-                                    e.Attribute("class")?.Value?.Contains("xdSection") == true);
-
-            if (sectionDiv != null)
-            {
-                var ctrlId = GetAttributeValue(sectionDiv, "CtrlId");
-
-                // Check if we're in a repeating context
-                if (repeatingContextStack.Count > 0)
-                {
-                    var parentRepeating = repeatingContextStack.Peek();
-
-                    // Check if this section already exists within the current repeating context
-                    var existingSection = sections.FirstOrDefault(s =>
-                        s.CtrlId == ctrlId &&
-                        s.Type == "conditional-in-repeating");
-
-                    if (existingSection != null)
-                    {
-                        Debug.WriteLine($"Conditional section with CtrlId {ctrlId} already exists in repeating context");
-                        return false;
-                    }
-                }
-                else
-                {
-                    // Check for standalone conditional sections
-                    var existingSection = sections.FirstOrDefault(s =>
-                        s.CtrlId == ctrlId &&
-                        s.Type == "conditional");
-
-                    if (existingSection != null)
-                    {
-                        Debug.WriteLine($"Conditional section with CtrlId {ctrlId} already exists");
-                        return false;
-                    }
-                }
-            }
-
-            return true;
-        }
+    
 
         private void ProcessConditionalSection(XElement ifElement, string mode)
         {
@@ -1698,101 +1654,7 @@ namespace FormGenerator.Analyzers.Infopath
             return result;
         }
 
-        private void ProcessRepeatingTemplate(XElement templateElem, string match, string mode)
-        {
-            Debug.WriteLine($"Processing repeating template - match: {match}, mode: {mode}");
-
-            var sectionName = ExtractNameFromBinding(match);
-
-            // Check if we've already processed this as a repeating section
-            // to avoid duplicates
-            bool alreadyInThisRepeatingContext = repeatingContextStack.Any(r =>
-                r.Binding == match || r.Name == sectionName);
-
-            if (alreadyInThisRepeatingContext)
-            {
-                Debug.WriteLine($"Already in repeating context for {sectionName}, skipping duplicate");
-                // Just process children without creating new context
-                foreach (var child in templateElem.Elements())
-                {
-                    ProcessElement(child);
-                }
-                return;
-            }
-
-            var repeatingContext = new RepeatingContext
-            {
-                Name = sectionName,
-                Binding = match,
-                Type = "section",
-                DisplayName = sectionName,
-                Depth = repeatingContextStack.Count
-            };
-
-            repeatingContextStack.Push(repeatingContext);
-
-            // Only create section info if not already created
-            if (!sections.Any(s => s.Name == sectionName && s.Type == "repeating"))
-            {
-                var sectionInfo = new SectionInfo
-                {
-                    Name = sectionName,
-                    Type = "repeating",
-                    CtrlId = mode, // Use mode as CtrlId if no explicit ID
-                    StartRow = currentRow
-                };
-                sections.Add(sectionInfo);
-            }
-
-            foreach (var child in templateElem.Elements())
-            {
-                ProcessElement(child);
-            }
-
-            repeatingContextStack.Pop();
-        }
-
-        private string DetermineSectionName(XElement ifElement, XElement sectionDiv,
-      string caption, string ctrlId, string mode)
-        {
-            // Priority order for determining section name:
-            // 1. Caption attribute
-            if (!string.IsNullOrEmpty(caption))
-                return caption;
-
-            // 2. Try to extract from the condition
-            var testCondition = ifElement?.Attribute("test")?.Value;
-            if (!string.IsNullOrEmpty(testCondition))
-            {
-                // Extract field name from condition (e.g., "isRoundTrip" from the condition)
-                var fieldMatch = System.Text.RegularExpressions.Regex.Match(
-                    testCondition, @"my:(\w+)");
-                if (fieldMatch.Success)
-                {
-                    var fieldName = fieldMatch.Groups[1].Value;
-                    // Convert from camelCase to readable (e.g., "isRoundTrip" -> "Round Trip")
-                    var readable = ConvertCamelCaseToReadable(fieldName);
-                    if (!string.IsNullOrEmpty(readable))
-                        return readable;
-                }
-            }
-
-            // 3. Look for labels within the section
-            var firstLabel = sectionDiv?.Descendants()
-                .Where(e => e.Name.LocalName == "font" || e.Name.LocalName == "strong")
-                .Select(e => e.Value)
-                .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
-
-            if (!string.IsNullOrEmpty(firstLabel))
-                return firstLabel.Trim();
-
-            // 4. Use CtrlId if available
-            if (!string.IsNullOrEmpty(ctrlId))
-                return $"Section_{ctrlId}";
-
-            // 5. Use mode as last resort
-            return $"Section_{mode}";
-        }
+     
 
 
         private string ConvertCamelCaseToReadable(string fieldName)

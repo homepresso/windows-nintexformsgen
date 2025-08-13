@@ -68,53 +68,8 @@ namespace FormGenerator.Views
 
         private void WireUpEditingControls()
         {
-            // Wire up toolbar buttons directly without null checks first
-            // This ensures they get wired up properly
-
-            // Add Control Button
-            AddControlButton.Click += (s, e) =>
-            {
-                var (view, section) = GetSelectedViewAndSection();
-                if (view == null)
-                {
-                    UpdateStatus("Select a view (or a section within a view) first.", MessageSeverity.Warning);
-                    MessageBox.Show("Please select a view or section first.", "No Selection",
-                                  MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-                _analysisHandlers?.ShowAddControlDialog(view, section);
-            };
-
-            // Edit Button
-            EditControlButton.Click += (s, e) => EditSelectedControl();
-
-            // Delete Button
-            DeleteControlButton.Click += (s, e) => DeleteSelectedControl();
-
-            // Convert to Repeating Button
-            ConvertToRepeatingButton.Click += (s, e) =>
-            {
-                var control = GetSelectedControl();
-                if (control == null)
-                {
-                    UpdateStatus("Select a control to move/convert.", MessageSeverity.Warning);
-                    return;
-                }
-                _analysisHandlers?.ShowMoveSectionDialog(control);
-            };
-
-            // Tree manipulation buttons
-            CollapseAllButton.Click += (s, e) => CollapseAllTreeItems(StructureTreeView.Items);
-            ExpandAllButton.Click += (s, e) => ExpandAllTreeItems(StructureTreeView.Items);
-
-            // Search functionality
-            TreeSearchButton.Click += (s, e) => SearchInTree();
-
-            TreeSearchBox.KeyDown += (s, e) =>
-            {
-                if (e.Key == Key.Enter)
-                    SearchInTree();
-            };
+            // Remove the inline event handlers - they're now in XAML
+            // Just set up the context menu and keyboard shortcuts
 
             // Setup context menu for StructureTreeView
             SetupTreeViewContextMenu();
@@ -1069,12 +1024,15 @@ namespace FormGenerator.Views
                 var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
                 if (selectedItem?.Tag is ControlDefinition control)
                 {
-                    _analysisHandlers.ShowEditPanel(control, selectedItem);
+                    // Call the ShowControlEditDialog directly, not ShowEditPanel
+                    _analysisHandlers?.ShowControlEditDialog(control);
                 }
                 else
                 {
-                    MessageBox.Show("Please select a control to edit.", "No Control Selected",
-                                  MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Please select a control to edit.",
+                                  "No Control Selected",
+                                  MessageBoxButton.OK,
+                                  MessageBoxImage.Information);
                 }
             }
             catch (Exception ex)
@@ -1093,12 +1051,23 @@ namespace FormGenerator.Views
                 var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
                 if (selectedItem?.Tag is ControlDefinition control)
                 {
-                    _analysisHandlers.DeleteControl(control);
+                    var result = MessageBox.Show(
+                        $"Are you sure you want to delete '{control.Label ?? control.Name}'?",
+                        "Confirm Delete",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning);
+
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        _analysisHandlers?.DeleteControl(control);
+                    }
                 }
                 else
                 {
-                    MessageBox.Show("Please select a control to delete.", "No Control Selected",
-                                  MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("Please select a control to delete.",
+                                  "No Control Selected",
+                                  MessageBoxButton.OK,
+                                  MessageBoxImage.Information);
                 }
             }
             catch (Exception ex)
@@ -1116,9 +1085,14 @@ namespace FormGenerator.Views
             {
                 var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
 
-                // Check if a section is selected
-                if (selectedItem?.Tag is string sectionName)
+                if (selectedItem?.Tag is ControlDefinition control)
                 {
+                    // Move control to repeating section
+                    _analysisHandlers?.ShowMoveSectionDialog(control);
+                }
+                else if (selectedItem?.Tag is string sectionName)
+                {
+                    // Convert section to repeating
                     var view = GetSelectedView();
                     if (view != null)
                     {
@@ -1134,19 +1108,16 @@ namespace FormGenerator.Views
 
                             if (result == MessageBoxResult.Yes)
                             {
-                                // Update section type
                                 section.Type = "repeating";
-
-                                // Update all controls in this section
-                                foreach (var control in view.Controls.Where(c => c.ParentSection == section.Name))
+                                foreach (var ctrl in view.Controls.Where(c => c.ParentSection == section.Name))
                                 {
-                                    control.IsInRepeatingSection = true;
-                                    control.RepeatingSectionName = section.Name;
-                                    control.SectionType = "repeating";
+                                    ctrl.IsInRepeatingSection = true;
+                                    ctrl.RepeatingSectionName = section.Name;
+                                    ctrl.SectionType = "repeating";
                                 }
 
-                                // Refresh the tree view
-                                if (_allFormDefinitions != null)
+                                // Refresh the display
+                                if (_allAnalysisResults != null)
                                 {
                                     _analysisHandlers.DisplayCombinedAnalysisResults(_allAnalysisResults);
                                 }
@@ -1165,8 +1136,8 @@ namespace FormGenerator.Views
                 }
                 else
                 {
-                    MessageBox.Show("Please select a section to convert to repeating.",
-                                  "No Section Selected",
+                    MessageBox.Show("Please select a control or section to convert.",
+                                  "No Selection",
                                   MessageBoxButton.OK,
                                   MessageBoxImage.Information);
                 }
@@ -1184,7 +1155,7 @@ namespace FormGenerator.Views
         {
             try
             {
-                CollapseAllTreeViewItems(StructureTreeView.Items);
+                CollapseAllTreeItems(StructureTreeView.Items);
                 UpdateStatus("Collapsed all tree items", MessageSeverity.Info);
             }
             catch (Exception ex)
@@ -1200,7 +1171,7 @@ namespace FormGenerator.Views
         {
             try
             {
-                ExpandAllTreeViewItems(StructureTreeView.Items);
+                ExpandAllTreeItems(StructureTreeView.Items);
                 UpdateStatus("Expanded all tree items", MessageSeverity.Info);
             }
             catch (Exception ex)
@@ -1209,6 +1180,7 @@ namespace FormGenerator.Views
             }
         }
 
+
         /// <summary>
         /// Handles Tree Search button click
         /// </summary>
@@ -1216,15 +1188,7 @@ namespace FormGenerator.Views
         {
             try
             {
-                if (!string.IsNullOrWhiteSpace(TreeSearchBox.Text))
-                {
-                    SearchTreeView(TreeSearchBox.Text);
-                }
-                else
-                {
-                    MessageBox.Show("Please enter a search term.", "Search",
-                                  MessageBoxButton.OK, MessageBoxImage.Information);
-                }
+                SearchInTree();
             }
             catch (Exception ex)
             {
@@ -1239,15 +1203,15 @@ namespace FormGenerator.Views
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(TreeSearchBox.Text))
+                // Auto-search after 3 characters
+                if (TreeSearchBox.Text?.Length >= 3)
                 {
-                    // Clear search highlighting
-                    ResetTreeViewHighlight(StructureTreeView.Items);
+                    SearchInTree();
                 }
-                else if (TreeSearchBox.Text.Length >= 3)
+                else if (string.IsNullOrWhiteSpace(TreeSearchBox.Text))
                 {
-                    // Auto-search after 3 characters
-                    SearchTreeView(TreeSearchBox.Text);
+                    // Clear highlighting when search is cleared
+                    ResetTreeItemsAppearance(StructureTreeView.Items);
                 }
             }
             catch (Exception ex)
@@ -1267,12 +1231,12 @@ namespace FormGenerator.Views
 
                 // Enable/disable buttons based on selection
                 bool isControlSelected = selectedItem?.Tag is ControlDefinition;
-                bool isSectionSelected = selectedItem?.Tag is string || selectedItem?.Tag is SectionInfo;
+                bool isSectionSelected = selectedItem?.Tag is string;
                 bool isViewSelected = selectedItem?.Tag is ViewDefinition;
 
                 EditControlButton.IsEnabled = isControlSelected;
                 DeleteControlButton.IsEnabled = isControlSelected;
-                ConvertToRepeatingButton.IsEnabled = isSectionSelected;
+                ConvertToRepeatingButton.IsEnabled = isSectionSelected || isControlSelected;
                 AddControlButton.IsEnabled = isViewSelected || isSectionSelected;
 
                 // Update status bar with selection info
@@ -1296,7 +1260,6 @@ namespace FormGenerator.Views
                 UpdateStatus($"Error in selection: {ex.Message}", MessageSeverity.Error);
             }
         }
-
         #endregion
 
         #region Helper Methods for Form Structure Tab
@@ -1355,26 +1318,6 @@ namespace FormGenerator.Views
                     ExpandAllTreeViewItems(item.Items);
                 }
             }
-        }
-
-        /// <summary>
-        /// Searches the tree view for matching items
-        /// </summary>
-        private void SearchTreeView(string searchText)
-        {
-            if (string.IsNullOrWhiteSpace(searchText))
-                return;
-
-            searchText = searchText.ToLower();
-            int matchCount = 0;
-
-            // Reset all highlights first
-            ResetTreeViewHighlight(StructureTreeView.Items);
-
-            // Search and highlight matches
-            matchCount = SearchTreeViewItems(StructureTreeView.Items, searchText);
-
-            UpdateStatus($"Found {matchCount} matches for '{searchText}'", MessageSeverity.Info);
         }
 
         /// <summary>
