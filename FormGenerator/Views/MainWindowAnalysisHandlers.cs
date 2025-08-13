@@ -1563,11 +1563,12 @@ namespace FormGenerator.Views
                 Text = text,
                 Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
                 FontWeight = FontWeights.Medium,
+                FontSize = 14,
                 Margin = new Thickness(0, 0, 0, 5)
             };
         }
         // Helper method to create consistent labels
-      
+
 
         private StackPanel CreateLabeledControl(string label)
         {
@@ -1585,18 +1586,23 @@ namespace FormGenerator.Views
 
         // In MainWindowAnalysisHandlers.cs, make sure ShowControlEditDialog is public and properly updates JSON:
 
-        // In MainWindowAnalysisHandlers.cs, make sure ShowControlEditDialog is public and properly updates JSON:
-
         public void ShowControlEditDialog(ControlDefinition control)
         {
             var dialog = new Window
             {
                 Title = $"Edit Control - {control.Label ?? control.Name}",
-                Width = 550,
-                Height = 700,
+                Width = 600,
+                Height = 800,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = _mainWindow,
                 Background = (Brush)_mainWindow.FindResource("BackgroundMedium")
+            };
+
+            // Create main scrollviewer for long forms
+            var scrollViewer = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
             };
 
             // Create a grid for better spacing
@@ -1605,27 +1611,27 @@ namespace FormGenerator.Views
             // Define rows for proper spacing
             int rowCount = 0;
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Title
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Type label
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Type input
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Name label
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Name input
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Label label
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Label input
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Binding label
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Binding input
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Section label
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Section input
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Required
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Default label
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Default input
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(10) }); // Spacer
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(15) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Options (conditional)
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Spacer
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Buttons
@@ -1634,7 +1640,7 @@ namespace FormGenerator.Views
             var titleText = new TextBlock
             {
                 Text = "Edit Control Properties",
-                FontSize = 18,
+                FontSize = 20,
                 FontWeight = FontWeights.Bold,
                 Foreground = (Brush)_mainWindow.FindResource("TextPrimary")
             };
@@ -1646,7 +1652,7 @@ namespace FormGenerator.Views
                 var idText = new TextBlock
                 {
                     Text = $"Control ID: {control.Properties["CtrlId"]}",
-                    FontSize = 12,
+                    FontSize = 13,
                     Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
                     Margin = new Thickness(0, 5, 0, 0)
                 };
@@ -1664,11 +1670,16 @@ namespace FormGenerator.Views
 
             var typeText = new TextBox
             {
-                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.Type,
                 IsReadOnly = true,
                 Background = new SolidColorBrush(Color.FromArgb(20, 128, 128, 128)),
-                Height = 32
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                BorderBrush = (Brush)_mainWindow.FindResource("BorderColor"),
+                BorderThickness = new Thickness(1),
+                Height = 40,  // Increased height
+                Padding = new Thickness(10, 8, 10, 8),  // Better padding
+                FontSize = 14,
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             Grid.SetRow(typeText, rowCount++);
             mainGrid.Children.Add(typeText);
@@ -1682,9 +1693,15 @@ namespace FormGenerator.Views
 
             var nameText = new TextBox
             {
-                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.Name ?? "",
-                Height = 32
+                Background = (Brush)_mainWindow.FindResource("BackgroundLight"),
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                BorderBrush = (Brush)_mainWindow.FindResource("BorderColor"),
+                BorderThickness = new Thickness(1),
+                Height = 40,  // Increased height
+                Padding = new Thickness(10, 8, 10, 8),  // Better padding
+                FontSize = 14,
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             Grid.SetRow(nameText, rowCount++);
             mainGrid.Children.Add(nameText);
@@ -1698,9 +1715,15 @@ namespace FormGenerator.Views
 
             var labelText = new TextBox
             {
-                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.Label ?? "",
-                Height = 32
+                Background = (Brush)_mainWindow.FindResource("BackgroundLight"),
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                BorderBrush = (Brush)_mainWindow.FindResource("BorderColor"),
+                BorderThickness = new Thickness(1),
+                Height = 40,  // Increased height
+                Padding = new Thickness(10, 8, 10, 8),  // Better padding
+                FontSize = 14,
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             Grid.SetRow(labelText, rowCount++);
             mainGrid.Children.Add(labelText);
@@ -1714,9 +1737,15 @@ namespace FormGenerator.Views
 
             var bindingText = new TextBox
             {
-                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.Binding ?? "",
-                Height = 32
+                Background = (Brush)_mainWindow.FindResource("BackgroundLight"),
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                BorderBrush = (Brush)_mainWindow.FindResource("BorderColor"),
+                BorderThickness = new Thickness(1),
+                Height = 40,  // Increased height
+                Padding = new Thickness(10, 8, 10, 8),  // Better padding
+                FontSize = 14,
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             Grid.SetRow(bindingText, rowCount++);
             mainGrid.Children.Add(bindingText);
@@ -1730,12 +1759,17 @@ namespace FormGenerator.Views
 
             var currentSectionText = new TextBox
             {
-                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.IsInRepeatingSection ? $"Repeating: {control.RepeatingSectionName}" :
                        !string.IsNullOrEmpty(control.ParentSection) ? $"Section: {control.ParentSection}" : "(No Section)",
                 IsReadOnly = true,
                 Background = new SolidColorBrush(Color.FromArgb(20, 128, 128, 128)),
-                Height = 32
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                BorderBrush = (Brush)_mainWindow.FindResource("BorderColor"),
+                BorderThickness = new Thickness(1),
+                Height = 40,  // Increased height
+                Padding = new Thickness(10, 8, 10, 8),  // Better padding
+                FontSize = 14,
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             Grid.SetRow(currentSectionText, rowCount++);
             mainGrid.Children.Add(currentSectionText);
@@ -1745,11 +1779,13 @@ namespace FormGenerator.Views
             // Required checkbox
             var requiredCheck = new CheckBox
             {
-                Style = (Style)_mainWindow.FindResource("ModernCheckBox"),
                 Content = "Required Field",
                 IsChecked = control.Properties?.ContainsKey("Required") == true &&
                            control.Properties["Required"] == "true",
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                FontSize = 14,
+                Margin = new Thickness(0, 5, 0, 5)
             };
             Grid.SetRow(requiredCheck, rowCount++);
             mainGrid.Children.Add(requiredCheck);
@@ -1763,10 +1799,16 @@ namespace FormGenerator.Views
 
             var defaultText = new TextBox
             {
-                Style = (Style)_mainWindow.FindResource("ModernTextBox"),
                 Text = control.Properties?.ContainsKey("DefaultValue") == true ?
                        control.Properties["DefaultValue"] : "",
-                Height = 32
+                Background = (Brush)_mainWindow.FindResource("BackgroundLight"),
+                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                BorderBrush = (Brush)_mainWindow.FindResource("BorderColor"),
+                BorderThickness = new Thickness(1),
+                Height = 40,  // Increased height
+                Padding = new Thickness(10, 8, 10, 8),  // Better padding
+                FontSize = 14,
+                VerticalContentAlignment = VerticalAlignment.Center
             };
             Grid.SetRow(defaultText, rowCount++);
             mainGrid.Children.Add(defaultText);
@@ -1783,12 +1825,17 @@ namespace FormGenerator.Views
 
                 optionsTextBox = new TextBox
                 {
-                    Style = (Style)_mainWindow.FindResource("ModernTextBox"),
-                    Height = 100,
+                    Height = 120,
                     AcceptsReturn = true,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                     Text = control.DataOptions != null ?
                            string.Join("\r\n", control.DataOptions.Select(o => o.DisplayText)) : "",
+                    Background = (Brush)_mainWindow.FindResource("BackgroundLight"),
+                    Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
+                    BorderBrush = (Brush)_mainWindow.FindResource("BorderColor"),
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(10, 8, 10, 8),
+                    FontSize = 14,
                     Margin = new Thickness(0, 5, 0, 0)
                 };
                 optionsPanel.Children.Add(optionsTextBox);
@@ -1804,33 +1851,37 @@ namespace FormGenerator.Views
             var buttonPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 20, 0, 0)
             };
 
             var saveButton = new Button
             {
                 Content = "Save Changes",
-                Width = 120,
-                Height = 35,
+                Width = 140,
+                Height = 40,
                 Margin = new Thickness(0, 0, 10, 0),
-                Style = (Style)_mainWindow.FindResource("ModernButton")
+                Style = (Style)_mainWindow.FindResource("ModernButton"),
+                FontSize = 14
             };
 
             var moveButton = new Button
             {
-                Content = "Move to Section...",
-                Width = 130,
-                Height = 35,
+                Content = "Move to Section",
+                Width = 140,
+                Height = 40,
                 Margin = new Thickness(0, 0, 10, 0),
-                Style = (Style)_mainWindow.FindResource("ModernButton")
+                Style = (Style)_mainWindow.FindResource("ModernButton"),
+                FontSize = 14
             };
 
             var cancelButton = new Button
             {
                 Content = "Cancel",
                 Width = 100,
-                Height = 35,
-                Style = (Style)_mainWindow.FindResource("ModernButton")
+                Height = 40,
+                Style = (Style)_mainWindow.FindResource("ModernButton"),
+                FontSize = 14
             };
 
             saveButton.Click += (s, e) =>
@@ -1867,17 +1918,10 @@ namespace FormGenerator.Views
                         });
                     }
                     control.DataOptionsString = string.Join(", ", control.DataOptions.Select(o => o.DisplayText));
-                    // HasStaticData is read-only - it's automatically determined by having DataOptions
                 }
 
-                // Refresh tree view
-                RefreshStructureTree();
-
-                // UPDATE JSON OUTPUT - this is the key part
-                if (_mainWindow._allFormDefinitions != null && _mainWindow._allFormDefinitions.Any())
-                {
-                    DisplayEnhancedJson(_mainWindow._allFormDefinitions);
-                }
+                // REFRESH BOTH TREE VIEW AND JSON
+                RefreshAll();
 
                 _mainWindow.UpdateStatus($"Updated control: {control.Label}", MessageSeverity.Info);
 
@@ -1906,7 +1950,8 @@ namespace FormGenerator.Views
             Grid.SetRow(buttonPanel, rowCount);
             mainGrid.Children.Add(buttonPanel);
 
-            dialog.Content = mainGrid;
+            scrollViewer.Content = mainGrid;
+            dialog.Content = scrollViewer;
             dialog.ShowDialog();
         }
 
