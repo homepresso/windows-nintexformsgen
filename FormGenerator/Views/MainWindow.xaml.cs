@@ -326,6 +326,29 @@ namespace FormGenerator.Views
             }
         }
 
+        private void SqlAuthRadio_Changed(object sender, RoutedEventArgs e)
+        {
+            // Check if the controls are initialized (to avoid null reference during startup)
+            if (SqlAuthRadio == null || WindowsAuthRadio == null) return;
+
+            if (SqlAuthRadio.IsChecked == true)
+            {
+                // Show SQL authentication fields
+                if (SqlUsernameLabel != null) SqlUsernameLabel.Visibility = Visibility.Visible;
+                if (SqlUsernameTextBox != null) SqlUsernameTextBox.Visibility = Visibility.Visible;
+                if (SqlPasswordLabel != null) SqlPasswordLabel.Visibility = Visibility.Visible;
+                if (SqlPasswordBox != null) SqlPasswordBox.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                // Hide SQL authentication fields for Windows authentication
+                if (SqlUsernameLabel != null) SqlUsernameLabel.Visibility = Visibility.Collapsed;
+                if (SqlUsernameTextBox != null) SqlUsernameTextBox.Visibility = Visibility.Collapsed;
+                if (SqlPasswordLabel != null) SqlPasswordLabel.Visibility = Visibility.Collapsed;
+                if (SqlPasswordBox != null) SqlPasswordBox.Visibility = Visibility.Collapsed;
+            }
+        }
+
         private void ExportTreeStructure()
         {
             try

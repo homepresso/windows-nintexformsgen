@@ -1187,232 +1187,293 @@
                 <TabItem Header="📊 Generate SQL" Name="GenerateSqlTab" IsEnabled="False">
                     <TabControl Background="{StaticResource BackgroundDark}" BorderThickness="0">
                         <!-- SQL Configuration Sub-tab -->
-                        <TabItem Header="Configuration">
-                            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                <Grid Margin="20">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="*"/>
-                                    </Grid.RowDefinitions>
+						<TabItem Header="Configuration">
+							<ScrollViewer VerticalScrollBarVisibility="Auto">
+								<Grid Margin="20">
+									<Grid.RowDefinitions>
+										<RowDefinition Height="Auto"/>
+										<RowDefinition Height="Auto"/>
+										<RowDefinition Height="Auto"/>
+										<RowDefinition Height="*"/>
+									</Grid.RowDefinitions>
 
-                                    <!-- SQL Connection Settings -->
-                                    <Border Grid.Row="0" Style="{StaticResource CardStyle}">
-                                        <StackPanel>
-                                            <TextBlock Text="SQL Database Connection" 
-                                                      FontSize="18" 
-                                                      FontWeight="Medium"
-                                                      Foreground="{StaticResource TextPrimary}"
-                                                      Margin="0,0,0,15"/>
+									<!-- SQL Connection Settings -->
+									<Border Grid.Row="0" Style="{StaticResource CardStyle}">
+										<StackPanel>
+											<TextBlock Text="SQL Database Connection"
+													  FontSize="18"
+													  FontWeight="Medium"
+													  Foreground="{StaticResource TextPrimary}"
+													  Margin="0,0,0,15"/>
 
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="150"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                </Grid.RowDefinitions>
+											<Grid>
+												<Grid.ColumnDefinitions>
+													<ColumnDefinition Width="150"/>
+													<ColumnDefinition Width="*"/>
+												</Grid.ColumnDefinitions>
+												<Grid.RowDefinitions>
+													<RowDefinition Height="Auto"/>
+													<RowDefinition Height="Auto"/>
+													<RowDefinition Height="Auto"/>
+													<RowDefinition Height="Auto"/>
+													<RowDefinition Height="Auto"/>
+													<RowDefinition Height="Auto"/>
+												</Grid.RowDefinitions>
 
-                                                <!-- Server -->
-                                                <TextBlock Grid.Row="0" Grid.Column="0" 
-                                                          Text="Server:" 
-                                                          VerticalAlignment="Center"
-                                                          Foreground="{StaticResource TextSecondary}"/>
-                                                <TextBox Grid.Row="0" Grid.Column="1" 
-                                                        Name="SqlServerTextBox"
-                                                        Style="{StaticResource ModernTextBox}"
-                                                        Text="localhost\SQLEXPRESS"
-                                                        Margin="5,2"/>
+												<!-- Server -->
+												<TextBlock Grid.Row="0" Grid.Column="0"
+														  Text="Server:"
+														  VerticalAlignment="Center"
+														  Foreground="{StaticResource TextSecondary}"/>
+												<TextBox Grid.Row="0" Grid.Column="1"
+														Name="SqlServerTextBox"
+														Style="{StaticResource ModernTextBox}"
+														Text="localhost\SQLEXPRESS"
+														Margin="5,2"/>
 
-                                                <!-- Database -->
-                                                <TextBlock Grid.Row="1" Grid.Column="0" 
-                                                          Text="Database:" 
-                                                          VerticalAlignment="Center"
-                                                          Foreground="{StaticResource TextSecondary}"/>
-                                                <TextBox Grid.Row="1" Grid.Column="1" 
-                                                        Name="SqlDatabaseTextBox"
-                                                        Style="{StaticResource ModernTextBox}"
-                                                        Text="FormDatabase"
-                                                        Margin="5,2"/>
+												<!-- Database -->
+												<TextBlock Grid.Row="1" Grid.Column="0"
+														  Text="Database:"
+														  VerticalAlignment="Center"
+														  Foreground="{StaticResource TextSecondary}"/>
+												<TextBox Grid.Row="1" Grid.Column="1"
+														Name="SqlDatabaseTextBox"
+														Style="{StaticResource ModernTextBox}"
+														Text="FormDatabase"
+														Margin="5,2"/>
 
-                                                <!-- Authentication -->
-                                                <TextBlock Grid.Row="2" Grid.Column="0" 
-                                                          Text="Authentication:" 
-                                                          VerticalAlignment="Center"
-                                                          Foreground="{StaticResource TextSecondary}"/>
-                                                <StackPanel Grid.Row="2" Grid.Column="1" 
-                                                           Orientation="Horizontal" 
-                                                           Margin="5,5">
-                                                    <RadioButton Name="WindowsAuthRadio" 
-                                                                Content="Windows Authentication" 
-                                                                Style="{StaticResource ModernRadioButton}"
-                                                                IsChecked="True"
-                                                                GroupName="SqlAuth"/>
-                                                    <RadioButton Name="SqlAuthRadio" 
-                                                                Content="SQL Server Authentication" 
-                                                                Style="{StaticResource ModernRadioButton}"
-                                                                GroupName="SqlAuth"/>
-                                                </StackPanel>
+												<!-- Authentication -->
+												<TextBlock Grid.Row="2" Grid.Column="0"
+														  Text="Authentication:"
+														  VerticalAlignment="Center"
+														  Foreground="{StaticResource TextSecondary}"/>
+												<StackPanel Grid.Row="2" Grid.Column="1"
+														   Orientation="Horizontal"
+														   Margin="5,5">
+													<RadioButton Name="WindowsAuthRadio"
+																Content="Windows Authentication"
+																Style="{StaticResource ModernRadioButton}"
+																IsChecked="True"
+																GroupName="SqlAuth"
+																Checked="SqlAuthRadio_Changed"/>
+													<RadioButton Name="SqlAuthRadio"
+																Content="SQL Server Authentication"
+																Style="{StaticResource ModernRadioButton}"
+																GroupName="SqlAuth"
+																Checked="SqlAuthRadio_Changed"/>
+												</StackPanel>
 
-                                                <!-- Username (for SQL Auth) -->
-                                                <TextBlock Grid.Row="3" Grid.Column="0" 
-                                                          Text="Username:" 
-                                                          VerticalAlignment="Center"
-                                                          Foreground="{StaticResource TextSecondary}"
-                                                          Name="SqlUsernameLabel"
-                                                          Visibility="Collapsed"/>
-                                                <TextBox Grid.Row="3" Grid.Column="1" 
-                                                        Name="SqlUsernameTextBox"
-                                                        Style="{StaticResource ModernTextBox}"
-                                                        Margin="5,2"
-                                                        Visibility="Collapsed"/>
+												<!-- Username (for SQL Auth) -->
+												<TextBlock Grid.Row="3" Grid.Column="0"
+														  Text="Username:"
+														  VerticalAlignment="Center"
+														  Foreground="{StaticResource TextSecondary}"
+														  Name="SqlUsernameLabel"
+														  Visibility="Collapsed"/>
+												<TextBox Grid.Row="3" Grid.Column="1"
+														Name="SqlUsernameTextBox"
+														Style="{StaticResource ModernTextBox}"
+														Margin="5,2"
+														Visibility="Collapsed"/>
 
-                                                <!-- Password (for SQL Auth) -->
-                                                <TextBlock Grid.Row="4" Grid.Column="0" 
-                                                          Text="Password:" 
-                                                          VerticalAlignment="Center"
-                                                          Foreground="{StaticResource TextSecondary}"
-                                                          Name="SqlPasswordLabel"
-                                                          Visibility="Collapsed"/>
-                                                <PasswordBox Grid.Row="4" Grid.Column="1" 
-                                                            Name="SqlPasswordBox"
-                                                            Style="{StaticResource ModernPasswordBox}"
-                                                            Margin="5,2"
-                                                            Visibility="Collapsed"/>
+												<!-- Password (for SQL Auth) -->
+												<TextBlock Grid.Row="4" Grid.Column="0"
+														  Text="Password:"
+														  VerticalAlignment="Center"
+														  Foreground="{StaticResource TextSecondary}"
+														  Name="SqlPasswordLabel"
+														  Visibility="Collapsed"/>
+												<PasswordBox Grid.Row="4" Grid.Column="1"
+															Name="SqlPasswordBox"
+															Style="{StaticResource ModernPasswordBox}"
+															Margin="5,2"
+															Visibility="Collapsed"/>
 
-                                                <!-- Test Connection Button -->
-                                                <Button Grid.Row="5" Grid.Column="1" 
-                                                       Name="TestSqlConnectionButton"
-                                                       Content="Test Connection"
-                                                       Style="{StaticResource ModernButton}"
-                                                       HorizontalAlignment="Left"
-                                                       Margin="5,10,0,0"
-                                                       Width="150"
-                                                       Click="TestSqlConnection_Click"/>
-                                            </Grid>
-                                        </StackPanel>
-                                    </Border>
+												<!-- Test Connection Button -->
+												<Button Grid.Row="5" Grid.Column="1"
+													   Name="TestSqlConnectionButton"
+													   Content="Test Connection"
+													   Style="{StaticResource ModernButton}"
+													   HorizontalAlignment="Left"
+													   Margin="5,10,0,0"
+													   Width="150"
+													   Click="TestSqlConnection_Click"/>
+											</Grid>
+										</StackPanel>
+									</Border>
 
-                                    <!-- SQL Generation Options -->
-                                    <Border Grid.Row="1" Style="{StaticResource CardStyle}">
-                                        <StackPanel>
-                                            <TextBlock Text="Generation Options" 
-                                                      FontSize="18" 
-                                                      FontWeight="Medium"
-                                                      Foreground="{StaticResource TextPrimary}"
-                                                      Margin="0,0,0,15"/>
+									<!-- SQL Generation Options -->
+									<Border Grid.Row="1" Style="{StaticResource CardStyle}">
+										<StackPanel>
+											<TextBlock Text="Generation Options"
+													  FontSize="18"
+													  FontWeight="Medium"
+													  Foreground="{StaticResource TextPrimary}"
+													  Margin="0,0,0,15"/>
 
-                                            <StackPanel>
-                                                <TextBlock Text="Table Structure:" 
-                                                          FontWeight="Medium"
-                                                          Foreground="{StaticResource TextPrimary}"
-                                                          Margin="0,0,0,10"/>
+											<StackPanel>
+												<!-- Table Structure Options -->
+												<TextBlock Text="Table Structure:"
+														  FontWeight="Medium"
+														  Foreground="{StaticResource TextPrimary}"
+														  Margin="0,0,0,10"/>
 
-                                                <RadioButton Name="FlatTablesRadio"
-                                                            Content="Flat Tables (Simple structure, one table per form)"
-                                                            Style="{StaticResource ModernRadioButton}"
-                                                            IsChecked="True"
-                                                            GroupName="TableStructure"/>
+												<RadioButton Name="FlatTablesRadio"
+															Style="{StaticResource ModernRadioButton}"
+															IsChecked="True"
+															GroupName="TableStructure"
+															Margin="0,5,0,10">
+													<RadioButton.Content>
+														<StackPanel>
+															<TextBlock Text="Flat Tables (Control Names as Columns)"
+																	  FontWeight="Medium"
+																	  Foreground="{StaticResource TextPrimary}"/>
+															<TextBlock Text="• Main table with control names as column names"
+																	  FontSize="11"
+																	  Foreground="{StaticResource TextSecondary}"
+																	  Margin="20,2,0,0"/>
+															<TextBlock Text="• Separate tables for repeating sections"
+																	  FontSize="11"
+																	  Foreground="{StaticResource TextSecondary}"
+																	  Margin="20,2,0,0"/>
+															<TextBlock Text="• Lookup tables for dropdown values"
+																	  FontSize="11"
+																	  Foreground="{StaticResource TextSecondary}"
+																	  Margin="20,2,0,0"/>
+															<TextBlock Text="• Best for simple reporting and direct queries"
+																	  FontSize="11"
+																	  FontStyle="Italic"
+																	  Foreground="{StaticResource AccentLight}"
+																	  Margin="20,2,0,0"/>
+														</StackPanel>
+													</RadioButton.Content>
+												</RadioButton>
 
-                                                <RadioButton Name="NormalizedTablesRadio"
-                                                            Content="Normalized Tables (Separate tables for repeating sections)"
-                                                            Style="{StaticResource ModernRadioButton}"
-                                                            GroupName="TableStructure"/>
+												<RadioButton Name="NormalizedTablesRadio"
+															Style="{StaticResource ModernRadioButton}"
+															GroupName="TableStructure"
+															Margin="0,5,0,15">
+													<RadioButton.Content>
+														<StackPanel>
+															<TextBlock Text="Normalized Q&amp;A Structure (Questions and Answers)"
+																	  FontWeight="Medium"
+																	  Foreground="{StaticResource TextPrimary}"/>
+															<TextBlock Text="• Forms table for form definitions"
+																	  FontSize="11"
+																	  Foreground="{StaticResource TextSecondary}"
+																	  Margin="20,2,0,0"/>
+															<TextBlock Text="• Questions table (Q1='Name', Q2='Email', etc.)"
+																	  FontSize="11"
+																	  Foreground="{StaticResource TextSecondary}"
+																	  Margin="20,2,0,0"/>
+															<TextBlock Text="• Submissions table for form submissions"
+																	  FontSize="11"
+																	  Foreground="{StaticResource TextSecondary}"
+																	  Margin="20,2,0,0"/>
+															<TextBlock Text="• Answers table linking questions to responses"
+																	  FontSize="11"
+																	  Foreground="{StaticResource TextSecondary}"
+																	  Margin="20,2,0,0"/>
+															<TextBlock Text="• Best for dynamic forms and flexible reporting"
+																	  FontSize="11"
+																	  FontStyle="Italic"
+																	  Foreground="{StaticResource AccentLight}"
+																	  Margin="20,2,0,0"/>
+														</StackPanel>
+													</RadioButton.Content>
+												</RadioButton>
 
-                                                <TextBlock Text="Stored Procedures:" 
-                                                          FontWeight="Medium"
-                                                          Foreground="{StaticResource TextPrimary}"
-                                                          Margin="0,15,0,10"/>
+												<!-- Info Panel -->
+												<Border Background="{StaticResource BackgroundMedium}"
+													   BorderBrush="{StaticResource InfoColor}"
+													   BorderThickness="1"
+													   CornerRadius="5"
+													   Padding="10"
+													   Margin="0,10,0,0">
+													<StackPanel>
+														<TextBlock Text="ℹ️ Included Features"
+																  FontWeight="Medium"
+																  Foreground="{StaticResource InfoColor}"
+																  Margin="0,0,0,5"/>
+														<TextBlock Text="Both structures automatically include:"
+																  FontSize="11"
+																  Foreground="{StaticResource TextSecondary}"
+																  TextWrapping="Wrap"/>
+														<TextBlock Text="✓ Drop statements for clean re-deployment"
+																  FontSize="11"
+																  Foreground="{StaticResource TextSecondary}"
+																  Margin="10,2,0,0"/>
+														<TextBlock Text="✓ Stored procedures (Submit, View, List)"
+																  FontSize="11"
+																  Foreground="{StaticResource TextSecondary}"
+																  Margin="10,2,0,0"/>
+														<TextBlock Text="✓ Performance indexes"
+																  FontSize="11"
+																  Foreground="{StaticResource TextSecondary}"
+																  Margin="10,2,0,0"/>
+														<TextBlock Text="✓ Foreign key constraints"
+																  FontSize="11"
+																  Foreground="{StaticResource TextSecondary}"
+																  Margin="10,2,0,0"/>
+														<TextBlock Text="✓ System fields (ID, DateSubmitted, etc.)"
+																  FontSize="11"
+																  Foreground="{StaticResource TextSecondary}"
+																  Margin="10,2,0,0"/>
+													</StackPanel>
+												</Border>
+											</StackPanel>
+										</StackPanel>
+									</Border>
 
-                                                <CheckBox Name="GenerateCrudProcsCheckBox"
-                                                         Content="Generate CRUD Stored Procedures"
-                                                         Style="{StaticResource ModernCheckBox}"
-                                                         IsChecked="True"/>
+									<!-- Generate Button -->
+									<StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20">
+										<Button Name="GenerateSqlButton"
+											   Content="🔨 Generate SQL Scripts"
+											   Style="{StaticResource ModernButton}"
+											   Width="200"
+											   Height="45"
+											   FontSize="16"
+											   Click="GenerateSql_Click"
+											   IsEnabled="False"/>
 
-                                                <CheckBox Name="GenerateScalableProcsCheckBox"
-                                                         Content="Generate Scalable Stored Procedures (with pagination)"
-                                                         Style="{StaticResource ModernCheckBox}"
-                                                         IsChecked="False"/>
+										<Button Name="DeploySqlButton"
+											   Content="🚀 Deploy to Database"
+											   Style="{StaticResource ModernButton}"
+											   Width="200"
+											   Height="45"
+											   FontSize="16"
+											   Background="{StaticResource SuccessColor}"
+											   Margin="10,0,0,0"
+											   Click="DeploySql_Click"
+											   IsEnabled="False"/>
+									</StackPanel>
 
-                                                <TextBlock Text="Additional Options:" 
-                                                          FontWeight="Medium"
-                                                          Foreground="{StaticResource TextPrimary}"
-                                                          Margin="0,15,0,10"/>
+									<!-- Output Log -->
+									<Border Grid.Row="3" Style="{StaticResource CardStyle}">
+										<Grid>
+											<Grid.RowDefinitions>
+												<RowDefinition Height="Auto"/>
+												<RowDefinition Height="*"/>
+											</Grid.RowDefinitions>
 
-                                                <CheckBox Name="IncludeIndexesCheckBox"
-                                                         Content="Include Indexes for Performance"
-                                                         Style="{StaticResource ModernCheckBox}"
-                                                         IsChecked="True"/>
+											<TextBlock Grid.Row="0"
+													  Text="Generation Log"
+													  FontSize="16"
+													  FontWeight="Medium"
+													  Foreground="{StaticResource TextPrimary}"
+													  Margin="0,0,0,10"/>
 
-                                                <CheckBox Name="IncludeConstraintsCheckBox"
-                                                         Content="Include Foreign Key Constraints"
-                                                         Style="{StaticResource ModernCheckBox}"
-                                                         IsChecked="True"/>
-
-                                                <CheckBox Name="IncludeTriggersCheckBox"
-                                                         Content="Include Audit Triggers"
-                                                         Style="{StaticResource ModernCheckBox}"
-                                                         IsChecked="False"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Border>
-
-                                    <!-- Generate Button -->
-                                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20">
-                                        <Button Name="GenerateSqlButton"
-                                               Content="🔨 Generate SQL Scripts"
-                                               Style="{StaticResource ModernButton}"
-                                               Width="200"
-                                               Height="45"
-                                               FontSize="16"
-                                               Click="GenerateSql_Click"
-                                               IsEnabled="False"/>
-
-                                        <Button Name="DeploySqlButton"
-                                               Content="🚀 Deploy to Database"
-                                               Style="{StaticResource ModernButton}"
-                                               Width="200"
-                                               Height="45"
-                                               FontSize="16"
-                                               Background="{StaticResource SuccessColor}"
-                                               Margin="10,0,0,0"
-                                               Click="DeploySql_Click"
-                                               IsEnabled="False"/>
-                                    </StackPanel>
-
-                                    <!-- Output Log -->
-                                    <Border Grid.Row="3" Style="{StaticResource CardStyle}">
-                                        <Grid>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto"/>
-                                                <RowDefinition Height="*"/>
-                                            </Grid.RowDefinitions>
-
-                                            <TextBlock Grid.Row="0"
-                                                      Text="Generation Log" 
-                                                      FontSize="16" 
-                                                      FontWeight="Medium"
-                                                      Foreground="{StaticResource TextPrimary}"
-                                                      Margin="0,0,0,10"/>
-
-                                            <TextBox Grid.Row="1"
-                                                    Name="SqlGenerationLog"
-                                                    Style="{StaticResource ModernTextBox}"
-                                                    IsReadOnly="True"
-                                                    MinHeight="150"
-                                                    Text="Ready to generate SQL scripts..."/>
-                                        </Grid>
-                                    </Border>
-                                </Grid>
-                            </ScrollViewer>
-                        </TabItem>
+											<TextBox Grid.Row="1"
+													Name="SqlGenerationLog"
+													Style="{StaticResource ModernTextBox}"
+													IsReadOnly="True"
+													MinHeight="150"
+													Text="Ready to generate SQL scripts..."/>
+										</Grid>
+									</Border>
+								</Grid>
+							</ScrollViewer>
+						</TabItem>
 
                         <!-- SQL Preview Sub-tab -->
                         <TabItem Header="SQL Preview">

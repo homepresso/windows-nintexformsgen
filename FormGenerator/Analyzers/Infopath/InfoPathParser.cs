@@ -15,6 +15,10 @@ namespace FormGenerator.Analyzers.Infopath
 
     public class InfoPathFormDefinition
     {
+
+        public string FormName { get; set; }  // The name of the form (from filename or metadata)
+        public string FileName { get; set; }  // The original XSN filename
+        public string Title { get; set; }
         public List<ViewDefinition> Views { get; set; } = new List<ViewDefinition>();
         public List<FormRule> Rules { get; set; } = new List<FormRule>();
         public List<DataColumn> Data { get; set; } = new List<DataColumn>();
@@ -98,7 +102,16 @@ namespace FormGenerator.Analyzers.Infopath
         public string Expression { get; set; }
     }
 
-    public class DataColumn
+    public class ValidValue
+    {
+        public string Value { get; set; }
+        public string DisplayText { get; set; }
+        public int Order { get; set; }
+        public bool IsDefault { get; set; }
+    }
+
+
+public class DataColumn
     {
         public string ColumnName { get; set; }
         public string Type { get; set; }

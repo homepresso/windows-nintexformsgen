@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using FormGenerator.Analyzers.Infopath;
 using FormGenerator.Core.Models;
+using FormGenerator.Services;
 
 namespace FormGenerator.Core.Interfaces
 {
@@ -24,8 +25,9 @@ namespace FormGenerator.Core.Interfaces
     /// </summary>
     public interface ISqlGenerator
     {
-        Task<SqlGenerationResult> GenerateFromAnalysisAsync(FormAnalysisResult analysis);
         SqlDialect Dialect { get; set; }
+        Task<SqlGenerationResult> GenerateFromAnalysisAsync(FormAnalysisResult analysis);
+        Task<SqlGenerationResult> GenerateFromAnalysisAsync(FormAnalysisResult analysis, TableStructureType? structureType);
     }
 
     /// <summary>
@@ -94,38 +96,45 @@ namespace FormGenerator.Core.Models
     {
         public bool Success { get; set; }
         public string ErrorMessage { get; set; }
-
         public List<SqlScript> Scripts { get; set; } = new List<SqlScript>();
         public SqlDialect Dialect { get; set; }
+        public TableStructureType StructureType { get; set; }
         public DateTime GeneratedDate { get; set; }
+        public int TotalScripts => Scripts?.Count ?? 0;
     }
 
     public class SqlScript
     {
         public string Name { get; set; }
-        public ScriptType Type { get; set; }
         public string Content { get; set; }
+        public ScriptType Type { get; set; }
         public int ExecutionOrder { get; set; }
         public string Description { get; set; }
+    }
+    public enum SqlDialect
+    {
+        SqlServer,
+        MySql,
+        PostgreSql,
+        Oracle
     }
 
     public enum ScriptType
     {
         Table,
-        StoredProcedure,
-        View,
-        Function,
         Index,
         Constraint,
-        Data
+        StoredProcedure,
+        View,
+        Trigger,
+        Data,
+        Other
     }
 
-    public enum SqlDialect
+    public enum TableStructureType
     {
-        SqlServer,
-        PostgreSQL,
-        MySQL,
-        Oracle
+        FlatTables,
+        NormalizedQA
     }
 
     /// <summary>

@@ -10,13 +10,18 @@ using FormGenerator.Analyzers.Infopath;
 namespace FormGenerator.Services
 {
     /// <summary>
-    /// Enhanced SQL generation service for creating database schema from form analysis
+    /// Enhanced SQL generation service with proper repeating section support
     /// </summary>
     public class SqlGeneratorService : ISqlGenerator
     {
         public SqlDialect Dialect { get; set; } = SqlDialect.SqlServer;
 
         public async Task<SqlGenerationResult> GenerateFromAnalysisAsync(FormAnalysisResult analysis)
+        {
+            return await GenerateFromAnalysisAsync(analysis, null);
+        }
+
+        public async Task<SqlGenerationResult> GenerateFromAnalysisAsync(FormAnalysisResult analysis, TableStructureType? structureType)
         {
             var result = new SqlGenerationResult
             {
@@ -36,26 +41,36 @@ namespace FormGenerator.Services
                     var formDef = analysis.FormDefinition;
                     var scripts = new List<SqlScript>();
 
+                    // Analyze the form structure to identify repeating sections
+                    var repeatingSectionAnalysis = AnalyzeRepeatingSections(formDef);
+
+                    // Apply structure type if specified
+                    if (structureType.HasValue)
+                    {
+                        // You can add logic here to handle different structure types
+                        // For now, we'll use the enhanced repeating section approach
+                    }
+
                     // Generate drop statements first (for re-deployment)
-                    scripts.Add(GenerateDropStatements(formDef));
+                    scripts.Add(GenerateDropStatements(formDef, repeatingSectionAnalysis));
 
                     // Generate main form table
-                    scripts.Add(GenerateMainTable(formDef));
+                    scripts.Add(GenerateMainTable(formDef, repeatingSectionAnalysis));
 
                     // Generate lookup tables for dropdowns
                     scripts.AddRange(GenerateLookupTables(formDef));
 
-                    // Generate tables for repeating sections
-                    scripts.AddRange(GenerateRepeatingTables(formDef));
+                    // Generate tables for repeating sections - ENHANCED
+                    scripts.AddRange(GenerateRepeatingTables(formDef, repeatingSectionAnalysis));
 
                     // Generate stored procedures
-                    scripts.AddRange(GenerateStoredProcedures(formDef));
+                    scripts.AddRange(GenerateStoredProcedures(formDef, repeatingSectionAnalysis));
 
                     // Generate views
-                    scripts.Add(GenerateMainView(formDef));
+                    scripts.Add(GenerateMainView(formDef, repeatingSectionAnalysis));
 
                     // Generate indexes
-                    scripts.Add(GenerateIndexes(formDef));
+                    scripts.Add(GenerateIndexes(formDef, repeatingSectionAnalysis));
 
                     // Order scripts by execution order
                     result.Scripts = scripts.OrderBy(s => s.ExecutionOrder).ToList();
@@ -72,9 +87,120 @@ namespace FormGenerator.Services
             return result;
         }
 
-        private SqlScript GenerateDropStatements(InfoPathFormDefinition formDef)
+        /// <summary>
+        /// Enhanced repeating section analysis - focuses ONLY on true repeating sections from Data
+        /// </summary>
+        private RepeatingSectionAnalysis AnalyzeRepeatingSections(InfoPathFormDefinition formDef)
         {
-            var tableName = SanitizeTableName(formDef.Views.First().ViewName);
+            var analysis = new RepeatingSectionAnalysis();
+
+            // PRIMARY APPROACH: Use Data columns to identify repeating sections
+            // This is the most reliable source as it represents the actual data structure
+            var repeatingSectionNames = formDef.Data
+                .Where(d => d.IsRepeating && !string.IsNullOrEmpty(d.RepeatingSection))
+                .Select(d => d.RepeatingSection)
+                .Distinct()
+                .ToList();
+
+            foreach (var sectionName in repeatingSectionNames)
+            {
+                analysis.RepeatingSections[sectionName] = new RepeatingSectionInfo
+                {
+                    Name = sectionName,
+                    SectionType = "repeating",
+                    Controls = new List<ControlDefinition>(),
+                    ChildSections = new List<string>()
+                };
+
+                // Find ALL controls for this repeating section from the Data (including conditional ones)
+                var sectionColumns = formDef.Data
+                    .Where(d => d.IsRepeating && d.RepeatingSection == sectionName)
+                    .ToList();
+
+                // Map data columns to actual controls
+                foreach (var dataColumn in sectionColumns)
+                {
+                    var matchingControl = formDef.Views
+                        .SelectMany(v => v.Controls)
+                        .FirstOrDefault(c => c.Name == dataColumn.ColumnName ||
+                                           c.Binding == dataColumn.ColumnName ||
+                                           c.Label == dataColumn.DisplayName);
+
+                    if (matchingControl != null &&
+                        !analysis.RepeatingSections[sectionName].Controls.Any(existing => existing.Name == matchingControl.Name))
+                    {
+                        analysis.RepeatingSections[sectionName].Controls.Add(matchingControl);
+                    }
+                }
+            }
+
+            // SECONDARY APPROACH: Use controls with IsInRepeatingSection property as backup
+            foreach (var view in formDef.Views)
+            {
+                foreach (var control in view.Controls)
+                {
+                    if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+                    {
+                        var sectionName = control.RepeatingSectionName;
+
+                        if (!analysis.RepeatingSections.ContainsKey(sectionName))
+                        {
+                            analysis.RepeatingSections[sectionName] = new RepeatingSectionInfo
+                            {
+                                Name = sectionName,
+                                SectionType = "repeating",
+                                Controls = new List<ControlDefinition>(),
+                                ChildSections = new List<string>()
+                            };
+                        }
+
+                        // Add control if it's not a label and not already added
+                        if (control.Type != "Label" &&
+                            !analysis.RepeatingSections[sectionName].Controls.Any(existing => existing.Name == control.Name))
+                        {
+                            analysis.RepeatingSections[sectionName].Controls.Add(control);
+                        }
+                    }
+                }
+            }
+
+            // Identify columns for non-repeating sections (main table)
+            analysis.MainTableColumns = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => !c.IsInRepeatingSection &&
+                           c.Type != "Label" && c.Type != "Section" &&
+                           c.Type != "RepeatingSection" && c.Type != "RepeatingTable")
+                .GroupBy(c => c.Name)
+                .Select(g => g.First())
+                .ToList();
+
+            // Also add from Data columns that are not repeating
+            var mainTableDataColumns = formDef.Data
+                .Where(d => !d.IsRepeating)
+                .ToList();
+
+            foreach (var dataColumn in mainTableDataColumns)
+            {
+                var matchingControl = formDef.Views
+                    .SelectMany(v => v.Controls)
+                    .FirstOrDefault(c => c.Name == dataColumn.ColumnName ||
+                                       c.Binding == dataColumn.ColumnName ||
+                                       c.Label == dataColumn.DisplayName);
+
+                if (matchingControl != null &&
+                    !analysis.MainTableColumns.Any(existing => existing.Name == matchingControl.Name) &&
+                    matchingControl.Type != "Label")
+                {
+                    analysis.MainTableColumns.Add(matchingControl);
+                }
+            }
+
+            return analysis;
+        }
+
+        private SqlScript GenerateDropStatements(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
+        {
+            var tableName = SanitizeTableName(formDef.FormName);
             var sb = new StringBuilder();
 
             sb.AppendLine("-- ===============================================");
@@ -88,45 +214,28 @@ namespace FormGenerator.Services
             sb.AppendLine();
 
             // Drop stored procedures
-            sb.AppendLine($"IF OBJECT_ID('dbo.sp_{tableName}_Insert', 'P') IS NOT NULL");
-            sb.AppendLine($"    DROP PROCEDURE [dbo].[sp_{tableName}_Insert];");
-            sb.AppendLine();
-
-            sb.AppendLine($"IF OBJECT_ID('dbo.sp_{tableName}_Update', 'P') IS NOT NULL");
-            sb.AppendLine($"    DROP PROCEDURE [dbo].[sp_{tableName}_Update];");
-            sb.AppendLine();
-
-            sb.AppendLine($"IF OBJECT_ID('dbo.sp_{tableName}_Get', 'P') IS NOT NULL");
-            sb.AppendLine($"    DROP PROCEDURE [dbo].[sp_{tableName}_Get];");
-            sb.AppendLine();
-
-            sb.AppendLine($"IF OBJECT_ID('dbo.sp_{tableName}_Delete', 'P') IS NOT NULL");
-            sb.AppendLine($"    DROP PROCEDURE [dbo].[sp_{tableName}_Delete];");
-            sb.AppendLine();
-
-            sb.AppendLine($"IF OBJECT_ID('dbo.sp_{tableName}_List', 'P') IS NOT NULL");
-            sb.AppendLine($"    DROP PROCEDURE [dbo].[sp_{tableName}_List];");
-            sb.AppendLine();
-
-            // Drop repeating section tables
-            var repeatingSections = formDef.Data
-                .Where(d => d.IsRepeating)
-                .Select(d => d.RepeatingSection)
-                .Distinct()
-                .Where(s => !string.IsNullOrEmpty(s));
-
-            foreach (var section in repeatingSections)
+            var procedures = new[] { "Insert", "Update", "Get", "Delete", "List" };
+            foreach (var proc in procedures)
             {
-                var sectionTableName = SanitizeTableName(section);
-                sb.AppendLine($"IF OBJECT_ID('dbo.{tableName}_{sectionTableName}', 'U') IS NOT NULL");
-                sb.AppendLine($"    DROP TABLE [dbo].[{tableName}_{sectionTableName}];");
+                sb.AppendLine($"IF OBJECT_ID('dbo.sp_{tableName}_{proc}', 'P') IS NOT NULL");
+                sb.AppendLine($"    DROP PROCEDURE [dbo].[sp_{tableName}_{proc}];");
+                sb.AppendLine();
+            }
+
+            // Drop repeating section tables ONLY (not conditional sections)
+            foreach (var section in analysis.RepeatingSections.Values)
+            {
+                var sectionTableName = SanitizeTableName(section.Name);
+                var fullTableName = $"{tableName}_{sectionTableName}";
+                sb.AppendLine($"IF OBJECT_ID('dbo.{fullTableName}', 'U') IS NOT NULL");
+                sb.AppendLine($"    DROP TABLE [dbo].[{fullTableName}];");
                 sb.AppendLine();
             }
 
             // Drop lookup tables
             var controlsWithLookups = formDef.Views
                 .SelectMany(v => v.Controls)
-                .Where(c => c.HasStaticData && c.DataOptions.Count > 5)
+                .Where(c => c.HasStaticData && c.DataOptions != null && c.DataOptions.Count > 5)
                 .GroupBy(c => c.Name)
                 .ToList();
 
@@ -139,7 +248,7 @@ namespace FormGenerator.Services
                 sb.AppendLine();
             }
 
-            // Drop main table last (due to foreign key constraints)
+            // Drop main table last
             sb.AppendLine($"IF OBJECT_ID('dbo.{tableName}', 'U') IS NOT NULL");
             sb.AppendLine($"    DROP TABLE [dbo].[{tableName}];");
             sb.AppendLine();
@@ -154,15 +263,21 @@ namespace FormGenerator.Services
             };
         }
 
-        private SqlScript GenerateMainTable(InfoPathFormDefinition formDef)
+        private SqlScript GenerateMainTable(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
         {
-            var tableName = SanitizeTableName(formDef.Views.First().ViewName);
+            var tableName = SanitizeTableName(formDef.FormName);
             var sb = new StringBuilder();
 
             if (Dialect == SqlDialect.SqlServer)
             {
                 sb.AppendLine("-- ===============================================");
                 sb.AppendLine($"-- Main table for {tableName}");
+                sb.AppendLine($"-- Main table controls: {analysis.MainTableColumns.Count}");
+                sb.AppendLine($"-- Repeating sections: {analysis.RepeatingSections.Count}");
+                foreach (var section in analysis.RepeatingSections)
+                {
+                    sb.AppendLine($"--   {section.Key}: {section.Value.Controls.Count} controls");
+                }
                 sb.AppendLine("-- ===============================================");
                 sb.AppendLine();
 
@@ -179,66 +294,83 @@ namespace FormGenerator.Services
                 sb.AppendLine("    [Status] NVARCHAR(50) DEFAULT 'Draft' NOT NULL,");
                 sb.AppendLine("    [Version] INT DEFAULT 1 NOT NULL,");
                 sb.AppendLine();
-                sb.AppendLine("    -- Form Fields");
 
-                // Track columns that need CHECK constraints
-                var columnsWithConstraints = new List<(string columnName, List<string> validValues)>();
-
-                // Add columns for non-repeating fields
-                var processedColumns = new HashSet<string>();
-                foreach (var column in formDef.Data.Where(d => !d.IsRepeating).OrderBy(d => d.ColumnName))
+                if (analysis.MainTableColumns.Any())
                 {
-                    var columnName = SanitizeColumnName(column.ColumnName);
-                    if (!processedColumns.Contains(columnName))
+                    sb.AppendLine("    -- Form Fields");
+
+                    // Track columns that need CHECK constraints
+                    var columnsWithConstraints = new List<(string columnName, List<string> validValues)>();
+
+                    // Add columns for non-repeating fields only
+                    var processedColumns = new HashSet<string>();
+                    foreach (var control in analysis.MainTableColumns.OrderBy(c => c.Name))
                     {
-                        processedColumns.Add(columnName);
-                        var sqlType = GetSqlType(column.Type);
-
-                        // FIXED: Default to NULL for safety since IsRequired doesn't exist
-                        var nullable = " NULL";
-
-                        // Check if this column has a default value from the control
-                        var defaultValue = GetDefaultValueClause(column, formDef);
-
-                        // Add comment for the column
-                        var comment = string.IsNullOrEmpty(column.DisplayName) ? column.ColumnName : column.DisplayName;
-                        sb.AppendLine($"    [{columnName}] {sqlType}{nullable}{defaultValue}, -- {comment}");
-
-                        // Track if this column needs constraints
-                        if (column.HasConstraints && column.ValidValues != null && column.ValidValues.Any())
+                        var columnName = SanitizeColumnName(control.Name);
+                        if (!processedColumns.Contains(columnName))
                         {
-                            columnsWithConstraints.Add((columnName,
-                                column.ValidValues.Select(v => v.Value).ToList()));
+                            processedColumns.Add(columnName);
+                            var sqlType = GetSqlType(control.Type);
+                            var nullable = " NULL";
+                            var defaultValue = GetDefaultValueClause(control);
+                            var comment = string.IsNullOrEmpty(control.Label) ? control.Name : control.Label;
+
+                            sb.AppendLine($"    [{columnName}] {sqlType}{nullable}{defaultValue}, -- {comment}");
+
+                            // Track if this column needs constraints
+                            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any())
+                            {
+                                columnsWithConstraints.Add((columnName,
+                                    control.DataOptions.Select(v => v.Value).ToList()));
+                            }
                         }
                     }
+
+                    sb.AppendLine();
+                    sb.AppendLine("    -- Constraints");
+                    sb.AppendLine($"    CONSTRAINT [PK_{tableName}] PRIMARY KEY CLUSTERED ([Id] ASC),");
+                    sb.AppendLine($"    CONSTRAINT [UQ_{tableName}_FormId] UNIQUE ([FormId])");
+                    sb.AppendLine(");");
+                    sb.AppendLine();
+
+                    // Add CHECK constraints for columns with valid values
+                    foreach (var (columnName, validValues) in columnsWithConstraints)
+                    {
+                        sb.AppendLine($"-- Add CHECK constraint for {columnName}");
+                        var constraintName = $"CK_{tableName}_{columnName}";
+                        var valuesList = string.Join(", ", validValues.Select(v => $"N'{v.Replace("'", "''")}'"));
+                        sb.AppendLine($"ALTER TABLE [dbo].[{tableName}]");
+                        sb.AppendLine($"ADD CONSTRAINT [{constraintName}]");
+                        sb.AppendLine($"CHECK ([{columnName}] IN ({valuesList}) OR [{columnName}] IS NULL);");
+                        sb.AppendLine();
+                    }
                 }
-
-                sb.AppendLine();
-                sb.AppendLine("    -- Constraints");
-                sb.AppendLine($"    CONSTRAINT [PK_{tableName}] PRIMARY KEY CLUSTERED ([Id] ASC),");
-                sb.AppendLine($"    CONSTRAINT [UQ_{tableName}_FormId] UNIQUE ([FormId])");
-                sb.AppendLine(");");
-                sb.AppendLine();
-
-                // Add CHECK constraints for columns with valid values
-                foreach (var (columnName, validValues) in columnsWithConstraints)
+                else
                 {
-                    sb.AppendLine($"-- Add CHECK constraint for {columnName}");
-                    var constraintName = $"CK_{tableName}_{columnName}";
-                    var valuesList = string.Join(", ", validValues.Select(v => $"N'{v.Replace("'", "''")}'"));
-                    sb.AppendLine($"ALTER TABLE [dbo].[{tableName}]");
-                    sb.AppendLine($"ADD CONSTRAINT [{constraintName}]");
-                    sb.AppendLine($"CHECK ([{columnName}] IN ({valuesList}) OR [{columnName}] IS NULL);");
+                    sb.AppendLine("    -- No main form fields found");
+                    sb.AppendLine("    [PlaceholderField] NVARCHAR(MAX) NULL,");
+                    sb.AppendLine();
+                    sb.AppendLine("    -- Constraints");
+                    sb.AppendLine($"    CONSTRAINT [PK_{tableName}] PRIMARY KEY CLUSTERED ([Id] ASC),");
+                    sb.AppendLine($"    CONSTRAINT [UQ_{tableName}_FormId] UNIQUE ([FormId])");
+                    sb.AppendLine(");");
                     sb.AppendLine();
                 }
 
-                // Add table extended property for description
+                // Add table extended property for description (check if exists first)
                 sb.AppendLine("-- Add table description");
-                sb.AppendLine($"EXEC sp_addextendedproperty ");
-                sb.AppendLine($"    @name = N'MS_Description',");
-                sb.AppendLine($"    @value = N'Main table for {formDef.Views.First().ViewName} form data',");
-                sb.AppendLine($"    @level0type = N'SCHEMA', @level0name = N'dbo',");
-                sb.AppendLine($"    @level1type = N'TABLE', @level1name = N'{tableName}';");
+                sb.AppendLine($"IF NOT EXISTS (");
+                sb.AppendLine($"    SELECT 1 FROM sys.extended_properties ep");
+                sb.AppendLine($"    INNER JOIN sys.tables t ON ep.major_id = t.object_id");
+                sb.AppendLine($"    WHERE t.name = N'{tableName}' AND ep.name = N'MS_Description' AND ep.minor_id = 0");
+                sb.AppendLine($")");
+                sb.AppendLine($"BEGIN");
+                sb.AppendLine($"    EXEC sp_addextendedproperty ");
+                sb.AppendLine($"        @name = N'MS_Description',");
+                sb.AppendLine($"                                @value = N'Main table for {formDef.FormName} form data. Contains {analysis.MainTableColumns.Count} main fields.',");
+                sb.AppendLine($"        @level0type = N'SCHEMA', @level0name = N'dbo',");
+                sb.AppendLine($"        @level1type = N'TABLE', @level1name = N'{tableName}';");
+                sb.AppendLine($"END");
                 sb.AppendLine();
             }
 
@@ -248,85 +380,166 @@ namespace FormGenerator.Services
                 Type = ScriptType.Table,
                 Content = sb.ToString(),
                 ExecutionOrder = 1,
-                Description = $"Main table for form {tableName}"
+                Description = $"Main table for form {tableName} with {analysis.MainTableColumns.Count} fields"
             };
         }
 
-
-        private SqlScript GenerateIndexes(InfoPathFormDefinition formDef)
+        private List<SqlScript> GenerateRepeatingTables(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
         {
-            var tableName = SanitizeTableName(formDef.Views.First().ViewName);
-            var sb = new StringBuilder();
+            var scripts = new List<SqlScript>();
+            var mainTableName = SanitizeTableName(formDef.FormName);
+            int order = 2;
 
-            sb.AppendLine("-- ===============================================");
-            sb.AppendLine($"-- Indexes for {tableName}");
-            sb.AppendLine("-- ===============================================");
-            sb.AppendLine();
-
-            // Standard indexes
-            sb.AppendLine("-- Index on FormId for quick lookups");
-            sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_FormId]");
-            sb.AppendLine($"ON [dbo].[{tableName}] ([FormId])");
-            sb.AppendLine("INCLUDE ([Status], [CreatedDate], [ModifiedDate]);");
-            sb.AppendLine();
-
-            sb.AppendLine("-- Index on CreatedDate for sorting and filtering");
-            sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_CreatedDate]");
-            sb.AppendLine($"ON [dbo].[{tableName}] ([CreatedDate] DESC)");
-            sb.AppendLine("INCLUDE ([FormId], [Status], [CreatedBy]);");
-            sb.AppendLine();
-
-            sb.AppendLine("-- Index on Status for filtering");
-            sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_Status]");
-            sb.AppendLine($"ON [dbo].[{tableName}] ([Status])");
-            sb.AppendLine("INCLUDE ([FormId], [CreatedDate]);");
-            sb.AppendLine();
-
-            sb.AppendLine("-- Index on CreatedBy for user queries");
-            sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_CreatedBy]");
-            sb.AppendLine($"ON [dbo].[{tableName}] ([CreatedBy])");
-            sb.AppendLine("WHERE [CreatedBy] IS NOT NULL;");
-            sb.AppendLine();
-
-            // Add indexes for frequently searched text columns
-            var searchableColumns = formDef.Data
-                .Where(d => !d.IsRepeating &&
-                       (d.Type == "TextField" || d.Type == "DropDown") &&
-                       !d.ColumnName.Contains("Description") &&
-                       !d.ColumnName.Contains("Comments"))
-                .Take(3) // Limit to top 3 searchable columns
-                .ToList();
-
-            foreach (var column in searchableColumns)
+            foreach (var sectionKvp in analysis.RepeatingSections)
             {
-                var columnName = SanitizeColumnName(column.ColumnName);
-                sb.AppendLine($"-- Index on {columnName} for searching");
-                sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_{columnName}]");
-                sb.AppendLine($"ON [dbo].[{tableName}] ([{columnName}])");
-                sb.AppendLine($"WHERE [{columnName}] IS NOT NULL;");
-                sb.AppendLine();
+                var section = sectionKvp.Value;
+                var sectionTableName = SanitizeTableName(section.Name);
+                var fullTableName = $"{mainTableName}_{sectionTableName}";
+                var sb = new StringBuilder();
+
+                if (Dialect == SqlDialect.SqlServer)
+                {
+                    sb.AppendLine("-- ===============================================");
+                    sb.AppendLine($"-- Repeating section table: {section.Name}");
+                    sb.AppendLine($"-- Controls in section: {section.Controls.Count}");
+                    if (section.ChildSections.Any())
+                    {
+                        sb.AppendLine($"-- Child sections: {string.Join(", ", section.ChildSections)}");
+                    }
+                    if (section.Controls.Any())
+                    {
+                        sb.AppendLine($"-- Control types: {string.Join(", ", section.Controls.Select(c => c.Type).Distinct())}");
+                    }
+                    sb.AppendLine("-- ===============================================");
+                    sb.AppendLine();
+
+                    sb.AppendLine($"CREATE TABLE [dbo].[{fullTableName}] (");
+                    sb.AppendLine("    -- Primary Key");
+                    sb.AppendLine("    [Id] INT IDENTITY(1,1) NOT NULL,");
+                    sb.AppendLine("    [ParentFormId] UNIQUEIDENTIFIER NOT NULL,");
+                    sb.AppendLine("    [ItemOrder] INT NOT NULL DEFAULT 0,");
+                    sb.AppendLine();
+                    sb.AppendLine("    -- Audit Fields");
+                    sb.AppendLine("    [CreatedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+                    sb.AppendLine("    [ModifiedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+                    sb.AppendLine();
+
+                    if (section.Controls.Any())
+                    {
+                        sb.AppendLine("    -- Section Fields");
+
+                        // Add columns for each control in this repeating section
+                        var processedControlNames = new HashSet<string>();
+                        foreach (var control in section.Controls.OrderBy(c => c.Name))
+                        {
+                            var sanitizedName = SanitizeColumnName(control.Name);
+
+                            // Avoid duplicate columns
+                            if (!processedControlNames.Contains(sanitizedName))
+                            {
+                                processedControlNames.Add(sanitizedName);
+                                var sqlType = GetSqlType(control.Type);
+                                var nullable = " NULL";
+                                var defaultValue = GetDefaultValueClause(control);
+                                var comment = string.IsNullOrEmpty(control.Label) ? control.Name : control.Label;
+
+                                sb.AppendLine($"    [{sanitizedName}] {sqlType}{nullable}{defaultValue}, -- {comment} ({control.Type})");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine("    -- No controls found in this section");
+                        sb.AppendLine("    [PlaceholderData] NVARCHAR(MAX) NULL, -- Placeholder for section data");
+                    }
+
+                    sb.AppendLine();
+                    sb.AppendLine("    -- Constraints");
+                    sb.AppendLine($"    CONSTRAINT [PK_{fullTableName}] PRIMARY KEY CLUSTERED ([Id] ASC),");
+                    sb.AppendLine($"    CONSTRAINT [FK_{fullTableName}_Parent] FOREIGN KEY ([ParentFormId])");
+                    sb.AppendLine($"        REFERENCES [dbo].[{mainTableName}] ([FormId])");
+                    sb.AppendLine($"        ON DELETE CASCADE");
+                    sb.AppendLine(");");
+                    sb.AppendLine();
+
+                    // Add indexes
+                    sb.AppendLine("-- Indexes for performance");
+                    sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{fullTableName}_ParentFormId]");
+                    sb.AppendLine($"ON [dbo].[{fullTableName}] ([ParentFormId], [ItemOrder]);");
+                    sb.AppendLine();
+
+                    // Add table description (check if exists first)
+                    sb.AppendLine("-- Add table description");
+                    sb.AppendLine($"IF NOT EXISTS (");
+                    sb.AppendLine($"    SELECT 1 FROM sys.extended_properties ep");
+                    sb.AppendLine($"    INNER JOIN sys.tables t ON ep.major_id = t.object_id");
+                    sb.AppendLine($"    WHERE t.name = N'{fullTableName}' AND ep.name = N'MS_Description' AND ep.minor_id = 0");
+                    sb.AppendLine($")");
+                    sb.AppendLine($"BEGIN");
+                    sb.AppendLine($"    EXEC sp_addextendedproperty ");
+                    sb.AppendLine($"        @name = N'MS_Description',");
+                    sb.AppendLine($"        @value = N'Repeating section table for {section.Name} containing {section.Controls.Count} controls',");
+                    sb.AppendLine($"        @level0type = N'SCHEMA', @level0name = N'dbo',");
+                    sb.AppendLine($"        @level1type = N'TABLE', @level1name = N'{fullTableName}';");
+                    sb.AppendLine($"END");
+                    sb.AppendLine();
+
+                    // Add column descriptions (only for unique columns to avoid duplicates)
+                    var processedDescriptions = new HashSet<string>();
+                    foreach (var control in section.Controls)
+                    {
+                        var sanitizedName = SanitizeColumnName(control.Name);
+
+                        // Skip if we've already added description for this column
+                        if (!processedDescriptions.Contains(sanitizedName))
+                        {
+                            processedDescriptions.Add(sanitizedName);
+                            var description = string.IsNullOrEmpty(control.Label) ? control.Name : control.Label;
+                            var safeDescription = description.Replace("'", "''"); // Escape single quotes
+
+                            sb.AppendLine($"-- Add column description for {sanitizedName}");
+                            sb.AppendLine($"IF NOT EXISTS (");
+                            sb.AppendLine($"    SELECT 1 FROM sys.extended_properties ep");
+                            sb.AppendLine($"    INNER JOIN sys.columns c ON ep.major_id = c.object_id AND ep.minor_id = c.column_id");
+                            sb.AppendLine($"    INNER JOIN sys.tables t ON c.object_id = t.object_id");
+                            sb.AppendLine($"    WHERE t.name = N'{fullTableName}' AND c.name = N'{sanitizedName}' AND ep.name = N'MS_Description'");
+                            sb.AppendLine($")");
+                            sb.AppendLine($"BEGIN");
+                            sb.AppendLine($"    EXEC sp_addextendedproperty ");
+                            sb.AppendLine($"        @name = N'MS_Description',");
+                            sb.AppendLine($"        @value = N'{safeDescription} (Type: {control.Type})',");
+                            sb.AppendLine($"        @level0type = N'SCHEMA', @level0name = N'dbo',");
+                            sb.AppendLine($"        @level1type = N'TABLE', @level1name = N'{fullTableName}',");
+                            sb.AppendLine($"        @level2type = N'COLUMN', @level2name = N'{sanitizedName}';");
+                            sb.AppendLine($"END");
+                            sb.AppendLine();
+                        }
+                    }
+                }
+
+                scripts.Add(new SqlScript
+                {
+                    Name = $"Create_{fullTableName}_Table",
+                    Type = ScriptType.Table,
+                    Content = sb.ToString(),
+                    ExecutionOrder = order++,
+                    Description = $"Repeating section table for {section.Name} with {section.Controls.Count} controls"
+                });
             }
 
-            return new SqlScript
-            {
-                Name = $"Create_{tableName}_Indexes",
-                Type = ScriptType.Index,
-                Content = sb.ToString(),
-                ExecutionOrder = 300,
-                Description = $"Performance indexes for {tableName}"
-            };
+            return scripts;
         }
 
+        // Keep all the existing methods but update signatures where needed
         private List<SqlScript> GenerateLookupTables(InfoPathFormDefinition formDef)
         {
             var scripts = new List<SqlScript>();
-            var tableName = SanitizeTableName(formDef.Views.First().ViewName);
-            int order = 50; // Execute after main tables but before procedures
+            var tableName = SanitizeTableName(formDef.FormName);
+            int order = 50;
 
-            // Find all controls with static data that might benefit from lookup tables
             var controlsWithData = formDef.Views
                 .SelectMany(v => v.Controls)
-                .Where(c => c.HasStaticData && c.DataOptions.Count > 5) // Only for controls with many options
+                .Where(c => c.HasStaticData && c.DataOptions != null && c.DataOptions.Count > 5)
                 .GroupBy(c => c.Name)
                 .ToList();
 
@@ -357,13 +570,11 @@ namespace FormGenerator.Services
                 sb.AppendLine(");");
                 sb.AppendLine();
 
-                // Create index on Value for lookups
                 sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{lookupTableName}_Value]");
                 sb.AppendLine($"ON [dbo].[{lookupTableName}] ([Value], [IsActive])");
                 sb.AppendLine("INCLUDE ([DisplayText], [SortOrder]);");
                 sb.AppendLine();
 
-                // Insert the static values
                 sb.AppendLine($"-- Insert static values for {control.Name}");
                 sb.AppendLine($"INSERT INTO [dbo].[{lookupTableName}] ([Value], [DisplayText], [SortOrder], [IsDefault])");
                 sb.AppendLine("VALUES");
@@ -394,165 +605,21 @@ namespace FormGenerator.Services
             return scripts;
         }
 
-        private string GetDefaultValueClause(DataColumn column, InfoPathFormDefinition formDef)
-        {
-            // Find the control that corresponds to this column
-            var control = formDef.Views
-                .SelectMany(v => v.Controls)
-                .FirstOrDefault(c => c.Name == column.ColumnName || c.Binding == column.ColumnName);
-
-            if (control == null)
-                return "";
-
-            // Check for default value in properties
-            if (control.Properties != null && control.Properties.ContainsKey("DefaultValue"))
-            {
-                var defaultValue = control.Properties["DefaultValue"];
-
-                // Format based on column type
-                switch (column.Type?.ToLower())
-                {
-                    case "checkbox":
-                        return defaultValue.ToLower() == "true" ? " DEFAULT 1" : " DEFAULT 0";
-                    case "textfield":
-                    case "dropdown":
-                    case "combobox":
-                        return $" DEFAULT N'{defaultValue.Replace("'", "''")}'";
-                    case "number":
-                        if (decimal.TryParse(defaultValue, out var numValue))
-                            return $" DEFAULT {numValue}";
-                        break;
-                    case "datepicker":
-                        if (defaultValue.ToLower() == "today" || defaultValue.ToLower() == "now")
-                            return " DEFAULT GETDATE()";
-                        break;
-                }
-            }
-
-            // Check for default option in DataOptions
-            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any(o => o.IsDefault))
-            {
-                var defaultOption = control.DataOptions.First(o => o.IsDefault);
-                return $" DEFAULT N'{defaultOption.Value.Replace("'", "''")}'";
-            }
-
-            return "";
-        }
-
-        private List<SqlScript> GenerateRepeatingTables(InfoPathFormDefinition formDef)
+        private List<SqlScript> GenerateStoredProcedures(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
         {
             var scripts = new List<SqlScript>();
-            var mainTableName = SanitizeTableName(formDef.Views.First().ViewName);
+            var mainTableName = SanitizeTableName(formDef.FormName);
 
-            // Get unique repeating sections
-            var repeatingSections = formDef.Data
-                .Where(d => d.IsRepeating)
-                .Select(d => d.RepeatingSection)
-                .Distinct()
-                .Where(s => !string.IsNullOrEmpty(s));
-
-            int order = 2;
-            foreach (var section in repeatingSections)
-            {
-                var sectionTableName = SanitizeTableName(section);
-                var fullTableName = $"{mainTableName}_{sectionTableName}";
-                var sb = new StringBuilder();
-
-                if (Dialect == SqlDialect.SqlServer)
-                {
-                    sb.AppendLine("-- ===============================================");
-                    sb.AppendLine($"-- Repeating section table: {sectionTableName}");
-                    sb.AppendLine("-- ===============================================");
-                    sb.AppendLine();
-
-                    sb.AppendLine($"CREATE TABLE [dbo].[{fullTableName}] (");
-                    sb.AppendLine("    -- Primary Key");
-                    sb.AppendLine("    [Id] INT IDENTITY(1,1) NOT NULL,");
-                    sb.AppendLine("    [ParentFormId] UNIQUEIDENTIFIER NOT NULL,");
-                    sb.AppendLine("    [ItemOrder] INT NOT NULL DEFAULT 0,");
-                    sb.AppendLine();
-                    sb.AppendLine("    -- Audit Fields");
-                    sb.AppendLine("    [CreatedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
-                    sb.AppendLine("    [ModifiedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
-                    sb.AppendLine();
-                    sb.AppendLine("    -- Section Fields");
-
-                    // Add columns for this repeating section
-                    var sectionColumns = formDef.Data
-                        .Where(d => d.RepeatingSection == section)
-                        .GroupBy(d => d.ColumnName)
-                        .Select(g => g.First())
-                        .OrderBy(d => d.ColumnName);
-
-                    foreach (var column in sectionColumns)
-                    {
-                        var sanitizedName = SanitizeColumnName(column.ColumnName);
-                        var sqlType = GetSqlType(column.Type);
-
-                        // FIXED: Default to NULL for safety since IsRequired doesn't exist
-                        var nullable = " NULL";
-
-                        var defaultValue = GetDefaultValueClause(column, formDef);
-                        var comment = string.IsNullOrEmpty(column.DisplayName) ? column.ColumnName : column.DisplayName;
-
-                        sb.AppendLine($"    [{sanitizedName}] {sqlType}{nullable}{defaultValue}, -- {comment}");
-                    }
-
-                    sb.AppendLine();
-                    sb.AppendLine("    -- Constraints");
-                    sb.AppendLine($"    CONSTRAINT [PK_{fullTableName}] PRIMARY KEY CLUSTERED ([Id] ASC),");
-                    sb.AppendLine($"    CONSTRAINT [FK_{fullTableName}_Parent] FOREIGN KEY ([ParentFormId])");
-                    sb.AppendLine($"        REFERENCES [dbo].[{mainTableName}] ([FormId])");
-                    sb.AppendLine($"        ON DELETE CASCADE");
-                    sb.AppendLine(");");
-                    sb.AppendLine();
-
-                    // Add indexes
-                    sb.AppendLine("-- Indexes for performance");
-                    sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{fullTableName}_ParentFormId]");
-                    sb.AppendLine($"ON [dbo].[{fullTableName}] ([ParentFormId], [ItemOrder]);");
-                    sb.AppendLine();
-
-                    // Add table description
-                    sb.AppendLine("-- Add table description");
-                    sb.AppendLine($"EXEC sp_addextendedproperty ");
-                    sb.AppendLine($"    @name = N'MS_Description',");
-                    sb.AppendLine($"    @value = N'Repeating section table for {section}',");
-                    sb.AppendLine($"    @level0type = N'SCHEMA', @level0name = N'dbo',");
-                    sb.AppendLine($"    @level1type = N'TABLE', @level1name = N'{fullTableName}';");
-                }
-
-                scripts.Add(new SqlScript
-                {
-                    Name = $"Create_{fullTableName}_Table",
-                    Type = ScriptType.Table,
-                    Content = sb.ToString(),
-                    ExecutionOrder = order++,
-                    Description = $"Repeating section table for {section}"
-                });
-            }
+            scripts.Add(GenerateInsertProcedure(formDef, mainTableName, analysis));
+            scripts.Add(GenerateUpdateProcedure(formDef, mainTableName, analysis));
+            scripts.Add(GenerateGetProcedure(formDef, mainTableName, analysis));
+            scripts.Add(GenerateDeleteProcedure(formDef, mainTableName, analysis));
+            scripts.Add(GenerateListProcedure(formDef, mainTableName, analysis));
 
             return scripts;
         }
 
-        private List<SqlScript> GenerateStoredProcedures(InfoPathFormDefinition formDef)
-        {
-            var scripts = new List<SqlScript>();
-            var mainTableName = SanitizeTableName(formDef.Views.First().ViewName);
-
-            // Generate CRUD procedures
-            scripts.Add(GenerateInsertProcedure(formDef, mainTableName));
-            scripts.Add(GenerateUpdateProcedure(formDef, mainTableName));
-            scripts.Add(GenerateGetProcedure(formDef, mainTableName));
-            scripts.Add(GenerateDeleteProcedure(formDef, mainTableName));
-            scripts.Add(GenerateListProcedure(formDef, mainTableName));
-
-            return scripts;
-        }
-
-        // Add these methods to your SqlGeneratorService class
-
-        private SqlScript GenerateInsertProcedure(InfoPathFormDefinition formDef, string tableName)
+        private SqlScript GenerateInsertProcedure(InfoPathFormDefinition formDef, string tableName, RepeatingSectionAnalysis analysis)
         {
             var sb = new StringBuilder();
 
@@ -563,28 +630,17 @@ namespace FormGenerator.Services
 
             sb.AppendLine($"CREATE PROCEDURE [dbo].[sp_{tableName}_Insert]");
 
-            // Add parameters for non-repeating fields
-            var nonRepeatingColumns = formDef.Data
-                .Where(d => !d.IsRepeating)
-                .GroupBy(d => d.ColumnName)
-                .Select(g => g.First())
-                .OrderBy(d => d.ColumnName)
-                .ToList();
-
             // Add output parameter for FormId
             sb.AppendLine("    @FormId UNIQUEIDENTIFIER OUTPUT,");
             sb.AppendLine("    @CreatedBy NVARCHAR(255) = NULL,");
-            sb.AppendLine("    @Status NVARCHAR(50) = 'Draft',");
+            sb.AppendLine("    @Status NVARCHAR(50) = 'Draft'");
 
-            // Add parameters for each column
-            for (int i = 0; i < nonRepeatingColumns.Count; i++)
+            // Add parameters for each main table column
+            foreach (var control in analysis.MainTableColumns.OrderBy(c => c.Name))
             {
-                var column = nonRepeatingColumns[i];
-                var columnName = SanitizeColumnName(column.ColumnName);
-                var sqlType = GetSqlType(column.Type);
-                var isLast = i == nonRepeatingColumns.Count - 1;
-
-                sb.AppendLine($"    @{columnName} {sqlType} = NULL{(isLast ? "" : ",")}");
+                var columnName = SanitizeColumnName(control.Name);
+                var sqlType = GetSqlType(control.Type);
+                sb.AppendLine($"    ,@{columnName} {sqlType} = NULL");
             }
 
             sb.AppendLine("AS");
@@ -603,36 +659,29 @@ namespace FormGenerator.Services
             sb.AppendLine("            [CreatedBy],");
             sb.AppendLine("            [Status],");
             sb.AppendLine("            [CreatedDate],");
-            sb.AppendLine("            [ModifiedDate],");
+            sb.AppendLine("            [ModifiedDate]");
 
             // Add column names
-            foreach (var column in nonRepeatingColumns)
+            foreach (var control in analysis.MainTableColumns)
             {
-                var columnName = SanitizeColumnName(column.ColumnName);
-                sb.AppendLine($"            [{columnName}],");
+                var columnName = SanitizeColumnName(control.Name);
+                sb.AppendLine($"            ,[{columnName}]");
             }
-
-            // Remove last comma
-            sb.Length -= 3;
-            sb.AppendLine();
 
             sb.AppendLine("        ) VALUES (");
             sb.AppendLine("            @FormId,");
             sb.AppendLine("            @CreatedBy,");
             sb.AppendLine("            @Status,");
             sb.AppendLine("            GETDATE(),");
-            sb.AppendLine("            GETDATE(),");
+            sb.AppendLine("            GETDATE()");
 
             // Add parameter values
-            foreach (var column in nonRepeatingColumns)
+            foreach (var control in analysis.MainTableColumns)
             {
-                var columnName = SanitizeColumnName(column.ColumnName);
-                sb.AppendLine($"            @{columnName},");
+                var columnName = SanitizeColumnName(control.Name);
+                sb.AppendLine($"            ,@{columnName}");
             }
 
-            // Remove last comma
-            sb.Length -= 3;
-            sb.AppendLine();
             sb.AppendLine("        );");
             sb.AppendLine();
             sb.AppendLine("        COMMIT TRANSACTION;");
@@ -654,7 +703,7 @@ namespace FormGenerator.Services
             };
         }
 
-        private SqlScript GenerateUpdateProcedure(InfoPathFormDefinition formDef, string tableName)
+        private SqlScript GenerateUpdateProcedure(InfoPathFormDefinition formDef, string tableName, RepeatingSectionAnalysis analysis)
         {
             var sb = new StringBuilder();
 
@@ -666,24 +715,14 @@ namespace FormGenerator.Services
             sb.AppendLine($"CREATE PROCEDURE [dbo].[sp_{tableName}_Update]");
             sb.AppendLine("    @FormId UNIQUEIDENTIFIER,");
             sb.AppendLine("    @ModifiedBy NVARCHAR(255) = NULL,");
-            sb.AppendLine("    @Status NVARCHAR(50) = NULL,");
+            sb.AppendLine("    @Status NVARCHAR(50) = NULL");
 
             // Add parameters for each column
-            var nonRepeatingColumns = formDef.Data
-                .Where(d => !d.IsRepeating)
-                .GroupBy(d => d.ColumnName)
-                .Select(g => g.First())
-                .OrderBy(d => d.ColumnName)
-                .ToList();
-
-            for (int i = 0; i < nonRepeatingColumns.Count; i++)
+            foreach (var control in analysis.MainTableColumns.OrderBy(c => c.Name))
             {
-                var column = nonRepeatingColumns[i];
-                var columnName = SanitizeColumnName(column.ColumnName);
-                var sqlType = GetSqlType(column.Type);
-                var isLast = i == nonRepeatingColumns.Count - 1;
-
-                sb.AppendLine($"    @{columnName} {sqlType} = NULL{(isLast ? "" : ",")}");
+                var columnName = SanitizeColumnName(control.Name);
+                var sqlType = GetSqlType(control.Type);
+                sb.AppendLine($"    ,@{columnName} {sqlType} = NULL");
             }
 
             sb.AppendLine("AS");
@@ -698,18 +737,14 @@ namespace FormGenerator.Services
             sb.AppendLine("            [ModifiedDate] = GETDATE(),");
             sb.AppendLine("            [ModifiedBy] = ISNULL(@ModifiedBy, [ModifiedBy]),");
             sb.AppendLine("            [Status] = ISNULL(@Status, [Status]),");
-            sb.AppendLine("            [Version] = [Version] + 1,");
+            sb.AppendLine("            [Version] = [Version] + 1");
 
             // Add update for each column
-            foreach (var column in nonRepeatingColumns)
+            foreach (var control in analysis.MainTableColumns)
             {
-                var columnName = SanitizeColumnName(column.ColumnName);
-                sb.AppendLine($"            [{columnName}] = ISNULL(@{columnName}, [{columnName}]),");
+                var columnName = SanitizeColumnName(control.Name);
+                sb.AppendLine($"            ,[{columnName}] = ISNULL(@{columnName}, [{columnName}])");
             }
-
-            // Remove last comma
-            sb.Length -= 3;
-            sb.AppendLine();
 
             sb.AppendLine("        WHERE [FormId] = @FormId;");
             sb.AppendLine();
@@ -735,12 +770,12 @@ namespace FormGenerator.Services
             };
         }
 
-        private SqlScript GenerateGetProcedure(InfoPathFormDefinition formDef, string tableName)
+        private SqlScript GenerateGetProcedure(InfoPathFormDefinition formDef, string tableName, RepeatingSectionAnalysis analysis)
         {
             var sb = new StringBuilder();
 
             sb.AppendLine("-- ===============================================");
-            sb.AppendLine($"-- Get procedure for {tableName}");
+            sb.AppendLine($"-- Get procedure for {tableName} with repeating sections");
             sb.AppendLine("-- ===============================================");
             sb.AppendLine();
 
@@ -758,19 +793,14 @@ namespace FormGenerator.Services
             sb.AppendLine("       OR (@Id IS NOT NULL AND [Id] = @Id);");
             sb.AppendLine();
 
-            // Get repeating section data if exists
-            var repeatingSections = formDef.Data
-                .Where(d => d.IsRepeating)
-                .Select(d => d.RepeatingSection)
-                .Distinct()
-                .Where(s => !string.IsNullOrEmpty(s));
-
-            foreach (var section in repeatingSections)
+            // Get repeating section data
+            foreach (var sectionKvp in analysis.RepeatingSections)
             {
-                var sectionTableName = SanitizeTableName(section);
+                var section = sectionKvp.Value;
+                var sectionTableName = SanitizeTableName(section.Name);
                 var fullTableName = $"{tableName}_{sectionTableName}";
 
-                sb.AppendLine($"    -- Get {section} repeating section data");
+                sb.AppendLine($"    -- Get {section.Name} repeating section data ({section.Controls.Count} controls)");
                 sb.AppendLine("    IF @FormId IS NOT NULL");
                 sb.AppendLine("    BEGIN");
                 sb.AppendLine("        SELECT *");
@@ -789,11 +819,11 @@ namespace FormGenerator.Services
                 Type = ScriptType.StoredProcedure,
                 Content = sb.ToString(),
                 ExecutionOrder = 102,
-                Description = $"Get procedure for {tableName}"
+                Description = $"Get procedure for {tableName} with repeating sections"
             };
         }
 
-        private SqlScript GenerateDeleteProcedure(InfoPathFormDefinition formDef, string tableName)
+        private SqlScript GenerateDeleteProcedure(InfoPathFormDefinition formDef, string tableName, RepeatingSectionAnalysis analysis)
         {
             var sb = new StringBuilder();
 
@@ -852,76 +882,7 @@ namespace FormGenerator.Services
             };
         }
 
-        private SqlScript GenerateMainView(InfoPathFormDefinition formDef)
-        {
-            var tableName = SanitizeTableName(formDef.Views.First().ViewName);
-            var sb = new StringBuilder();
-
-            sb.AppendLine("-- ===============================================");
-            sb.AppendLine($"-- Summary view for {tableName}");
-            sb.AppendLine("-- ===============================================");
-            sb.AppendLine();
-
-            sb.AppendLine($"CREATE VIEW [dbo].[vw_{tableName}_Summary]");
-            sb.AppendLine("AS");
-            sb.AppendLine("SELECT");
-            sb.AppendLine("    t.[Id],");
-            sb.AppendLine("    t.[FormId],");
-            sb.AppendLine("    t.[Status],");
-            sb.AppendLine("    t.[CreatedDate],");
-            sb.AppendLine("    t.[ModifiedDate],");
-            sb.AppendLine("    t.[CreatedBy],");
-            sb.AppendLine("    t.[ModifiedBy],");
-            sb.AppendLine("    t.[Version],");
-
-            // Add key columns (first 5 non-repeating text fields)
-            var keyColumns = formDef.Data
-                .Where(d => !d.IsRepeating &&
-                       (d.Type == "TextField" || d.Type == "DropDown"))
-                .Take(5)
-                .ToList();
-
-            foreach (var column in keyColumns)
-            {
-                var columnName = SanitizeColumnName(column.ColumnName);
-                sb.AppendLine($"    t.[{columnName}],");
-            }
-
-            // Add count of repeating section items
-            var repeatingSections = formDef.Data
-                .Where(d => d.IsRepeating)
-                .Select(d => d.RepeatingSection)
-                .Distinct()
-                .Where(s => !string.IsNullOrEmpty(s))
-                .ToList();
-
-            if (repeatingSections.Any())
-            {
-                foreach (var section in repeatingSections)
-                {
-                    var sectionTableName = SanitizeTableName(section);
-                    var fullTableName = $"{tableName}_{sectionTableName}";
-                    sb.AppendLine($"    (SELECT COUNT(*) FROM [dbo].[{fullTableName}] WHERE [ParentFormId] = t.[FormId]) AS [{sectionTableName}_Count],");
-                }
-            }
-
-            // Remove last comma
-            sb.Length -= 3;
-            sb.AppendLine();
-
-            sb.AppendLine($"FROM [dbo].[{tableName}] t");
-            sb.AppendLine("WHERE t.[Status] != 'Deleted';");
-
-            return new SqlScript
-            {
-                Name = $"vw_{tableName}_Summary",
-                Type = ScriptType.View,
-                Content = sb.ToString(),
-                ExecutionOrder = 200,
-                Description = $"Summary view for {tableName}"
-            };
-        }
-        private SqlScript GenerateListProcedure(InfoPathFormDefinition formDef, string tableName)
+        private SqlScript GenerateListProcedure(InfoPathFormDefinition formDef, string tableName, RepeatingSectionAnalysis analysis)
         {
             var sb = new StringBuilder();
 
@@ -990,8 +951,165 @@ namespace FormGenerator.Services
             };
         }
 
-        // Keep other existing methods (GenerateInsertProcedure, GenerateUpdateProcedure, etc.) as they are
-        // ... rest of the existing methods remain the same ...
+        private SqlScript GenerateMainView(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
+        {
+            var tableName = SanitizeTableName(formDef.FormName);
+            var sb = new StringBuilder();
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine($"-- Summary view for {tableName} with repeating section counts");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            sb.AppendLine($"CREATE VIEW [dbo].[vw_{tableName}_Summary]");
+            sb.AppendLine("AS");
+            sb.AppendLine("SELECT");
+            sb.AppendLine("    t.[Id],");
+            sb.AppendLine("    t.[FormId],");
+            sb.AppendLine("    t.[Status],");
+            sb.AppendLine("    t.[CreatedDate],");
+            sb.AppendLine("    t.[ModifiedDate],");
+            sb.AppendLine("    t.[CreatedBy],");
+            sb.AppendLine("    t.[ModifiedBy],");
+            sb.AppendLine("    t.[Version],");
+
+            // Add key columns (first 5 main table columns)
+            var keyColumns = analysis.MainTableColumns.Take(5).ToList();
+            foreach (var control in keyColumns)
+            {
+                var columnName = SanitizeColumnName(control.Name);
+                sb.AppendLine($"    t.[{columnName}],");
+            }
+
+            // Add count of repeating section items
+            foreach (var sectionKvp in analysis.RepeatingSections)
+            {
+                var section = sectionKvp.Value;
+                var sectionTableName = SanitizeTableName(section.Name);
+                var fullTableName = $"{tableName}_{sectionTableName}";
+                sb.AppendLine($"    (SELECT COUNT(*) FROM [dbo].[{fullTableName}] WHERE [ParentFormId] = t.[FormId]) AS [{sectionTableName}_Count],");
+            }
+
+            // Remove last comma
+            sb.Length -= 3;
+            sb.AppendLine();
+
+            sb.AppendLine($"FROM [dbo].[{tableName}] t");
+            sb.AppendLine("WHERE t.[Status] != 'Deleted';");
+
+            return new SqlScript
+            {
+                Name = $"vw_{tableName}_Summary",
+                Type = ScriptType.View,
+                Content = sb.ToString(),
+                ExecutionOrder = 200,
+                Description = $"Summary view for {tableName} with repeating section counts"
+            };
+        }
+
+        private SqlScript GenerateIndexes(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
+        {
+            var tableName = SanitizeTableName(formDef.FormName);
+            var sb = new StringBuilder();
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine($"-- Indexes for {tableName} and repeating sections");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            // Standard indexes for main table
+            sb.AppendLine("-- Index on FormId for quick lookups");
+            sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_FormId]");
+            sb.AppendLine($"ON [dbo].[{tableName}] ([FormId])");
+            sb.AppendLine("INCLUDE ([Status], [CreatedDate], [ModifiedDate]);");
+            sb.AppendLine();
+
+            sb.AppendLine("-- Index on CreatedDate for sorting and filtering");
+            sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_CreatedDate]");
+            sb.AppendLine($"ON [dbo].[{tableName}] ([CreatedDate] DESC)");
+            sb.AppendLine("INCLUDE ([FormId], [Status], [CreatedBy]);");
+            sb.AppendLine();
+
+            sb.AppendLine("-- Index on Status for filtering");
+            sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_Status]");
+            sb.AppendLine($"ON [dbo].[{tableName}] ([Status])");
+            sb.AppendLine("INCLUDE ([FormId], [CreatedDate]);");
+            sb.AppendLine();
+
+            // Add indexes for frequently searched main table columns
+            var searchableColumns = analysis.MainTableColumns
+                .Where(c => c.Type == "TextField" || c.Type == "DropDown")
+                .Take(3)
+                .ToList();
+
+            foreach (var control in searchableColumns)
+            {
+                var columnName = SanitizeColumnName(control.Name);
+                sb.AppendLine($"-- Index on {columnName} for searching");
+                sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{tableName}_{columnName}]");
+                sb.AppendLine($"ON [dbo].[{tableName}] ([{columnName}])");
+                sb.AppendLine($"WHERE [{columnName}] IS NOT NULL;");
+                sb.AppendLine();
+            }
+
+            // Add indexes for repeating section tables
+            foreach (var sectionKvp in analysis.RepeatingSections)
+            {
+                var section = sectionKvp.Value;
+                var sectionTableName = SanitizeTableName(section.Name);
+                var fullTableName = $"{tableName}_{sectionTableName}";
+
+                sb.AppendLine($"-- Additional indexes for {section.Name} repeating section");
+                sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{fullTableName}_Parent_Order]");
+                sb.AppendLine($"ON [dbo].[{fullTableName}] ([ParentFormId], [ItemOrder])");
+                sb.AppendLine("INCLUDE ([CreatedDate], [ModifiedDate]);");
+                sb.AppendLine();
+            }
+
+            return new SqlScript
+            {
+                Name = $"Create_{tableName}_Indexes",
+                Type = ScriptType.Index,
+                Content = sb.ToString(),
+                ExecutionOrder = 300,
+                Description = $"Performance indexes for {tableName} and repeating sections"
+            };
+        }
+
+        // Helper methods
+        private string GetDefaultValueClause(ControlDefinition control)
+        {
+            if (control.Properties != null && control.Properties.ContainsKey("DefaultValue"))
+            {
+                var defaultValue = control.Properties["DefaultValue"];
+
+                switch (control.Type?.ToLower())
+                {
+                    case "checkbox":
+                        return defaultValue.ToLower() == "true" ? " DEFAULT 1" : " DEFAULT 0";
+                    case "textfield":
+                    case "dropdown":
+                    case "combobox":
+                        return $" DEFAULT N'{defaultValue.Replace("'", "''")}'";
+                    case "number":
+                        if (decimal.TryParse(defaultValue, out var numValue))
+                            return $" DEFAULT {numValue}";
+                        break;
+                    case "datepicker":
+                        if (defaultValue.ToLower() == "today" || defaultValue.ToLower() == "now")
+                            return " DEFAULT GETDATE()";
+                        break;
+                }
+            }
+
+            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any(o => o.IsDefault))
+            {
+                var defaultOption = control.DataOptions.First(o => o.IsDefault);
+                return $" DEFAULT N'{defaultOption.Value.Replace("'", "''")}'";
+            }
+
+            return "";
+        }
 
         private string GetSqlType(string controlType)
         {
@@ -1034,33 +1152,22 @@ namespace FormGenerator.Services
                 }
             }
 
-            // Add other dialects as needed
             return "VARCHAR(MAX)";
         }
 
-        // Keep SanitizeTableName and SanitizeColumnName methods as they are
         private string SanitizeTableName(string name)
         {
             if (string.IsNullOrEmpty(name))
                 return "FormTable";
 
-            // Remove file extension if present
             name = System.IO.Path.GetFileNameWithoutExtension(name);
-
-            // Remove invalid characters and replace with underscore
             var sanitized = System.Text.RegularExpressions.Regex.Replace(name, @"[^a-zA-Z0-9]", "_");
-
-            // Remove consecutive underscores
             sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"_+", "_");
-
-            // Remove leading/trailing underscores
             sanitized = sanitized.Trim('_');
 
-            // Ensure it starts with a letter
             if (sanitized.Length > 0 && char.IsDigit(sanitized[0]))
                 sanitized = "Form_" + sanitized;
 
-            // Limit length
             if (sanitized.Length > 64)
                 sanitized = sanitized.Substring(0, 64);
 
@@ -1072,29 +1179,43 @@ namespace FormGenerator.Services
             if (string.IsNullOrEmpty(name))
                 return "Column";
 
-            // Remove invalid characters
             var sanitized = System.Text.RegularExpressions.Regex.Replace(name, @"[^a-zA-Z0-9]", "_");
-
-            // Remove consecutive underscores
             sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"_+", "_");
-
-            // Remove leading/trailing underscores
             sanitized = sanitized.Trim('_');
 
-            // Ensure it starts with a letter
             if (sanitized.Length > 0 && char.IsDigit(sanitized[0]))
                 sanitized = "Col_" + sanitized;
 
-            // Check for reserved words
             string[] reservedWords = { "User", "Date", "Time", "Table", "Index", "Key", "Primary", "Foreign", "References", "Order", "Group", "By" };
             if (reservedWords.Contains(sanitized, StringComparer.OrdinalIgnoreCase))
                 sanitized = sanitized + "_Field";
 
-            // Limit length
             if (sanitized.Length > 128)
                 sanitized = sanitized.Substring(0, 128);
 
             return string.IsNullOrEmpty(sanitized) ? "Column" : sanitized;
         }
+    }
+
+    /// <summary>
+    /// Enhanced analysis structure for repeating sections
+    /// </summary>
+    public class RepeatingSectionAnalysis
+    {
+        public Dictionary<string, RepeatingSectionInfo> RepeatingSections { get; set; } = new Dictionary<string, RepeatingSectionInfo>();
+        public List<ControlDefinition> MainTableColumns { get; set; } = new List<ControlDefinition>();
+    }
+
+    /// <summary>
+    /// Detailed information about a repeating section
+    /// </summary>
+    public class RepeatingSectionInfo
+    {
+        public string Name { get; set; }
+        public string SectionType { get; set; }
+        public int StartRow { get; set; }
+        public int EndRow { get; set; }
+        public List<ControlDefinition> Controls { get; set; } = new List<ControlDefinition>();
+        public List<string> ChildSections { get; set; } = new List<string>();
     }
 }

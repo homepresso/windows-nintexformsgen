@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using System.Diagnostics;
 using FormGenerator.Core.Interfaces;
 using FormGenerator.Core.Models;
-using FormGenerator.Core.Interfaces;
 using FormGenerator.Analyzers.Infopath;
 
 namespace FormGenerator.Analyzers.InfoPath
@@ -61,6 +60,26 @@ namespace FormGenerator.Analyzers.InfoPath
 
                 // Run analysis in background thread to keep UI responsive
                 var formDefinition = await Task.Run(() => _parser.ParseXsnFile(filePath));
+
+                // IMPORTANT: Set the form name and file properties
+                if (formDefinition != null)
+                {
+                    // Set the form name from the file (e.g., "ExpenseClaims" instead of "View1")
+                    formDefinition.FormName = Path.GetFileNameWithoutExtension(filePath);
+                    formDefinition.FileName = Path.GetFileName(filePath);
+
+                    // Try to get a better title from the form definition if available
+                    if (string.IsNullOrEmpty(formDefinition.Title))
+                    {
+                        formDefinition.Title = formDefinition.FormName;
+                    }
+
+                    // Ensure Data columns are properly populated and unique
+                    EnsureUniqueDataColumns(formDefinition);
+
+                    // Process dropdown values from Data columns
+                    ProcessDropdownValues(formDefinition);
+                }
 
                 result.FormDefinition = formDefinition;
                 result.Success = true;
@@ -129,6 +148,192 @@ namespace FormGenerator.Analyzers.InfoPath
         }
 
         /// <summary>
+        /// Ensures Data columns are unique and properly structured
+        /// </summary>
+        private void EnsureUniqueDataColumns(InfoPathFormDefinition formDef)
+        {
+            if (formDef.Data == null || formDef.Data.Count == 0)
+            {
+                // If Data is empty, try to build it from Views
+                formDef.Data = BuildDataColumnsFromViews(formDef);
+            }
+            else
+            {
+                // Ensure uniqueness by column name
+                var uniqueColumns = new Dictionary<string, DataColumn>();
+
+                foreach (var column in formDef.Data)
+                {
+                    var key = column.ColumnName;
+
+                    // If repeating, include the section in the key to maintain uniqueness
+                    if (column.IsRepeating && !string.IsNullOrEmpty(column.RepeatingSection))
+                    {
+                        key = $"{column.RepeatingSection}.{column.ColumnName}";
+                    }
+
+                    if (!uniqueColumns.ContainsKey(key))
+                    {
+                        uniqueColumns[key] = column;
+                    }
+                    else
+                    {
+                        // Merge properties if needed
+                        var existing = uniqueColumns[key];
+
+                        // Preserve the most complete information
+                        if (string.IsNullOrEmpty(existing.DisplayName) && !string.IsNullOrEmpty(column.DisplayName))
+                        {
+                            existing.DisplayName = column.DisplayName;
+                        }
+
+                        if (string.IsNullOrEmpty(existing.Type) && !string.IsNullOrEmpty(column.Type))
+                        {
+                            existing.Type = column.Type;
+                        }
+
+                        // Merge ValidValues if they exist
+                        if (column.ValidValues != null && column.ValidValues.Count > 0)
+                        {
+                            if (existing.ValidValues == null)
+                            {
+                                existing.ValidValues = column.ValidValues;
+                            }
+                            else
+                            {
+                                // Merge unique values
+                                foreach (var val in column.ValidValues)
+                                {
+                                    if (!existing.ValidValues.Any(v => v.Value == val.Value))
+                                    {
+                                        existing.ValidValues.Add(val);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                formDef.Data = uniqueColumns.Values.ToList();
+            }
+        }
+        /// <summary>
+        /// Builds Data columns from Views if Data is empty
+        /// </summary>
+        private List<DataColumn> BuildDataColumnsFromViews(InfoPathFormDefinition formDef)
+        {
+            var dataColumns = new Dictionary<string, DataColumn>();
+
+            foreach (var view in formDef.Views)
+            {
+                foreach (var control in view.Controls)
+                {
+                    // Skip labels and non-data controls
+                    if (control.Type == "Label" || control.Type == "Button" ||
+                        control.Type == "Section" || string.IsNullOrEmpty(control.Binding))
+                    {
+                        continue;
+                    }
+
+                    var columnName = !string.IsNullOrEmpty(control.Binding) ? control.Binding : control.Name;
+
+                    if (string.IsNullOrEmpty(columnName))
+                        continue;
+
+                    // Create a unique key for the column
+                    var key = columnName;
+                    if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+                    {
+                        key = $"{control.RepeatingSectionName}.{columnName}";
+                    }
+
+                    if (!dataColumns.ContainsKey(key))
+                    {
+                        var dataColumn = new DataColumn
+                        {
+                            ColumnName = columnName,
+                            DisplayName = !string.IsNullOrEmpty(control.Label) ? control.Label : control.Name,
+                            Type = control.Type,
+                            IsRepeating = control.IsInRepeatingSection,
+                            RepeatingSection = control.RepeatingSectionName,
+                            RepeatingSectionPath = control.RepeatingSectionBinding,
+                            IsConditional = CheckIfConditional(control)
+                        };
+
+                        // Convert DataOptions to ValidValues (note: DataColumn uses DataOption, not ValidValue)
+                        if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Count > 0)
+                        {
+                            dataColumn.ValidValues = new List<DataOption>(control.DataOptions);
+                        }
+
+                        dataColumns[key] = dataColumn;
+                    }
+                }
+            }
+
+            return dataColumns.Values.ToList();
+        }
+
+        private bool CheckIfConditional(ControlDefinition control)
+        {
+            if (control.Properties != null)
+            {
+                // Check various possible property names for conditional status
+                if (control.Properties.ContainsKey("IsConditional") &&
+                    bool.TryParse(control.Properties["IsConditional"], out bool isConditional))
+                {
+                    return isConditional;
+                }
+
+                if (control.Properties.ContainsKey("HasConditionalFormatting") &&
+                    bool.TryParse(control.Properties["HasConditionalFormatting"], out bool hasConditional))
+                {
+                    return hasConditional;
+                }
+
+                if (control.Properties.ContainsKey("ConditionalVisibility"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Process dropdown values from controls and ensure they're in Data columns
+        /// </summary>
+        private void ProcessDropdownValues(InfoPathFormDefinition formDef)
+        {
+            // Map dropdown values from controls to data columns
+            foreach (var view in formDef.Views)
+            {
+                foreach (var control in view.Controls)
+                {
+                    if ((control.Type == "DropDown" || control.Type == "ComboBox" || control.Type == "ListBox")
+                        && control.HasStaticData && control.DataOptions != null && control.DataOptions.Count > 0)
+                    {
+                        // Find the corresponding data column
+                        var bindingName = !string.IsNullOrEmpty(control.Binding) ? control.Binding : control.Name;
+
+                        var dataColumn = formDef.Data.FirstOrDefault(d =>
+                            d.ColumnName == bindingName ||
+                            d.ColumnName == control.Name);
+
+                        if (dataColumn != null)
+                        {
+                            // Ensure ValidValues are set
+                            if (dataColumn.ValidValues == null || dataColumn.ValidValues.Count == 0)
+                            {
+                                dataColumn.ValidValues = new List<DataOption>(control.DataOptions);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
         /// Adds analysis messages based on the form structure
         /// </summary>
         private void AddAnalysisMessages(FormAnalysisResult result, InfoPathFormDefinition formDef)
@@ -137,8 +342,8 @@ namespace FormGenerator.Analyzers.InfoPath
             result.Messages.Add(new AnalysisMessage
             {
                 Severity = MessageSeverity.Info,
-                Message = $"Successfully analyzed {formDef.Views.Count} view(s)",
-                Details = $"Found {formDef.Metadata.TotalControls} controls across all views",
+                Message = $"Successfully analyzed form: {formDef.FormName}",
+                Details = $"Found {formDef.Views.Count} view(s) with {formDef.Metadata.TotalControls} controls",
                 Source = "ViewAnalysis"
             });
 
@@ -186,6 +391,19 @@ namespace FormGenerator.Analyzers.InfoPath
                         Source = "ConditionalLogicAnalysis"
                     });
                 }
+            }
+
+            // Check for dropdowns with values
+            var dropdownCount = formDef.Data.Count(d => d.HasConstraints && d.ValidValues != null && d.ValidValues.Count > 0);
+            if (dropdownCount > 0)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Info,
+                    Message = $"Found {dropdownCount} dropdown field(s) with predefined values",
+                    Details = "Lookup tables will be created for dropdown values",
+                    Source = "DataAnalysis"
+                });
             }
 
             // Check for complex control types
@@ -351,6 +569,8 @@ namespace FormGenerator.Analyzers.InfoPath
                 result.Metadata["FileSizeFormatted"] = FormatFileSize(fileInfo.Length);
                 result.Metadata["FileCreated"] = fileInfo.CreationTime;
                 result.Metadata["FileModified"] = fileInfo.LastWriteTime;
+                result.Metadata["FormName"] = formDef.FormName;
+                result.Metadata["FileName"] = formDef.FileName;
             }
             catch
             {
@@ -364,6 +584,7 @@ namespace FormGenerator.Analyzers.InfoPath
             result.Metadata["RepeatingSections"] = formDef.Metadata.RepeatingSectionCount;
             result.Metadata["DynamicSections"] = formDef.Metadata.DynamicSectionCount;
             result.Metadata["UniqueDataColumns"] = formDef.Data.Count;
+            result.Metadata["DropdownFields"] = formDef.Data.Count(d => d.HasConstraints && d.ValidValues != null && d.ValidValues.Count > 0);
 
             // Add control type breakdown
             var controlTypes = new Dictionary<string, int>();
@@ -403,10 +624,12 @@ namespace FormGenerator.Analyzers.InfoPath
         }
     }
 
-    /// <summary>
-    /// Placeholder for future InfoPath 2010 analyzer
-    /// </summary>
-    public class InfoPath2010Analyzer : IFormAnalyzer
+
+
+/// <summary>
+/// Placeholder for future InfoPath 2010 analyzer
+/// </summary>
+public class InfoPath2010Analyzer : IFormAnalyzer
     {
         public string AnalyzerName => "InfoPath 2010 Analyzer";
         public string SupportedVersion => "2010";
