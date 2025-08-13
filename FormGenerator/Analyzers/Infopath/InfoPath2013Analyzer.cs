@@ -255,12 +255,12 @@ namespace FormGenerator.Analyzers.InfoPath
                             DisplayName = !string.IsNullOrEmpty(control.Label) ? control.Label : control.Name,
                             Type = control.Type,
                             IsRepeating = control.IsInRepeatingSection,
-                            RepeatingSection = control.RepeatingSectionName,
+                            RepeatingSection = control.RepeatingSectionName,  // FIX: Use RepeatingSectionName directly
                             RepeatingSectionPath = control.RepeatingSectionBinding,
                             IsConditional = CheckIfConditional(control)
                         };
 
-                        // Convert DataOptions to ValidValues (note: DataColumn uses DataOption, not ValidValue)
+                        // Convert DataOptions to ValidValues
                         if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Count > 0)
                         {
                             dataColumn.ValidValues = new List<DataOption>(control.DataOptions);

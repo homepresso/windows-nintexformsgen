@@ -33,13 +33,15 @@ namespace FormGenerator.Analyzers.InfoPath
                             SectionType = c.SectionType,
                             IsInSection = true
                         } : null,
-                        // Repeating section info
+                        // Repeating section info - ENHANCED TO ALWAYS SHOW WHEN IN REPEATING SECTION
                         RepeatingSectionInfo = c.IsInRepeatingSection ? new
                         {
                             c.IsInRepeatingSection,
-                            c.RepeatingSectionName,
+                            RepeatingSectionName = c.RepeatingSectionName,  // THIS IS THE KEY ADDITION
                             c.RepeatingSectionBinding
                         } : null,
+                        // ADD THIS NEW PROPERTY - Simple repeating section name at top level for easier access
+                        RepeatingSectionName = c.IsInRepeatingSection ? c.RepeatingSectionName : null,
                         // Include data options if present
                         DataOptions = c.HasStaticData ? c.DataOptions : null,
                         DataValues = c.HasStaticData ? c.DataOptionsString : null,
@@ -68,8 +70,9 @@ namespace FormGenerator.Analyzers.InfoPath
                     ColumnName = d.ColumnName,
                     d.Type,
                     d.DisplayName,
-                    // Section context
+                    // Section context - INCLUDING REPEATING SECTION NAME
                     Section = !string.IsNullOrEmpty(d.RepeatingSection) ? d.RepeatingSection : null,
+                    RepeatingSectionName = d.IsRepeating ? d.RepeatingSection : null,  // ADD THIS FOR CLARITY
                     d.IsRepeating,
                     d.IsConditional,
                     ConditionalOnField = d.IsConditional ? d.ConditionalOnField : null,
@@ -103,8 +106,38 @@ namespace FormGenerator.Analyzers.InfoPath
                     // Add summary of sections found
                     SectionsSummary = GetSectionsSummary(formDef),
                     // Add summary of controls with CtrlIds
-                    ControlsWithIds = GetControlsWithIds(formDef)
+                    ControlsWithIds = GetControlsWithIds(formDef),
+                    // ADD THIS: Summary of which controls are in which repeating sections
+                    RepeatingSectionMembership = GetRepeatingSectionMembership(formDef)
                 }
+            };
+        }
+
+        private static object GetRepeatingSectionMembership(InfoPathFormDefinition formDef)
+        {
+            var membership = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => c.IsInRepeatingSection && !string.IsNullOrEmpty(c.RepeatingSectionName))
+                .GroupBy(c => c.RepeatingSectionName)
+                .Select(g => new
+                {
+                    RepeatingSectionName = g.Key,
+                    ControlCount = g.Count(),
+                    Controls = g.Select(c => new
+                    {
+                        Name = c.Name,
+                        Label = c.Label,
+                        Type = c.Type,
+                        CtrlId = c.Properties?.ContainsKey("CtrlId") == true ? c.Properties["CtrlId"] : null
+                    }).OrderBy(c => c.Name).ToList()
+                })
+                .OrderBy(s => s.RepeatingSectionName)
+                .ToList();
+
+            return new
+            {
+                TotalRepeatingSections = membership.Count,
+                RepeatingSections = membership
             };
         }
 

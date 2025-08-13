@@ -338,7 +338,7 @@ public class DataColumn
                 string colName = string.IsNullOrWhiteSpace(ctrl.Name) ? ctrl.Binding : ctrl.Name;
                 if (string.IsNullOrWhiteSpace(colName)) continue;
 
-                string repeating = ctrl.ParentSection;
+                string repeating = ctrl.IsInRepeatingSection ? ctrl.RepeatingSectionName : ctrl.ParentSection;
                 var key = (colName, repeating);
 
                 if (!dict.ContainsKey(key))
@@ -347,9 +347,9 @@ public class DataColumn
                     {
                         ColumnName = colName,
                         Type = ctrl.Type,
-                        RepeatingSection = repeating,
+                        RepeatingSection = repeating,  // This will now have the correct value
                         IsRepeating = ctrl.SectionType == "repeating" || ctrl.IsInRepeatingSection,
-                        RepeatingSectionPath = repeating,
+                        RepeatingSectionPath = ctrl.IsInRepeatingSection ? ctrl.RepeatingSectionBinding : repeating,
                         DisplayName = ctrl.Label
                     };
 
