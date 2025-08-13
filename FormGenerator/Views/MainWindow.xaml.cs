@@ -68,15 +68,53 @@ namespace FormGenerator.Views
 
         private void WireUpEditingControls()
         {
-            // Remove the inline event handlers - they're now in XAML
-            // Just set up the context menu and keyboard shortcuts
+            // Setup simplified context menu for StructureTreeView
+            SetupSimplifiedTreeViewContextMenu();
 
-            // Setup context menu for StructureTreeView
-            SetupTreeViewContextMenu();
-
-            // Keyboard shortcuts for StructureTreeView
+            // Keyboard shortcuts for StructureTreeView (keeping F2 for edit, Delete for delete)
             StructureTreeView.PreviewKeyDown += StructureTreeView_PreviewKeyDown;
         }
+
+        private void SetupSimplifiedTreeViewContextMenu()
+        {
+            // Create context menu if it doesn't exist
+            if (StructureTreeView.ContextMenu == null)
+            {
+                StructureTreeView.ContextMenu = new ContextMenu();
+            }
+
+            var contextMenu = StructureTreeView.ContextMenu;
+            contextMenu.Items.Clear();
+
+            // Expand All
+            var expandAllMenuItem = new MenuItem { Header = "Expand All" };
+            expandAllMenuItem.Icon = new TextBlock { Text = "⊞", FontSize = 14 };
+            expandAllMenuItem.Click += (s, e) => ExpandAllTreeItems(StructureTreeView.Items);
+            contextMenu.Items.Add(expandAllMenuItem);
+
+            // Collapse All
+            var collapseAllMenuItem = new MenuItem { Header = "Collapse All" };
+            collapseAllMenuItem.Icon = new TextBlock { Text = "⊟", FontSize = 14 };
+            collapseAllMenuItem.Click += (s, e) => CollapseAllTreeItems(StructureTreeView.Items);
+            contextMenu.Items.Add(collapseAllMenuItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // Copy entire tree as JSON
+            var copyTreeJsonMenuItem = new MenuItem { Header = "Copy Tree as JSON" };
+            copyTreeJsonMenuItem.Icon = new TextBlock { Text = "📋", FontSize = 14 };
+            copyTreeJsonMenuItem.Click += (s, e) => CopyTreeAsJson();
+            contextMenu.Items.Add(copyTreeJsonMenuItem);
+
+            // Export tree structure
+            var exportTreeMenuItem = new MenuItem { Header = "Export Tree Structure..." };
+            exportTreeMenuItem.Icon = new TextBlock { Text = "📥", FontSize = 14 };
+            exportTreeMenuItem.Click += (s, e) => ExportTreeStructure();
+            contextMenu.Items.Add(exportTreeMenuItem);
+        }
+
+
+
 
         private void SetupTreeViewContextMenu()
         {
@@ -220,19 +258,6 @@ namespace FormGenerator.Views
                 }
                 e.Handled = true;
             }
-            else if (e.Key == Key.R && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
-            {
-                var control = GetSelectedControl();
-                if (control == null)
-                {
-                    UpdateStatus("Select a control to move/convert.", MessageSeverity.Warning);
-                }
-                else
-                {
-                    _analysisHandlers?.ShowMoveSectionDialog(control);
-                }
-                e.Handled = true;
-            }
         }
 
         #endregion
@@ -284,6 +309,51 @@ namespace FormGenerator.Views
             }
         }
 
+        private void CopyTreeAsJson()
+        {
+            try
+            {
+                if (_allFormDefinitions != null && _allFormDefinitions.Any())
+                {
+                    var json = JsonConvert.SerializeObject(_allFormDefinitions, Formatting.Indented);
+                    Clipboard.SetText(json);
+                    UpdateStatus("Tree structure copied to clipboard as JSON", MessageSeverity.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Failed to copy tree: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        private void ExportTreeStructure()
+        {
+            try
+            {
+                var dialog = new SaveFileDialog
+                {
+                    Title = "Export Tree Structure",
+                    Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                    FileName = $"TreeStructure_{DateTime.Now:yyyyMMdd_HHmmss}.json"
+                };
+
+                if (dialog.ShowDialog() == true)
+                {
+                    if (_allFormDefinitions != null && _allFormDefinitions.Any())
+                    {
+                        var json = JsonConvert.SerializeObject(_allFormDefinitions, Formatting.Indented);
+                        File.WriteAllText(dialog.FileName, json);
+                        UpdateStatus($"Tree structure exported to {dialog.FileName}", MessageSeverity.Info);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Export failed: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+
         private void DeleteSelectedControl()
         {
             var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
@@ -301,6 +371,7 @@ namespace FormGenerator.Views
                 }
             }
         }
+
 
         private void RemoveSelectedFromRepeating()
         {
@@ -1220,6 +1291,7 @@ namespace FormGenerator.Views
             }
         }
 
+
         /// <summary>
         /// Handles TreeView selection changed
         /// </summary>
@@ -1229,29 +1301,17 @@ namespace FormGenerator.Views
             {
                 var selectedItem = e.NewValue as TreeViewItem;
 
-                // Enable/disable buttons based on selection
-                bool isControlSelected = selectedItem?.Tag is ControlDefinition;
-                bool isSectionSelected = selectedItem?.Tag is string;
-                bool isViewSelected = selectedItem?.Tag is ViewDefinition;
-
-                EditControlButton.IsEnabled = isControlSelected;
-                DeleteControlButton.IsEnabled = isControlSelected;
-                ConvertToRepeatingButton.IsEnabled = isSectionSelected || isControlSelected;
-                AddControlButton.IsEnabled = isViewSelected || isSectionSelected;
-
                 // Update status bar with selection info
-                if (isControlSelected)
+                if (selectedItem?.Tag is ControlDefinition control)
                 {
-                    var control = selectedItem.Tag as ControlDefinition;
                     UpdateStatus($"Selected control: {control?.Label ?? control?.Name}", MessageSeverity.Info);
                 }
-                else if (isSectionSelected)
+                else if (selectedItem?.Tag is string)
                 {
                     UpdateStatus($"Selected section", MessageSeverity.Info);
                 }
-                else if (isViewSelected)
+                else if (selectedItem?.Tag is ViewDefinition view)
                 {
-                    var view = selectedItem.Tag as ViewDefinition;
                     UpdateStatus($"Selected view: {view?.ViewName}", MessageSeverity.Info);
                 }
             }

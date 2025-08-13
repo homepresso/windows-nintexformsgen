@@ -736,6 +736,7 @@
                 <!-- Form Structure Tab -->
                 <!-- Replace the Form Structure TabItem in MainWindow.xaml with this corrected version -->
 
+                <!-- Updated Form Structure Tab with inline controls and simplified toolbar -->
                 <TabItem Header="Form Structure">
                     <Grid>
                         <Grid.RowDefinitions>
@@ -743,7 +744,7 @@
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
 
-                        <!-- Fixed Toolbar with proper styling -->
+                        <!-- Simplified Toolbar with only search and expand/collapse -->
                         <Border Grid.Row="0" 
                 Background="{StaticResource BackgroundLight}"
                 BorderBrush="{StaticResource BorderColor}"
@@ -800,33 +801,7 @@
                                     </Style>
                                 </ToolBar.Resources>
 
-                                <!-- Toolbar Items with proper spacing -->
-                                <Button Name="AddControlButton"
-                        Content="Add Control"
-                        ToolTip="Add New Control (Ctrl+Shift+A)"
-                        Click="AddControlButton_Click"/>
-
-                                <Separator/>
-
-                                <Button Name="EditControlButton"
-                        Content="Edit"
-                        ToolTip="Edit Selected Control (F2)"
-                        Click="EditControlButton_Click"/>
-
-                                <Button Name="DeleteControlButton"
-                        Content="Delete"
-                        ToolTip="Delete Selected Control (Delete)"
-                        Click="DeleteControlButton_Click"/>
-
-                                <Separator/>
-
-                                <Button Name="ConvertToRepeatingButton"
-                        Content="Make Repeating"
-                        ToolTip="Convert Section to Repeating (Ctrl+Shift+R)"
-                        Click="ConvertToRepeatingButton_Click"/>
-
-                                <Separator/>
-
+                                <!-- Only Collapse/Expand and Search in toolbar -->
                                 <Button Name="CollapseAllButton"
                         Content="Collapse All"
                         ToolTip="Collapse All"
@@ -866,12 +841,34 @@
                       BorderThickness="0"
                       Padding="20"
                       SelectedItemChanged="StructureTreeView_SelectedItemChanged">
+                                <TreeView.Resources>
+                                    <!-- Style for inline action buttons -->
+                                    <Style x:Key="InlineActionButton" TargetType="Button">
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Setter Property="BorderThickness" Value="0"/>
+                                        <Setter Property="Cursor" Value="Hand"/>
+                                        <Setter Property="Padding" Value="3"/>
+                                        <Setter Property="Margin" Value="2,0"/>
+                                        <Setter Property="Width" Value="20"/>
+                                        <Setter Property="Height" Value="20"/>
+                                        <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="FontSize" Value="12"/>
+                                        <Setter Property="ToolTipService.InitialShowDelay" Value="500"/>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource BackgroundLighter}"/>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TreeView.Resources>
+
                                 <TreeView.ItemContainerStyle>
                                     <Style TargetType="TreeViewItem">
                                         <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
                                         <Setter Property="FontSize" Value="13"/>
                                         <Setter Property="Padding" Value="5,3"/>
                                         <Setter Property="Margin" Value="0,1"/>
+                                        <Setter Property="MinHeight" Value="26"/>
                                         <Style.Triggers>
                                             <Trigger Property="IsSelected" Value="True">
                                                 <Setter Property="Background" Value="{StaticResource BackgroundLighter}"/>

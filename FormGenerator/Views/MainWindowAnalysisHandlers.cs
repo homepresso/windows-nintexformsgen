@@ -158,6 +158,222 @@ namespace FormGenerator.Views
             }
         }
 
+        private Brush GetControlIconColor(string controlType)
+        {
+            return controlType?.ToLower() switch
+            {
+                "textfield" => new SolidColorBrush(Color.FromRgb(100, 200, 255)), // Light blue
+                "richtext" => new SolidColorBrush(Color.FromRgb(150, 200, 255)), // Lighter blue
+                "dropdown" => new SolidColorBrush(Color.FromRgb(255, 200, 100)), // Light orange
+                "combobox" => new SolidColorBrush(Color.FromRgb(255, 180, 100)), // Orange
+                "checkbox" => new SolidColorBrush(Color.FromRgb(100, 255, 150)), // Light green
+                "datepicker" => new SolidColorBrush(Color.FromRgb(255, 150, 255)), // Light pink
+                "peoplepicker" => new SolidColorBrush(Color.FromRgb(150, 150, 255)), // Light purple
+                "fileattachment" => new SolidColorBrush(Color.FromRgb(200, 200, 200)), // Light gray
+                "button" => new SolidColorBrush(Color.FromRgb(100, 255, 200)), // Mint green
+                "repeatingtable" => new SolidColorBrush(Color.FromRgb(100, 200, 255)), // Light blue
+                "repeatingsection" => new SolidColorBrush(Color.FromRgb(100, 180, 255)), // Blue
+                "label" => new SolidColorBrush(Color.FromRgb(200, 200, 150)), // Light yellow-gray
+                "radiobutton" => new SolidColorBrush(Color.FromRgb(200, 150, 255)), // Light violet
+                "hyperlink" => new SolidColorBrush(Color.FromRgb(100, 150, 255)), // Link blue
+                "inlinepicture" => new SolidColorBrush(Color.FromRgb(255, 200, 150)), // Light peach
+                "signatureline" => new SolidColorBrush(Color.FromRgb(255, 255, 150)), // Light yellow
+                _ => new SolidColorBrush(Color.FromRgb(180, 180, 180)) // Default light gray
+            };
+        }
+
+        private TreeViewItem CreateEnhancedControlItem(ControlDefinition control)
+        {
+            var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
+
+            // Control icon with better visibility
+            var iconText = new TextBlock
+            {
+                Text = GetControlIcon(control.Type) + " ",
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 14,
+                Foreground = GetControlIconColor(control.Type)
+            };
+            headerPanel.Children.Add(iconText);
+
+            // Control label/name with better formatting (no control ID)
+            var displayName = !string.IsNullOrEmpty(control.Label) ? control.Label :
+                             !string.IsNullOrEmpty(control.Name) ? control.Name : "Unnamed";
+
+            // Main display text - just the display name
+            var mainText = new TextBlock
+            {
+                Text = displayName,
+                FontWeight = FontWeights.Medium,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0),
+                MinWidth = 150
+            };
+
+            headerPanel.Children.Add(mainText);
+
+            // Control type badge
+            AddControlTypeBadge(headerPanel, control.Type);
+
+            // Section indicator (if in a section)
+            if (!string.IsNullOrEmpty(control.ParentSection) || control.IsInRepeatingSection)
+            {
+                AddSectionIndicator(headerPanel, control);
+            }
+
+            // Grid position
+            if (!string.IsNullOrEmpty(control.GridPosition))
+            {
+                headerPanel.Children.Add(new TextBlock
+                {
+                    Text = $"[{control.GridPosition}]",
+                    Foreground = (Brush)_mainWindow.FindResource("TextDim"),
+                    FontSize = 10,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(5, 0, 0, 0)
+                });
+            }
+
+            // Dropdown indicator with count
+            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any())
+            {
+                AddDropdownIndicator(headerPanel, control);
+            }
+
+            // Default value indicator
+            if (control.Properties != null && control.Properties.ContainsKey("DefaultValue") &&
+                !string.IsNullOrEmpty(control.Properties["DefaultValue"]))
+            {
+                headerPanel.Children.Add(new TextBlock
+                {
+                    Text = " 🎯",
+                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
+                    ToolTip = $"Has default value: {control.Properties["DefaultValue"]}",
+                    FontSize = 11,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+
+            // Add spacer to push action buttons to the right
+            headerPanel.Children.Add(new TextBlock
+            {
+                Text = " ",
+                MinWidth = 20,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            });
+
+            // Action buttons container with proper visibility
+            var actionPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 0, 0)
+            };
+
+            // Edit button
+            var editButton = new Button
+            {
+                Content = "✏️",
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Padding = new Thickness(3),
+                ToolTip = "Edit control properties",
+                Tag = control,
+                Width = 22,
+                Height = 22,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(2, 0, 2, 0),
+                FontSize = 12
+            };
+            editButton.Click += (s, e) =>
+            {
+                e.Handled = true; // Prevent tree selection change
+                ShowControlEditDialog(control);
+            };
+            actionPanel.Children.Add(editButton);
+
+            // Move to section button
+            var moveButton = new Button
+            {
+                Content = "➡️",
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Padding = new Thickness(3),
+                ToolTip = "Move to section",
+                Tag = control,
+                Width = 22,
+                Height = 22,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(2, 0, 2, 0),
+                FontSize = 12
+            };
+            moveButton.Click += (s, e) =>
+            {
+                e.Handled = true;
+                var view = GetViewForControl(control);
+                if (view != null)
+                    MoveControlToSection(control, view);
+            };
+            actionPanel.Children.Add(moveButton);
+
+            // Delete button
+            var deleteButton = new Button
+            {
+                Content = "🗑️",
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Padding = new Thickness(3),
+                ToolTip = "Delete control",
+                Tag = control,
+                Width = 22,
+                Height = 22,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(2, 0, 2, 0),
+                FontSize = 12
+            };
+            deleteButton.Click += (s, e) =>
+            {
+                e.Handled = true;
+                var result = MessageBox.Show(
+                    $"Are you sure you want to delete '{control.Label ?? control.Name}'?",
+                    "Confirm Delete",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (result == MessageBoxResult.Yes)
+                {
+                    DeleteControl(control);
+                }
+            };
+            actionPanel.Children.Add(deleteButton);
+
+            // Make buttons visible on hover
+            actionPanel.Opacity = 0.3;
+            headerPanel.MouseEnter += (s, e) => actionPanel.Opacity = 1.0;
+            headerPanel.MouseLeave += (s, e) => actionPanel.Opacity = 0.3;
+
+            headerPanel.Children.Add(actionPanel);
+
+            var item = new TreeViewItem
+            {
+                Header = headerPanel,
+                Tag = control,
+                MinHeight = 26
+            };
+
+            // Add comprehensive control properties
+            AddDetailedControlProperties(item, control);
+
+            // Add simplified context menu (without duplicate actions)
+            AddSimplifiedControlContextMenu(item, control);
+
+            return item;
+        }
+
+
         /// <summary>
         /// Creates an enhanced metadata item with section summary
         /// </summary>
@@ -243,26 +459,61 @@ namespace FormGenerator.Views
         /// </summary>
         private TreeViewItem CreateEnhancedViewItem(ViewDefinition view)
         {
+            var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
+
+            headerPanel.Children.Add(new TextBlock
+            {
+                Text = "📄 ",
+                FontSize = 16,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            headerPanel.Children.Add(new TextBlock
+            {
+                Text = view.ViewName,
+                FontWeight = FontWeights.Medium,
+                VerticalAlignment = VerticalAlignment.Center,
+                MinWidth = 200
+            });
+
+            // Add control button for views
+            var addButton = new Button
+            {
+                Content = "➕",
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Padding = new Thickness(3),
+                ToolTip = "Add new control",
+                Width = 22,
+                Height = 22,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 2, 0),
+                FontSize = 12,
+                Opacity = 0.5
+            };
+
+            addButton.Click += (s, e) =>
+            {
+                e.Handled = true;
+                ShowAddControlDialog(view, null);
+            };
+
+            // Show/hide on hover
+            headerPanel.MouseEnter += (s, e) => addButton.Opacity = 1.0;
+            headerPanel.MouseLeave += (s, e) => addButton.Opacity = 0.5;
+
+            headerPanel.Children.Add(addButton);
+
             var viewItem = new TreeViewItem
             {
-                Header = $"📄 {view.ViewName}",
+                Header = headerPanel,
                 Tag = view,
-                IsExpanded = false
+                IsExpanded = false,
+                MinHeight = 26
             };
-
-            // Add context menu to view for adding controls
-            var viewContextMenu = new ContextMenu();
-            var addControlToView = new MenuItem
-            {
-                Header = "Add Control...",
-                Icon = new TextBlock { Text = "➕" }
-            };
-            addControlToView.Click += (s, e) => AddNewControl(view);
-            viewContextMenu.Items.Add(addControlToView);
-            viewItem.ContextMenu = viewContextMenu;
 
             // Build hierarchical structure of sections and controls
-            var rootControls = new List<ControlDefinition>();
             var sectionHierarchy = BuildSectionHierarchy(view);
 
             // Add controls without sections first
@@ -289,6 +540,170 @@ namespace FormGenerator.Views
             viewItem.Items.Add(statsItem);
 
             return viewItem;
+        }
+
+
+        private TreeViewItem CreateSectionTreeItem(SectionNode sectionNode, ViewDefinition view)
+        {
+            var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
+
+            // Section icon with color
+            var sectionIcon = new TextBlock
+            {
+                Text = GetSectionIcon(sectionNode.Type) + " ",
+                FontSize = 16,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = GetSectionIconColor(sectionNode.Type)
+            };
+            headerPanel.Children.Add(sectionIcon);
+
+            // Section name
+            headerPanel.Children.Add(new TextBlock
+            {
+                Text = sectionNode.Name,
+                FontWeight = FontWeights.Medium,
+                VerticalAlignment = VerticalAlignment.Center,
+                MinWidth = 150,
+                Margin = new Thickness(0, 0, 8, 0)
+            });
+
+            // Section type badge
+            var typeBadge = new Border
+            {
+                Background = GetSectionTypeBrush(sectionNode.Type),
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(6, 2, 6, 2),
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            typeBadge.Child = new TextBlock
+            {
+                Text = FormatSectionType(sectionNode.Type),
+                Foreground = Brushes.White,
+                FontSize = 10,
+                FontWeight = FontWeights.Medium
+            };
+            headerPanel.Children.Add(typeBadge);
+
+            // Control count
+            var controlCount = sectionNode.Controls.Count + sectionNode.ChildSections.Sum(cs => CountAllControls(cs));
+            headerPanel.Children.Add(new TextBlock
+            {
+                Text = $"({controlCount} controls)",
+                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                FontStyle = FontStyles.Italic,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+
+            // Add control button for sections
+            var addButton = new Button
+            {
+                Content = "➕",
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Padding = new Thickness(3),
+                ToolTip = "Add control to section",
+                Width = 22,
+                Height = 22,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(10, 0, 2, 0),
+                FontSize = 12,
+                Opacity = 0.5
+            };
+
+            addButton.Click += (s, e) =>
+            {
+                e.Handled = true;
+                ShowAddControlDialog(view, sectionNode.Name);
+            };
+
+            // Show/hide on hover
+            headerPanel.MouseEnter += (s, e) => addButton.Opacity = 1.0;
+            headerPanel.MouseLeave += (s, e) => addButton.Opacity = 0.5;
+
+            headerPanel.Children.Add(addButton);
+
+            var sectionItem = new TreeViewItem
+            {
+                Header = headerPanel,
+                IsExpanded = false,
+                Tag = sectionNode.Name,
+                MinHeight = 26
+            };
+
+            // Apply color based on section type
+            ApplySectionColor(sectionItem, sectionNode.Type);
+
+            // Add section metadata
+            var sectionInfo = view.Sections.FirstOrDefault(s => s.Name == sectionNode.Name);
+            if (sectionInfo != null)
+            {
+                sectionItem.Items.Add(CreateInfoItem($"Type: {sectionNode.Type}", 10));
+                if (!string.IsNullOrEmpty(sectionInfo.CtrlId))
+                {
+                    sectionItem.Items.Add(CreateInfoItem($"ID: {sectionInfo.CtrlId}", 10));
+                }
+
+                // Add conditional indicator if this is a conditional section
+                if (sectionNode.Type == "conditional" || sectionNode.Type == "conditional-in-repeating")
+                {
+                    sectionItem.Items.Add(CreateInfoItem($"⚡ Conditionally visible section", 10));
+                }
+            }
+
+            // If this is a repeating table, add a special indicator
+            if (sectionNode.IsRepeatingTable)
+            {
+                sectionItem.Items.Add(CreateInfoItem($"📊 Repeating Table", 10));
+            }
+
+            // Add child sections first (nested sections like Round Trip within Trips)
+            foreach (var childSection in sectionNode.ChildSections)
+            {
+                var childItem = CreateSectionTreeItem(childSection, view);
+
+                // Add visual indicator for conditional child sections
+                if (childSection.Type == "conditional")
+                {
+                    var headerPanel2 = childItem.Header as StackPanel;
+                    if (headerPanel2 == null)
+                    {
+                        headerPanel2 = new StackPanel { Orientation = Orientation.Horizontal };
+                        headerPanel2.Children.Add(new TextBlock { Text = "⚡ " }); // Lightning bolt for conditional
+                        if (childItem.Header is string headerText)
+                        {
+                            headerPanel2.Children.Add(new TextBlock { Text = headerText });
+                        }
+                        childItem.Header = headerPanel2;
+                    }
+                }
+
+                sectionItem.Items.Add(childItem);
+            }
+
+            // Then add controls in this section
+            foreach (var control in sectionNode.Controls.OrderBy(c => c.DocIndex))
+            {
+                if (!control.IsMergedIntoParent)
+                {
+                    sectionItem.Items.Add(CreateEnhancedControlItem(control));
+                }
+            }
+
+            return sectionItem;
+        }
+
+
+        private class SectionNode
+        {
+            public string Name { get; set; }
+            public string Type { get; set; }
+            public string CtrlId { get; set; }
+            public string ParentSection { get; set; }
+            public bool IsRepeatingTable { get; set; }
+            public List<ControlDefinition> Controls { get; set; }
+            public List<SectionNode> ChildSections { get; set; }
         }
 
         private List<SectionNode> BuildSectionHierarchy(ViewDefinition view)
@@ -396,91 +811,7 @@ namespace FormGenerator.Views
             return rootSections;
         }
 
-        private TreeViewItem CreateSectionTreeItem(SectionNode sectionNode, ViewDefinition view)
-        {
-            var sectionItem = new TreeViewItem
-            {
-                Header = CreateEnhancedSectionHeader(
-                    sectionNode.Name,
-                    sectionNode.Type,
-                    sectionNode.Controls.Count + sectionNode.ChildSections.Sum(cs => CountAllControls(cs))
-                ),
-                IsExpanded = false,
-                Tag = sectionNode.Name
-            };
 
-            // Apply color based on section type
-            ApplySectionColor(sectionItem, sectionNode.Type);
-
-            // Add section metadata
-            var sectionInfo = view.Sections.FirstOrDefault(s => s.Name == sectionNode.Name);
-            if (sectionInfo != null)
-            {
-                sectionItem.Items.Add(CreateInfoItem($"Type: {sectionNode.Type}", 10));
-                if (!string.IsNullOrEmpty(sectionInfo.CtrlId))
-                {
-                    sectionItem.Items.Add(CreateInfoItem($"ID: {sectionInfo.CtrlId}", 10));
-                }
-
-                // Add conditional indicator if this is a conditional section
-                if (sectionNode.Type == "conditional" || sectionNode.Type == "conditional-in-repeating")
-                {
-                    sectionItem.Items.Add(CreateInfoItem($"⚡ Conditionally visible section", 10));
-                }
-            }
-
-            // If this is a repeating table, add a special indicator
-            if (sectionNode.IsRepeatingTable)
-            {
-                sectionItem.Items.Add(CreateInfoItem($"📊 Repeating Table", 10));
-            }
-
-            // Add child sections first (nested sections like Round Trip within Trips)
-            foreach (var childSection in sectionNode.ChildSections)
-            {
-                var childItem = CreateSectionTreeItem(childSection, view);
-
-                // Add visual indicator for conditional child sections
-                if (childSection.Type == "conditional")
-                {
-                    var headerPanel = childItem.Header as StackPanel;
-                    if (headerPanel == null)
-                    {
-                        headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
-                        headerPanel.Children.Add(new TextBlock { Text = "⚡ " }); // Lightning bolt for conditional
-                        if (childItem.Header is string headerText)
-                        {
-                            headerPanel.Children.Add(new TextBlock { Text = headerText });
-                        }
-                        childItem.Header = headerPanel;
-                    }
-                }
-
-                sectionItem.Items.Add(childItem);
-            }
-
-            // Then add controls in this section
-            foreach (var control in sectionNode.Controls.OrderBy(c => c.DocIndex))
-            {
-                if (!control.IsMergedIntoParent)
-                {
-                    sectionItem.Items.Add(CreateEnhancedControlItem(control));
-                }
-            }
-
-            return sectionItem;
-        }
-
-        private class SectionNode
-        {
-            public string Name { get; set; }
-            public string Type { get; set; }
-            public string CtrlId { get; set; }
-            public string ParentSection { get; set; }
-            public bool IsRepeatingTable { get; set; }
-            public List<ControlDefinition> Controls { get; set; }
-            public List<SectionNode> ChildSections { get; set; }
-        }
 
         private int CountAllControls(SectionNode section)
         {
@@ -490,6 +821,56 @@ namespace FormGenerator.Views
                 count += CountAllControls(childSection);
             }
             return count;
+        }
+
+        private void AddSimplifiedControlContextMenu(TreeViewItem item, ControlDefinition control)
+        {
+            var contextMenu = new ContextMenu();
+
+            // Duplicate Control
+            var duplicateMenuItem = new MenuItem
+            {
+                Header = "Duplicate Control",
+                Icon = new TextBlock { Text = "📋", FontSize = 14 }
+            };
+            duplicateMenuItem.Click += (s, e) => DuplicateControl(control);
+            contextMenu.Items.Add(duplicateMenuItem);
+
+            // Copy as JSON
+            var copyJsonMenuItem = new MenuItem
+            {
+                Header = "Copy as JSON",
+                Icon = new TextBlock { Text = "📄", FontSize = 14 }
+            };
+            copyJsonMenuItem.Click += (s, e) => CopyControlAsJson(control);
+            contextMenu.Items.Add(copyJsonMenuItem);
+
+            contextMenu.Items.Add(new Separator());
+
+            // Convert to Repeating (if applicable)
+            if (!control.IsInRepeatingSection)
+            {
+                var convertMenuItem = new MenuItem
+                {
+                    Header = "Convert to Repeating Section",
+                    Icon = new TextBlock { Text = "🔁", FontSize = 14 }
+                };
+                convertMenuItem.Click += (s, e) => ShowMoveSectionDialog(control);
+                contextMenu.Items.Add(convertMenuItem);
+            }
+            else
+            {
+                // Remove from Repeating Section
+                var removeMenuItem = new MenuItem
+                {
+                    Header = "Remove from Repeating Section",
+                    Icon = new TextBlock { Text = "➖", FontSize = 14 }
+                };
+                removeMenuItem.Click += (s, e) => RemoveFromRepeatingSectionWithRefresh(control);
+                contextMenu.Items.Add(removeMenuItem);
+            }
+
+            item.ContextMenu = contextMenu;
         }
 
         /// <summary>
@@ -519,134 +900,7 @@ namespace FormGenerator.Views
         /// <summary>
         /// Creates an enhanced control item with all properties
         /// </summary>
-        private TreeViewItem CreateEnhancedControlItem(ControlDefinition control)
-        {
-            var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
-
-            // Control icon
-            headerPanel.Children.Add(new TextBlock
-            {
-                Text = GetControlIcon(control.Type) + " ",
-                VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 14
-            });
-
-            // Control label/name with better formatting
-            var displayName = !string.IsNullOrEmpty(control.Label) ? control.Label :
-                             !string.IsNullOrEmpty(control.Name) ? control.Name : "Unnamed";
-
-            // Main display text
-            var mainText = new TextBlock
-            {
-                FontWeight = FontWeights.Medium,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 8, 0)
-            };
-
-            // Add CtrlId if present
-            if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
-            {
-                mainText.Text = $"[{control.Properties["CtrlId"]}] {displayName}";
-            }
-            else
-            {
-                mainText.Text = displayName;
-            }
-
-            headerPanel.Children.Add(mainText);
-
-            // Control type badge
-            AddControlTypeBadge(headerPanel, control.Type);
-
-            // Control Name (if different from label)
-            if (!string.IsNullOrEmpty(control.Name) && control.Name != control.Label)
-            {
-                var nameBadge = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromArgb(30, 128, 128, 128)),
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(5, 1, 5, 1),
-                    Margin = new Thickness(0, 0, 5, 0)
-                };
-                nameBadge.Child = new TextBlock
-                {
-                    Text = $"Name: {control.Name}",
-                    Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                    FontSize = 10,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                headerPanel.Children.Add(nameBadge);
-            }
-
-            // Section indicator (if in a section)
-            if (!string.IsNullOrEmpty(control.ParentSection) || control.IsInRepeatingSection)
-            {
-                AddSectionIndicator(headerPanel, control);
-            }
-
-            // Grid position
-            if (!string.IsNullOrEmpty(control.GridPosition))
-            {
-                headerPanel.Children.Add(new TextBlock
-                {
-                    Text = $"[{control.GridPosition}]",
-                    Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                    FontSize = 10,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(5, 0, 0, 0)
-                });
-            }
-
-            // Dropdown indicator with count
-            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any())
-            {
-                AddDropdownIndicator(headerPanel, control);
-            }
-
-            // Default value indicator
-            if (control.Properties != null && control.Properties.ContainsKey("DefaultValue") &&
-                !string.IsNullOrEmpty(control.Properties["DefaultValue"]))
-            {
-                headerPanel.Children.Add(new TextBlock
-                {
-                    Text = " 🎯",
-                    Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
-                    ToolTip = $"Has default value: {control.Properties["DefaultValue"]}",
-                    FontSize = 11,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-            }
-
-            // Edit button - FIXED
-            var editButton = new Button
-            {
-                Content = "✏️",
-                Background = Brushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Cursor = System.Windows.Input.Cursors.Hand,
-                Padding = new Thickness(5, 0, 5, 0),
-                ToolTip = "Edit control properties",
-                Tag = control,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(5, 0, 0, 0)
-            };
-            editButton.Click += (s, e) => ShowControlEditDialog(control);
-            headerPanel.Children.Add(editButton);
-
-            var item = new TreeViewItem
-            {
-                Header = headerPanel,
-                Tag = control
-            };
-
-            // Add comprehensive control properties
-            AddDetailedControlProperties(item, control);
-
-            // Add context menu
-            AddControlContextMenu(item, control);
-
-            return item;
-        }
+    
 
         private void AddDetailedControlProperties(TreeViewItem item, ControlDefinition control)
         {
@@ -697,7 +951,8 @@ namespace FormGenerator.Views
                     Header = $"📋 Dropdown Values ({control.DataOptions.Count})",
                     Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
                     FontSize = 11,
-                    IsExpanded = false
+                    IsExpanded = false,
+                    MinHeight = 22
                 };
 
                 foreach (var option in control.DataOptions.OrderBy(o => o.Order))
@@ -706,13 +961,16 @@ namespace FormGenerator.Views
                     if (option.IsDefault)
                         optionText += " ⭐ (default)";
 
-                    dropdownItem.Items.Add(new TreeViewItem
+                    var optionItem = new TreeViewItem
                     {
                         Header = $"  • {optionText}",
                         Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
                         FontSize = 10,
-                        ToolTip = $"Value: {option.Value}"
-                    });
+                        ToolTip = $"Value: {option.Value}",
+                        MinHeight = 18,
+                        Padding = new Thickness(5, 1, 5, 1)
+                    };
+                    dropdownItem.Items.Add(optionItem);
                 }
 
                 item.Items.Add(dropdownItem);
@@ -726,7 +984,8 @@ namespace FormGenerator.Views
                     Header = $"⚙️ Properties ({control.Properties.Count})",
                     Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
                     FontSize = 11,
-                    IsExpanded = false
+                    IsExpanded = false,
+                    MinHeight = 22
                 };
 
                 foreach (var prop in control.Properties.OrderBy(p => p.Key))
@@ -734,12 +993,15 @@ namespace FormGenerator.Views
                     // Skip already displayed properties
                     if (prop.Key == "CtrlId") continue;
 
-                    propsItem.Items.Add(new TreeViewItem
+                    var propItem = new TreeViewItem
                     {
                         Header = $"  {prop.Key}: {prop.Value}",
                         Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                        FontSize = 10
-                    });
+                        FontSize = 10,
+                        MinHeight = 18,
+                        Padding = new Thickness(5, 1, 5, 1)
+                    };
+                    propsItem.Items.Add(propItem);
                 }
 
                 item.Items.Add(propsItem);
@@ -2345,7 +2607,8 @@ namespace FormGenerator.Views
                 Header = "📈 View Statistics",
                 Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
                 FontSize = 11,
-                IsExpanded = false
+                IsExpanded = false,
+                MinHeight = 24
             };
 
             var controlTypeGroups = view.Controls
@@ -2355,48 +2618,58 @@ namespace FormGenerator.Views
 
             foreach (var typeGroup in controlTypeGroups)
             {
-                statsItem.Items.Add(new TreeViewItem
+                var statItem = new TreeViewItem
                 {
                     Header = $"{GetControlIcon(typeGroup.Key)} {typeGroup.Key}: {typeGroup.Count()}",
                     Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                    FontSize = 10
-                });
+                    FontSize = 10,
+                    MinHeight = 20,
+                    Padding = new Thickness(5, 2, 5, 2)
+                };
+                statsItem.Items.Add(statItem);
             }
 
             // Add dropdown controls count
             var dropdownControls = view.Controls.Count(c => c.HasStaticData);
             if (dropdownControls > 0)
             {
-                statsItem.Items.Add(new TreeViewItem
+                var dropdownItem = new TreeViewItem
                 {
                     Header = $"📋 Controls with dropdown values: {dropdownControls}",
                     Foreground = (Brush)_mainWindow.FindResource("SuccessColor"),
-                    FontSize = 10
-                });
+                    FontSize = 10,
+                    MinHeight = 20,
+                    Padding = new Thickness(5, 2, 5, 2)
+                };
+                statsItem.Items.Add(dropdownItem);
             }
 
             // Add repeating controls count
             var repeatingControls = view.Controls.Count(c => c.IsInRepeatingSection);
             if (repeatingControls > 0)
             {
-                statsItem.Items.Add(new TreeViewItem
+                var repeatingItem = new TreeViewItem
                 {
                     Header = $"🔁 Controls in repeating sections: {repeatingControls}",
                     Foreground = (Brush)_mainWindow.FindResource("InfoColor"),
-                    FontSize = 10
-                });
+                    FontSize = 10,
+                    MinHeight = 20,
+                    Padding = new Thickness(5, 2, 5, 2)
+                };
+                statsItem.Items.Add(repeatingItem);
             }
 
             return statsItem;
         }
-
         private TreeViewItem CreateInfoItem(string text, int fontSize = 11)
         {
             return new TreeViewItem
             {
                 Header = text,
                 Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                FontSize = fontSize
+                FontSize = fontSize,
+                MinHeight = 20,
+                Padding = new Thickness(5, 2, 5, 2)
             };
         }
 
@@ -2451,7 +2724,20 @@ namespace FormGenerator.Views
                 "repeating" => "🔁",
                 "optional" => "❓",
                 "dynamic" => "🔄",
+                "conditional" => "⚡",
                 _ => "📦"
+            };
+        }
+
+        private Brush GetSectionIconColor(string sectionType)
+        {
+            return sectionType?.ToLower() switch
+            {
+                "repeating" => new SolidColorBrush(Color.FromRgb(100, 200, 255)), // Light blue
+                "optional" => new SolidColorBrush(Color.FromRgb(255, 200, 100)), // Light orange
+                "dynamic" => new SolidColorBrush(Color.FromRgb(200, 150, 255)), // Light purple
+                "conditional" => new SolidColorBrush(Color.FromRgb(255, 255, 100)), // Light yellow
+                _ => new SolidColorBrush(Color.FromRgb(150, 200, 150)) // Light green
             };
         }
 
