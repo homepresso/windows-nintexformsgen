@@ -181,7 +181,6 @@ namespace FormGenerator.Views
                 _ => new SolidColorBrush(Color.FromRgb(180, 180, 180)) // Default light gray
             };
         }
-
         private TreeViewItem CreateEnhancedControlItem(ControlDefinition control)
         {
             var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
@@ -270,7 +269,7 @@ namespace FormGenerator.Views
                 Margin = new Thickness(10, 0, 0, 0)
             };
 
-            // Edit button
+            // Edit button - visible gray by default
             var editButton = new Button
             {
                 Content = "✏️",
@@ -284,16 +283,19 @@ namespace FormGenerator.Views
                 Height = 22,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(2, 0, 2, 0),
-                FontSize = 12
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)) // Gray by default
             };
             editButton.Click += (s, e) =>
             {
                 e.Handled = true; // Prevent tree selection change
                 ShowControlEditDialog(control);
             };
+            editButton.MouseEnter += (s, e) => editButton.Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)); // Bright on hover
+            editButton.MouseLeave += (s, e) => editButton.Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)); // Back to gray
             actionPanel.Children.Add(editButton);
 
-            // Move to section button
+            // Move to section button - visible gray by default
             var moveButton = new Button
             {
                 Content = "➡️",
@@ -307,7 +309,8 @@ namespace FormGenerator.Views
                 Height = 22,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(2, 0, 2, 0),
-                FontSize = 12
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)) // Gray by default
             };
             moveButton.Click += (s, e) =>
             {
@@ -316,9 +319,11 @@ namespace FormGenerator.Views
                 if (view != null)
                     MoveControlToSection(control, view);
             };
+            moveButton.MouseEnter += (s, e) => moveButton.Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)); // Bright on hover
+            moveButton.MouseLeave += (s, e) => moveButton.Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)); // Back to gray
             actionPanel.Children.Add(moveButton);
 
-            // Delete button
+            // Delete button - visible gray by default
             var deleteButton = new Button
             {
                 Content = "🗑️",
@@ -332,11 +337,13 @@ namespace FormGenerator.Views
                 Height = 22,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(2, 0, 2, 0),
-                FontSize = 12
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)) // Gray by default
             };
             deleteButton.Click += (s, e) =>
             {
                 e.Handled = true;
+
                 var result = MessageBox.Show(
                     $"Are you sure you want to delete '{control.Label ?? control.Name}'?",
                     "Confirm Delete",
@@ -345,15 +352,41 @@ namespace FormGenerator.Views
 
                 if (result == MessageBoxResult.Yes)
                 {
-                    DeleteControl(control);
+                    var view = GetViewForControl(control);
+                    if (view != null)
+                    {
+                        // Remove the control from the view
+                        view.Controls.Remove(control);
+
+                        // Update the form definition's metadata
+                        if (_mainWindow._allFormDefinitions != null)
+                        {
+                            foreach (var formDef in _mainWindow._allFormDefinitions.Values)
+                            {
+                                if (formDef.Views.Contains(view))
+                                {
+                                    // Update control count in metadata
+                                    formDef.Metadata.TotalControls = formDef.Views.Sum(v => v.Controls.Count);
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Refresh everything - tree, JSON, and data columns
+                        RefreshAll();
+
+                        _mainWindow.UpdateStatus($"Deleted control: {control.Label ?? control.Name}", MessageSeverity.Info);
+                    }
                 }
             };
+            deleteButton.MouseEnter += (s, e) => deleteButton.Foreground = new SolidColorBrush(Color.FromRgb(255, 100, 100)); // Red on hover for delete
+            deleteButton.MouseLeave += (s, e) => deleteButton.Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)); // Back to gray
             actionPanel.Children.Add(deleteButton);
 
-            // Make buttons visible on hover
-            actionPanel.Opacity = 0.3;
-            headerPanel.MouseEnter += (s, e) => actionPanel.Opacity = 1.0;
-            headerPanel.MouseLeave += (s, e) => actionPanel.Opacity = 0.3;
+            // Remove the opacity changes since we're using color changes now
+            // actionPanel.Opacity = 0.3;
+            // headerPanel.MouseEnter += (s, e) => actionPanel.Opacity = 1.0;
+            // headerPanel.MouseLeave += (s, e) => actionPanel.Opacity = 0.3;
 
             headerPanel.Children.Add(actionPanel);
 
@@ -382,26 +415,51 @@ namespace FormGenerator.Views
             var metadataItem = new TreeViewItem
             {
                 Header = "📊 Form Summary",
-                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
+                Foreground = new SolidColorBrush(Color.FromRgb(200, 200, 200)), // Brighter
                 FontSize = 11,
-                IsExpanded = false
+                IsExpanded = false,
+                MinHeight = 24
             };
 
-            // Basic counts
-            metadataItem.Items.Add(CreateInfoItem($"Views: {formDef.Views.Count}"));
-            metadataItem.Items.Add(CreateInfoItem($"Total Controls: {formDef.Metadata.TotalControls}"));
-            metadataItem.Items.Add(CreateInfoItem($"Data Columns: {formDef.Data.Count}"));
+            // Basic counts with brighter text
+            metadataItem.Items.Add(new TreeViewItem
+            {
+                Header = $"Views: {formDef.Views.Count}",
+                Foreground = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                FontSize = 10,
+                MinHeight = 20,
+                Padding = new Thickness(5, 2, 5, 2)
+            });
 
-            // Section information with details
+            metadataItem.Items.Add(new TreeViewItem
+            {
+                Header = $"Total Controls: {formDef.Metadata.TotalControls}",
+                Foreground = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                FontSize = 10,
+                MinHeight = 20,
+                Padding = new Thickness(5, 2, 5, 2)
+            });
+
+            metadataItem.Items.Add(new TreeViewItem
+            {
+                Header = $"Data Columns: {formDef.Data.Count}",
+                Foreground = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                FontSize = 10,
+                MinHeight = 20,
+                Padding = new Thickness(5, 2, 5, 2)
+            });
+
+            // Section information with bright colors
             if (formDef.Metadata.RepeatingSectionCount > 0)
             {
                 var repeatingSectionNames = GetRepeatingSectionNames(formDef);
                 var repeatingSectionItem = new TreeViewItem
                 {
                     Header = $"🔁 Repeating Sections: {formDef.Metadata.RepeatingSectionCount}",
-                    Foreground = (Brush)_mainWindow.FindResource("InfoColor"),
+                    Foreground = new SolidColorBrush(Color.FromRgb(100, 200, 255)), // Bright blue
                     FontSize = 11,
-                    IsExpanded = false
+                    IsExpanded = false,
+                    MinHeight = 22
                 };
 
                 foreach (var sectionName in repeatingSectionNames)
@@ -409,8 +467,10 @@ namespace FormGenerator.Views
                     repeatingSectionItem.Items.Add(new TreeViewItem
                     {
                         Header = $"  • {sectionName}",
-                        Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                        FontSize = 10
+                        Foreground = new SolidColorBrush(Color.FromRgb(170, 170, 170)), // Brighter
+                        FontSize = 10,
+                        MinHeight = 18,
+                        Padding = new Thickness(5, 1, 5, 1)
                     });
                 }
 
@@ -422,20 +482,22 @@ namespace FormGenerator.Views
                 metadataItem.Items.Add(new TreeViewItem
                 {
                     Header = $"🔄 Dynamic Sections: {formDef.Metadata.DynamicSectionCount} (conditional visibility)",
-                    Foreground = (Brush)_mainWindow.FindResource("WarningColor"),
-                    FontSize = 11
+                    Foreground = new SolidColorBrush(Color.FromRgb(200, 150, 255)), // Bright purple
+                    FontSize = 11,
+                    MinHeight = 22
                 });
             }
 
-            // Conditional fields
+            // Conditional fields with bright colors
             if (formDef.Metadata.ConditionalFields.Any())
             {
                 var conditionalItem = new TreeViewItem
                 {
                     Header = $"⚡ Conditional Fields: {formDef.Metadata.ConditionalFields.Count}",
-                    Foreground = (Brush)_mainWindow.FindResource("AccentColor"),
+                    Foreground = new SolidColorBrush(Color.FromRgb(255, 255, 100)), // Bright yellow
                     FontSize = 11,
-                    IsExpanded = false
+                    IsExpanded = false,
+                    MinHeight = 22
                 };
 
                 foreach (var field in formDef.Metadata.ConditionalFields)
@@ -443,8 +505,10 @@ namespace FormGenerator.Views
                     conditionalItem.Items.Add(new TreeViewItem
                     {
                         Header = $"  • {field}",
-                        Foreground = (Brush)_mainWindow.FindResource("TextDim"),
-                        FontSize = 10
+                        Foreground = new SolidColorBrush(Color.FromRgb(170, 170, 170)), // Brighter
+                        FontSize = 10,
+                        MinHeight = 18,
+                        Padding = new Thickness(5, 1, 5, 1)
                     });
                 }
 
@@ -595,7 +659,7 @@ namespace FormGenerator.Views
                 VerticalAlignment = VerticalAlignment.Center
             });
 
-            // Add control button for sections
+            // Add control button for sections - gray by default, bright on hover
             var addButton = new Button
             {
                 Content = "➕",
@@ -609,7 +673,7 @@ namespace FormGenerator.Views
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(10, 0, 2, 0),
                 FontSize = 12,
-                Opacity = 0.5
+                Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120)) // Gray by default
             };
 
             addButton.Click += (s, e) =>
@@ -618,9 +682,9 @@ namespace FormGenerator.Views
                 ShowAddControlDialog(view, sectionNode.Name);
             };
 
-            // Show/hide on hover
-            headerPanel.MouseEnter += (s, e) => addButton.Opacity = 1.0;
-            headerPanel.MouseLeave += (s, e) => addButton.Opacity = 0.5;
+            // Bright green on hover for add
+            addButton.MouseEnter += (s, e) => addButton.Foreground = new SolidColorBrush(Color.FromRgb(100, 255, 100));
+            addButton.MouseLeave += (s, e) => addButton.Foreground = new SolidColorBrush(Color.FromRgb(120, 120, 120));
 
             headerPanel.Children.Add(addButton);
 
@@ -900,7 +964,7 @@ namespace FormGenerator.Views
         /// <summary>
         /// Creates an enhanced control item with all properties
         /// </summary>
-    
+
 
         private void AddDetailedControlProperties(TreeViewItem item, ControlDefinition control)
         {
@@ -1461,14 +1525,13 @@ namespace FormGenerator.Views
                         });
                     }
                     newControl.DataOptionsString = string.Join(", ", newControl.DataOptions.Select(o => o.DisplayText));
-                    // HasStaticData is read-only - it's automatically determined by having DataOptions
                 }
 
                 // Add to view
                 view.Controls.Add(newControl);
 
-                // Refresh tree view
-                RefreshStructureTree();
+                // REFRESH BOTH TREE AND JSON
+                RefreshAll();
 
                 _mainWindow.UpdateStatus($"Added control: {newControl.Label} [{newCtrlId}]", MessageSeverity.Info);
 
@@ -1847,7 +1910,7 @@ namespace FormGenerator.Views
             dialog.ShowDialog();
         }
 
-   
+
 
 
 
@@ -1961,8 +2024,8 @@ namespace FormGenerator.Views
                         }
                     }
 
-                    // Refresh tree view
-                    RefreshStructureTree();
+                    // REFRESH BOTH TREE AND JSON
+                    RefreshAll();
 
                     _mainWindow.UpdateStatus($"Moved control to: {targetSection.Display}", MessageSeverity.Info);
                 }
@@ -2358,21 +2421,39 @@ namespace FormGenerator.Views
         // Made public for accessibility
         public void DeleteControl(ControlDefinition control)
         {
-            var result = MessageBox.Show(
-                $"Delete control '{control.Label ?? control.Name}'?",
-                "Confirm Delete",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-
-            if (result == MessageBoxResult.Yes)
+            var view = GetViewForControl(control);
+            if (view != null)
             {
-                var view = GetViewForControl(control);
-                if (view != null)
+                // Remove the control from the view
+                view.Controls.Remove(control);
+
+                // Update the form definition's metadata
+                if (_mainWindow._allFormDefinitions != null)
                 {
-                    view.Controls.Remove(control);
-                    RefreshStructureTree();
-                    _mainWindow.UpdateStatus($"Deleted control: {control.Label}", MessageSeverity.Info);
+                    foreach (var formDef in _mainWindow._allFormDefinitions.Values)
+                    {
+                        if (formDef.Views.Contains(view))
+                        {
+                            // Update control count in metadata
+                            formDef.Metadata.TotalControls = formDef.Views.Sum(v => v.Controls.Count);
+
+                            // If this was in a repeating section, update that count too
+                            if (control.IsInRepeatingSection)
+                            {
+                                var repeatingCount = formDef.Views
+                                    .SelectMany(v => v.Controls)
+                                    .Count(c => c.IsInRepeatingSection);
+                                // Update repeating controls count if tracked
+                            }
+                            break;
+                        }
+                    }
                 }
+
+                // REFRESH BOTH TREE AND JSON
+                RefreshAll();
+
+                _mainWindow.UpdateStatus($"Deleted control: {control.Label ?? control.Name}", MessageSeverity.Info);
             }
         }
 
@@ -2865,6 +2946,32 @@ namespace FormGenerator.Views
                 "dynamic" => (Brush)_mainWindow.FindResource("AccentColor"),
                 _ => (Brush)_mainWindow.FindResource("TextPrimary")
             };
+        }
+
+        private void RefreshJsonOutput()
+        {
+            if (_mainWindow._allFormDefinitions != null && _mainWindow._allFormDefinitions.Any())
+            {
+                DisplayEnhancedJson(_mainWindow._allFormDefinitions);
+            }
+        }
+
+        private void RefreshAll()
+        {
+            // Rebuild the structure tree
+            if (_mainWindow._allFormDefinitions != null)
+            {
+                BuildEnhancedStructureTree(_mainWindow._allFormDefinitions);
+            }
+
+            // Refresh the JSON output
+            RefreshJsonOutput();
+
+            // Also refresh the data columns grid if needed
+            if (_mainWindow._allFormDefinitions != null)
+            {
+                DisplayEnhancedDataColumns(_mainWindow._allFormDefinitions);
+            }
         }
 
         #endregion

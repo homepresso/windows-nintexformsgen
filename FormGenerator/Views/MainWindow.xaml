@@ -805,27 +805,32 @@
                                 <Button Name="CollapseAllButton"
                         Content="Collapse All"
                         ToolTip="Collapse All"
+                        Foreground="{StaticResource TextSecondary}"
                         Click="CollapseAllButton_Click"/>
 
                                 <Button Name="ExpandAllButton"
                         Content="Expand All"
                         ToolTip="Expand All"
+                        Foreground="{StaticResource TextSecondary}"
                         Click="ExpandAllButton_Click"/>
 
                                 <Separator/>
 
                                 <TextBlock Text="Search:" 
-                           Margin="5,0"/>
+                           Margin="5,0"
+                           Foreground="{StaticResource TextSecondary}"/>
 
                                 <TextBox Name="TreeSearchBox"
                          Width="200"
                          Height="26"
                          Margin="0,0,5,0"
+                         Foreground="{StaticResource TextPrimary}"
                          TextChanged="TreeSearchBox_TextChanged"/>
 
                                 <Button Name="TreeSearchButton"
                         Content="Search"
                         ToolTip="Search"
+                        Foreground="{StaticResource TextSecondary}"
                         Click="TreeSearchButton_Click"/>
 
                             </ToolBar>
