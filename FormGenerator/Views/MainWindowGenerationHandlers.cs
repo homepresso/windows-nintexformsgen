@@ -19,11 +19,14 @@ namespace FormGenerator.Views
     {
         private readonly MainWindow _mainWindow;
         private readonly SqlGeneratorService _sqlGenerator;
+        private readonly SqlConnectionService _sqlConnection;
+        private string _currentConnectionString;
 
         public MainWindowGenerationHandlers(MainWindow mainWindow)
         {
             _mainWindow = mainWindow;
             _sqlGenerator = new SqlGeneratorService();
+            _sqlConnection = new SqlConnectionService();
         }
 
         #region SQL Generation
@@ -35,56 +38,191 @@ namespace FormGenerator.Views
                 _mainWindow.UpdateStatus("Testing SQL connection...");
                 _mainWindow.SqlGenerationLog.Text = "Testing connection to SQL Server...\n";
 
-                // Build connection string based on authentication type
-                string connectionString;
-                if (_mainWindow.WindowsAuthRadio.IsChecked == true)
+                // Validate inputs
+                if (string.IsNullOrWhiteSpace(_mainWindow.SqlServerTextBox.Text))
                 {
-                    connectionString = $"Server={_mainWindow.SqlServerTextBox.Text};Database={_mainWindow.SqlDatabaseTextBox.Text};Integrated Security=true;";
+                    MessageBox.Show("Please enter a SQL Server name/instance.",
+                                   "Missing Information",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(_mainWindow.SqlDatabaseTextBox.Text))
+                {
+                    MessageBox.Show("Please enter a database name.",
+                                   "Missing Information",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
+
+                // Build connection string based on authentication type
+                bool useWindowsAuth = _mainWindow.WindowsAuthRadio.IsChecked == true;
+
+                if (useWindowsAuth)
+                {
                     _mainWindow.SqlGenerationLog.Text += $"Using Windows Authentication\n";
                 }
                 else
                 {
-                    connectionString = $"Server={_mainWindow.SqlServerTextBox.Text};Database={_mainWindow.SqlDatabaseTextBox.Text};User Id={_mainWindow.SqlUsernameTextBox.Text};Password={_mainWindow.SqlPasswordBox.Password};";
                     _mainWindow.SqlGenerationLog.Text += $"Using SQL Server Authentication\n";
+
+                    // Validate SQL auth credentials
+                    if (string.IsNullOrWhiteSpace(_mainWindow.SqlUsernameTextBox.Text))
+                    {
+                        MessageBox.Show("Please enter a username for SQL Server authentication.",
+                                       "Missing Credentials",
+                                       MessageBoxButton.OK,
+                                       MessageBoxImage.Warning);
+                        return;
+                    }
                 }
 
                 _mainWindow.SqlGenerationLog.Text += $"Server: {_mainWindow.SqlServerTextBox.Text}\n";
                 _mainWindow.SqlGenerationLog.Text += $"Database: {_mainWindow.SqlDatabaseTextBox.Text}\n\n";
 
-                // Simulate connection test
-                await Task.Delay(1000);
+                // Build connection string using the service
+                // IMPORTANT: Set trustServerCertificate to true to handle SSL certificate issues
+                _currentConnectionString = _sqlConnection.BuildConnectionString(
+                    _mainWindow.SqlServerTextBox.Text,
+                    _mainWindow.SqlDatabaseTextBox.Text,
+                    useWindowsAuth,
+                    useWindowsAuth ? null : _mainWindow.SqlUsernameTextBox.Text,
+                    useWindowsAuth ? null : _mainWindow.SqlPasswordBox.Password,
+                    trustServerCertificate: true  // This handles the certificate trust issue
+                );
 
-                // Mock success
-                _mainWindow.SqlGenerationLog.Text += "✅ Connection successful!\n";
-                _mainWindow.UpdateStatus("SQL connection test successful", MessageSeverity.Info);
+                // Test the connection with the fixed method that properly checks database existence
+                var testResult = await _sqlConnection.TestConnectionAsync(_currentConnectionString);
 
-                // Enable generation button after successful connection
-                _mainWindow.GenerateSqlButton.IsEnabled = true;
+                if (testResult.Success)
+                {
+                    _mainWindow.SqlGenerationLog.Text += $"✅ {testResult.Message}\n";
+                    _mainWindow.SqlGenerationLog.Text += $"Server Version: {testResult.ServerVersion}\n";
+                    _mainWindow.UpdateStatus("SQL connection test successful", MessageSeverity.Info);
 
-                MessageBox.Show("Connection to SQL Server successful!",
-                               "Connection Test",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Information);
+                    // Enable generation button after successful connection
+                    _mainWindow.GenerateSqlButton.IsEnabled = true;
+
+                    MessageBox.Show($"{testResult.Message}\n\nServer Version:\n{testResult.ServerVersion}",
+                                   "Connection Test Successful",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Information);
+                }
+                else
+                {
+                    _mainWindow.SqlGenerationLog.Text += $"❌ {testResult.Message}\n";
+
+                    // Check if it's a certificate error and retry with trust enabled
+                    if (testResult.Message.Contains("certificate") || testResult.Message.Contains("SSL"))
+                    {
+                        _mainWindow.SqlGenerationLog.Text += "\nRetrying with certificate trust enabled...\n";
+
+                        // Already set to true above, but just to be explicit
+                        _currentConnectionString = _sqlConnection.BuildConnectionString(
+                            _mainWindow.SqlServerTextBox.Text,
+                            _mainWindow.SqlDatabaseTextBox.Text,
+                            useWindowsAuth,
+                            useWindowsAuth ? null : _mainWindow.SqlUsernameTextBox.Text,
+                            useWindowsAuth ? null : _mainWindow.SqlPasswordBox.Password,
+                            trustServerCertificate: true
+                        );
+
+                        testResult = await _sqlConnection.TestConnectionAsync(_currentConnectionString);
+
+                        if (testResult.Success)
+                        {
+                            _mainWindow.SqlGenerationLog.Text += $"✅ {testResult.Message}\n";
+                            _mainWindow.UpdateStatus("SQL connection test successful", MessageSeverity.Info);
+                            _mainWindow.GenerateSqlButton.IsEnabled = true;
+
+                            MessageBox.Show($"Connection successful!\n\nNote: The server is using a self-signed or untrusted certificate. The connection has been established with certificate trust enabled.\n\nServer Version:\n{testResult.ServerVersion}",
+                                           "Connection Test Successful",
+                                           MessageBoxButton.OK,
+                                           MessageBoxImage.Information);
+                            return;
+                        }
+                    }
+
+                    // Check if it's a database not found error
+                    if (testResult.Message.Contains("does not exist"))
+                    {
+                        // Ask user if they want to create the database
+                        var result = MessageBox.Show(
+                            $"{testResult.Message}\n\nWould you like to create the database now?",
+                            "Database Not Found",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question);
+
+                        if (result == MessageBoxResult.Yes)
+                        {
+                            _mainWindow.SqlGenerationLog.Text += "\nAttempting to create database...\n";
+
+                            // Try to create the database
+                            var createResult = await _sqlConnection.CreateDatabaseIfNotExistsAsync(_mainWindow.SqlDatabaseTextBox.Text);
+
+                            if (createResult.Success)
+                            {
+                                _mainWindow.SqlGenerationLog.Text += $"✅ {createResult.Message}\n";
+
+                                // Now test the connection again
+                                var retestResult = await _sqlConnection.TestConnectionAsync(_currentConnectionString);
+
+                                if (retestResult.Success)
+                                {
+                                    _mainWindow.SqlGenerationLog.Text += $"✅ Connection verified successfully!\n";
+                                    _mainWindow.UpdateStatus("Database created and connection successful", MessageSeverity.Info);
+                                    _mainWindow.GenerateSqlButton.IsEnabled = true;
+
+                                    MessageBox.Show("Database created successfully and connection established!",
+                                                   "Success",
+                                                   MessageBoxButton.OK,
+                                                   MessageBoxImage.Information);
+                                }
+                            }
+                            else
+                            {
+                                _mainWindow.SqlGenerationLog.Text += $"❌ {createResult.Message}\n";
+                                _mainWindow.UpdateStatus("Failed to create database", MessageSeverity.Error);
+
+                                MessageBox.Show($"Failed to create database:\n{createResult.Message}",
+                                               "Database Creation Failed",
+                                               MessageBoxButton.OK,
+                                               MessageBoxImage.Error);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _mainWindow.UpdateStatus("SQL connection test failed", MessageSeverity.Error);
+
+                        MessageBox.Show($"Connection failed:\n{testResult.Message}",
+                                       "Connection Test Failed",
+                                       MessageBoxButton.OK,
+                                       MessageBoxImage.Error);
+                    }
+                }
             }
             catch (Exception ex)
             {
-                _mainWindow.SqlGenerationLog.Text += $"❌ Connection failed: {ex.Message}\n";
-                _mainWindow.UpdateStatus("SQL connection test failed", MessageSeverity.Error);
+                _mainWindow.SqlGenerationLog.Text += $"❌ Unexpected error: {ex.Message}\n";
+                _mainWindow.UpdateStatus($"Connection test error: {ex.Message}", MessageSeverity.Error);
 
-                MessageBox.Show($"Connection failed:\n{ex.Message}",
-                               "Connection Error",
+                MessageBox.Show($"An unexpected error occurred:\n{ex.Message}",
+                               "Error",
                                MessageBoxButton.OK,
                                MessageBoxImage.Error);
             }
         }
-
         public async Task GenerateSql()
         {
             try
             {
                 _mainWindow.GenerateSqlButton.IsEnabled = false;
                 _mainWindow.UpdateStatus("Generating SQL scripts...");
-                _mainWindow.SqlGenerationLog.Text = "Starting SQL generation...\n\n";
+                _mainWindow.SqlGenerationLog.Text += "\n═══════════════════════════════════════\n";
+                _mainWindow.SqlGenerationLog.Text += "Starting SQL generation...\n\n";
 
                 // Check analysis results
                 if (_mainWindow._allAnalysisResults == null || !_mainWindow._allAnalysisResults.Any())
@@ -135,50 +273,81 @@ namespace FormGenerator.Views
 
                 _mainWindow.SqlGenerationLog.Text += "\n";
 
-                // Simulate generation for each form
+                // Generate SQL for each form
+                var allScripts = new StringBuilder();
+                int totalScriptsGenerated = 0;
+                int successfulForms = 0;
+
                 foreach (var form in _mainWindow._allAnalysisResults)
                 {
                     _mainWindow.SqlGenerationLog.Text += $"Processing form: {form.Key}\n";
-                    await Task.Delay(500);
 
-                    _mainWindow.SqlGenerationLog.Text += $"  - Creating table structure...\n";
-                    await Task.Delay(300);
-
-                    if (_mainWindow.GenerateCrudProcsCheckBox.IsChecked == true)
+                    try
                     {
-                        _mainWindow.SqlGenerationLog.Text += $"  - Creating stored procedures...\n";
-                        await Task.Delay(300);
+                        // Generate SQL using the SqlGeneratorService
+                        var sqlResult = await _sqlGenerator.GenerateFromAnalysisAsync(form.Value);
+
+                        if (sqlResult.Success)
+                        {
+                            _mainWindow.SqlGenerationLog.Text += $"  ✓ Generated {sqlResult.Scripts.Count} scripts\n";
+
+                            foreach (var script in sqlResult.Scripts)
+                            {
+                                _mainWindow.SqlGenerationLog.Text += $"    - {script.Name} ({script.Type})\n";
+                                allScripts.AppendLine(script.Content);
+                                allScripts.AppendLine("GO");
+                                allScripts.AppendLine();
+                            }
+
+                            totalScriptsGenerated += sqlResult.Scripts.Count;
+                            successfulForms++;
+                        }
+                        else
+                        {
+                            _mainWindow.SqlGenerationLog.Text += $"  ❌ Generation failed: {sqlResult.ErrorMessage}\n";
+                        }
                     }
-
-                    if (_mainWindow.IncludeIndexesCheckBox.IsChecked == true)
+                    catch (Exception formEx)
                     {
-                        _mainWindow.SqlGenerationLog.Text += $"  - Creating indexes...\n";
-                        await Task.Delay(200);
+                        _mainWindow.SqlGenerationLog.Text += $"  ❌ Error: {formEx.Message}\n";
                     }
                 }
 
-                _mainWindow.SqlGenerationLog.Text += "\n✅ SQL generation completed successfully!\n";
-                _mainWindow.SqlGenerationLog.Text += $"Total scripts generated: {_mainWindow._allAnalysisResults.Count * 3}\n";
+                _mainWindow.SqlGenerationLog.Text += $"\n✅ SQL generation completed!\n";
+                _mainWindow.SqlGenerationLog.Text += $"Forms processed: {successfulForms}/{_mainWindow._allAnalysisResults.Count}\n";
+                _mainWindow.SqlGenerationLog.Text += $"Total scripts generated: {totalScriptsGenerated}\n";
 
-                _mainWindow.UpdateStatus("SQL scripts generated successfully", MessageSeverity.Info);
-                _mainWindow.DeploySqlButton.IsEnabled = true;
+                // Update SQL Preview
+                _mainWindow.SqlPreview.Text = allScripts.ToString();
 
-                // Switch to SQL Preview tab
-                var sqlPreviewIndex = 0;
-                for (int i = 0; i < _mainWindow.ResultsTabs.Items.Count; i++)
+                _mainWindow.UpdateStatus($"SQL scripts generated successfully ({totalScriptsGenerated} scripts)", MessageSeverity.Info);
+
+                if (successfulForms > 0)
                 {
-                    if (_mainWindow.ResultsTabs.Items[i] is TabItem tab && tab.Header.ToString().Contains("SQL Preview"))
+                    _mainWindow.DeploySqlButton.IsEnabled = true;
+
+                    // Switch to SQL Preview tab
+                    var sqlPreviewIndex = 0;
+                    for (int i = 0; i < _mainWindow.ResultsTabs.Items.Count; i++)
                     {
-                        sqlPreviewIndex = i;
-                        break;
+                        if (_mainWindow.ResultsTabs.Items[i] is TabItem tab && tab.Header.ToString().Contains("SQL Preview"))
+                        {
+                            sqlPreviewIndex = i;
+                            break;
+                        }
                     }
+                    _mainWindow.ResultsTabs.SelectedIndex = sqlPreviewIndex;
                 }
-                _mainWindow.ResultsTabs.SelectedIndex = sqlPreviewIndex;
             }
             catch (Exception ex)
             {
                 _mainWindow.SqlGenerationLog.Text += $"\n❌ Error: {ex.Message}\n";
                 _mainWindow.UpdateStatus($"SQL generation failed: {ex.Message}", MessageSeverity.Error);
+
+                MessageBox.Show($"SQL generation failed:\n{ex.Message}",
+                               "Generation Error",
+                               MessageBoxButton.OK,
+                               MessageBoxImage.Error);
             }
             finally
             {
@@ -190,45 +359,90 @@ namespace FormGenerator.Views
         {
             try
             {
-                var result = MessageBox.Show("Are you sure you want to deploy the generated SQL scripts to the database?\n\nThis action cannot be undone.",
-                                             "Confirm Deployment",
-                                             MessageBoxButton.YesNo,
-                                             MessageBoxImage.Warning);
+                // Ensure we have a connection string
+                if (string.IsNullOrEmpty(_currentConnectionString))
+                {
+                    MessageBox.Show("Please test the SQL connection first before deploying.",
+                                   "No Connection",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
+
+                var result = MessageBox.Show(
+                    "Are you sure you want to deploy the generated SQL scripts to the database?\n\n" +
+                    "This will create/modify database objects and cannot be easily undone.\n\n" +
+                    "It's recommended to review the SQL Preview tab first.",
+                    "Confirm Deployment",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
 
                 if (result != MessageBoxResult.Yes)
                     return;
 
                 _mainWindow.DeploySqlButton.IsEnabled = false;
                 _mainWindow.UpdateStatus("Deploying SQL scripts to database...");
-                _mainWindow.SqlGenerationLog.Text += "\n\nStarting deployment to database...\n";
+                _mainWindow.SqlGenerationLog.Text += "\n═══════════════════════════════════════\n";
+                _mainWindow.SqlGenerationLog.Text += "Starting deployment to database...\n\n";
 
-                // Simulate deployment
-                _mainWindow.SqlGenerationLog.Text += "Creating database objects...\n";
-                await Task.Delay(1000);
+                // Get the SQL script from the preview
+                string sqlScript = _mainWindow.SqlPreview.Text;
 
-                _mainWindow.SqlGenerationLog.Text += "  - Tables created: 5\n";
-                await Task.Delay(500);
+                if (string.IsNullOrWhiteSpace(sqlScript))
+                {
+                    MessageBox.Show("No SQL scripts to deploy. Please generate SQL first.",
+                                   "No Scripts",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
 
-                _mainWindow.SqlGenerationLog.Text += "  - Stored procedures created: 20\n";
-                await Task.Delay(500);
+                // Execute the SQL script
+                _mainWindow.SqlGenerationLog.Text += "Executing SQL scripts...\n";
+                var deployResult = await _sqlConnection.ExecuteScriptAsync(sqlScript);
 
-                _mainWindow.SqlGenerationLog.Text += "  - Indexes created: 8\n";
-                await Task.Delay(500);
+                if (deployResult.Success)
+                {
+                    _mainWindow.SqlGenerationLog.Text += $"✅ {deployResult.Message}\n";
 
-                _mainWindow.SqlGenerationLog.Text += "\n✅ Deployment completed successfully!\n";
-                _mainWindow.UpdateStatus("SQL deployment completed", MessageSeverity.Info);
+                    if (deployResult.RowsAffected > 0)
+                    {
+                        _mainWindow.SqlGenerationLog.Text += $"Rows affected: {deployResult.RowsAffected}\n";
+                    }
 
-                MessageBox.Show("SQL scripts have been successfully deployed to the database!",
-                               "Deployment Successful",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Information);
+                    // Get list of created tables to show summary
+                    var tables = await _sqlConnection.GetTablesAsync();
+                    _mainWindow.SqlGenerationLog.Text += $"\nDatabase objects created successfully!\n";
+                    _mainWindow.SqlGenerationLog.Text += $"Total tables in database: {tables.Count}\n";
+
+                    _mainWindow.UpdateStatus("SQL deployment completed successfully", MessageSeverity.Info);
+
+                    MessageBox.Show(
+                        "SQL scripts have been successfully deployed to the database!\n\n" +
+                        $"Database: {_mainWindow.SqlDatabaseTextBox.Text}\n" +
+                        $"Tables created/updated: {tables.Count}",
+                        "Deployment Successful",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                }
+                else
+                {
+                    _mainWindow.SqlGenerationLog.Text += $"❌ Deployment failed: {deployResult.Message}\n";
+                    _mainWindow.UpdateStatus($"SQL deployment failed", MessageSeverity.Error);
+
+                    MessageBox.Show($"Deployment failed:\n{deployResult.Message}\n\n" +
+                                   "Please check the SQL scripts and try again.",
+                                   "Deployment Error",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Error);
+                }
             }
             catch (Exception ex)
             {
-                _mainWindow.SqlGenerationLog.Text += $"\n❌ Deployment failed: {ex.Message}\n";
-                _mainWindow.UpdateStatus($"SQL deployment failed: {ex.Message}", MessageSeverity.Error);
+                _mainWindow.SqlGenerationLog.Text += $"\n❌ Deployment error: {ex.Message}\n";
+                _mainWindow.UpdateStatus($"SQL deployment error: {ex.Message}", MessageSeverity.Error);
 
-                MessageBox.Show($"Deployment failed:\n{ex.Message}",
+                MessageBox.Show($"Deployment error:\n{ex.Message}",
                                "Deployment Error",
                                MessageBoxButton.OK,
                                MessageBoxImage.Error);
@@ -246,9 +460,11 @@ namespace FormGenerator.Views
                 _mainWindow.UpdateStatus("Generating SQL scripts for all forms...");
 
                 var sqlText = new StringBuilder();
-                sqlText.AppendLine($"-- SQL Scripts Generated: {DateTime.Now}");
+                sqlText.AppendLine($"-- ═══════════════════════════════════════════════════════════════");
+                sqlText.AppendLine($"-- SQL Scripts Generated by InfoPath to SQL Converter");
+                sqlText.AppendLine($"-- Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 sqlText.AppendLine($"-- Total Forms: {allResults.Count}");
-                sqlText.AppendLine("-- ================================================");
+                sqlText.AppendLine($"-- ═══════════════════════════════════════════════════════════════");
                 sqlText.AppendLine();
 
                 foreach (var formKvp in allResults)
@@ -256,10 +472,10 @@ namespace FormGenerator.Views
                     var formName = Path.GetFileNameWithoutExtension(formKvp.Key);
                     var analysis = formKvp.Value;
 
-                    sqlText.AppendLine($"-- ================================================");
+                    sqlText.AppendLine($"-- ═══════════════════════════════════════════════════════════════");
                     sqlText.AppendLine($"-- FORM: {formName}");
                     sqlText.AppendLine($"-- FILE: {formKvp.Key}");
-                    sqlText.AppendLine($"-- ================================================");
+                    sqlText.AppendLine($"-- ═══════════════════════════════════════════════════════════════");
                     sqlText.AppendLine();
 
                     var sqlResult = await _sqlGenerator.GenerateFromAnalysisAsync(analysis);
@@ -268,9 +484,10 @@ namespace FormGenerator.Views
                     {
                         foreach (var script in sqlResult.Scripts)
                         {
+                            sqlText.AppendLine($"-- -----------------------------------------------");
                             sqlText.AppendLine($"-- {script.Description}");
-                            sqlText.AppendLine($"-- Type: {script.Type}, Order: {script.ExecutionOrder}");
-                            sqlText.AppendLine("-- ------------------------------------------------");
+                            sqlText.AppendLine($"-- Type: {script.Type}, Execution Order: {script.ExecutionOrder}");
+                            sqlText.AppendLine($"-- -----------------------------------------------");
                             sqlText.AppendLine(script.Content);
                             sqlText.AppendLine();
                             sqlText.AppendLine("GO");
@@ -279,18 +496,19 @@ namespace FormGenerator.Views
                     }
                     else
                     {
-                        sqlText.AppendLine($"-- SQL Generation Failed for {formName}");
+                        sqlText.AppendLine($"-- ❌ SQL Generation Failed for {formName}");
                         sqlText.AppendLine($"-- Error: {sqlResult.ErrorMessage}");
+                        sqlText.AppendLine();
                     }
-
-                    sqlText.AppendLine();
                 }
 
                 _mainWindow.SqlPreview.Text = sqlText.ToString();
+                _mainWindow.UpdateStatus("SQL preview generated successfully", MessageSeverity.Info);
             }
             catch (Exception ex)
             {
                 _mainWindow.SqlPreview.Text = $"-- Error generating SQL\n-- {ex.Message}";
+                _mainWindow.UpdateStatus($"SQL preview generation failed: {ex.Message}", MessageSeverity.Error);
             }
         }
 
