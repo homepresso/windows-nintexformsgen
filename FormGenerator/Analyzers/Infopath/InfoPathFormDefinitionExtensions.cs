@@ -167,6 +167,7 @@ namespace FormGenerator.Analyzers.InfoPath
             };
         }
 
+
         /// <summary>
         /// Gets a summary of controls that have CtrlIds
         /// </summary>
