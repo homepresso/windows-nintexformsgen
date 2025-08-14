@@ -10,7 +10,7 @@ using FormGenerator.Analyzers.Infopath;
 namespace FormGenerator.Services
 {
     /// <summary>
-    /// Enhanced SQL generation service with proper repeating section support
+    /// Enhanced SQL generation service with proper repeating section support and Q&A structure
     /// </summary>
     public class SqlGeneratorService : ISqlGenerator
     {
@@ -18,8 +18,7 @@ namespace FormGenerator.Services
 
         public async Task<SqlGenerationResult> GenerateFromAnalysisAsync(FormAnalysisResult analysis)
         {
-
-            return await GenerateFromAnalysisAsync(analysis, null);
+            return await GenerateFromAnalysisAsync(analysis, TableStructureType.FlatTables);
         }
 
         public async Task<SqlGenerationResult> GenerateFromAnalysisAsync(FormAnalysisResult analysis, TableStructureType? structureType)
@@ -27,7 +26,8 @@ namespace FormGenerator.Services
             var result = new SqlGenerationResult
             {
                 Dialect = Dialect,
-                GeneratedDate = DateTime.Now
+                GeneratedDate = DateTime.Now,
+                StructureType = structureType ?? TableStructureType.FlatTables
             };
 
             try
@@ -37,48 +37,120 @@ namespace FormGenerator.Services
                     throw new ArgumentException("Invalid analysis result");
                 }
 
+                // Choose generation method based on structure type
+                if (structureType == TableStructureType.NormalizedQA)
+                {
+                    // Use the Q&A normalized structure
+                    return await GenerateNormalizedQAStructure(analysis.FormDefinition);
+                }
+                else
+                {
+                    // Use the flat table structure (default)
+                    await Task.Run(() =>
+                    {
+                        var formDef = analysis.FormDefinition;
+                        var scripts = new List<SqlScript>();
+
+                        // Analyze the form structure to identify repeating sections
+                        var repeatingSectionAnalysis = AnalyzeRepeatingSections(formDef);
+
+                        // Generate drop statements first (for re-deployment)
+                        scripts.Add(GenerateDropStatements(formDef, repeatingSectionAnalysis));
+
+                        // Generate main form table
+                        scripts.Add(GenerateMainTable(formDef, repeatingSectionAnalysis));
+
+                        // Generate lookup tables for dropdowns
+                        scripts.AddRange(GenerateLookupTables(formDef));
+
+                        // Generate tables for repeating sections
+                        scripts.AddRange(GenerateRepeatingTables(formDef, repeatingSectionAnalysis));
+
+                        // Generate stored procedures
+                        scripts.AddRange(GenerateStoredProcedures(formDef, repeatingSectionAnalysis));
+
+                        // Generate views
+                        scripts.Add(GenerateMainView(formDef, repeatingSectionAnalysis));
+
+                        // Generate indexes
+                        scripts.Add(GenerateIndexes(formDef, repeatingSectionAnalysis));
+
+                        // Generate table types for bulk operations
+                        scripts.AddRange(GenerateTableTypes(formDef, repeatingSectionAnalysis));
+
+                        // Generate repeating section procedures
+                        scripts.AddRange(GenerateRepeatingSectionProcedures(formDef, repeatingSectionAnalysis));
+
+                        // Order scripts by execution order
+                        result.Scripts = scripts.OrderBy(s => s.ExecutionOrder).ToList();
+                    });
+
+                    result.Success = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Generate the complete normalized Q&A structure
+        /// </summary>
+        private async Task<SqlGenerationResult> GenerateNormalizedQAStructure(InfoPathFormDefinition formDef)
+        {
+            var result = new SqlGenerationResult
+            {
+                Dialect = this.Dialect,
+                StructureType = TableStructureType.NormalizedQA,
+                GeneratedDate = DateTime.Now
+            };
+
+            try
+            {
                 await Task.Run(() =>
                 {
-                    var formDef = analysis.FormDefinition;
                     var scripts = new List<SqlScript>();
+                    var analysis = AnalyzeRepeatingSections(formDef);
 
-                    // Analyze the form structure to identify repeating sections
-                    var repeatingSectionAnalysis = AnalyzeRepeatingSections(formDef);
+                    // Split table creation into separate scripts to ensure proper ordering
 
-                    // Apply structure type if specified
-                    if (structureType.HasValue)
-                    {
-                        // You can add logic here to handle different structure types
-                        // For now, we'll use the enhanced repeating section approach
-                    }
+                    // 1. Drop existing Q&A objects
+                    scripts.Add(GenerateNormalizedDropStatements());
 
-                    // Generate drop statements first (for re-deployment)
-                    scripts.Add(GenerateDropStatements(formDef, repeatingSectionAnalysis));
+                    // 2. Create base tables without foreign keys to avoid circular dependencies
+                    scripts.Add(GenerateNormalizedBaseTables());
 
-                    // Generate main form table
-                    scripts.Add(GenerateMainTable(formDef, repeatingSectionAnalysis));
+                    // 3. Create lookup table separately
+                    scripts.Add(GenerateLookupTableOnly());
 
-                    // Generate lookup tables for dropdowns
-                    scripts.AddRange(GenerateLookupTables(formDef));
+                    // 4. Add all foreign key constraints after all tables exist
+                    scripts.Add(GenerateNormalizedForeignKeys());
 
-                    // Generate tables for repeating sections - ENHANCED
-                    scripts.AddRange(GenerateRepeatingTables(formDef, repeatingSectionAnalysis));
+                    // 5. Create form registration stored procedures
+                    scripts.Add(GenerateFormRegistrationProcedures());
 
-                    // Generate stored procedures
-                    scripts.AddRange(GenerateStoredProcedures(formDef, repeatingSectionAnalysis));
+                    // 6. Register this specific form
+                    scripts.Add(GenerateFormRegistrationScript(formDef, analysis));
 
-                    // Generate views
-                    scripts.Add(GenerateMainView(formDef, repeatingSectionAnalysis));
+                    // 7. Create generic submission procedures
+                    scripts.Add(GenerateNormalizedSubmissionProcedures());
 
-                    // Generate indexes
-                    scripts.Add(GenerateIndexes(formDef, repeatingSectionAnalysis));
+                    // 8. Create form-specific procedures (THIS IS THE KEY ADDITION)
+                    scripts.Add(GenerateFormSpecificProcedures(formDef, analysis));
 
-                    scripts.AddRange(GenerateTableTypes(formDef, repeatingSectionAnalysis));
+                    // 9. Create retrieval procedures
+                    scripts.Add(GenerateNormalizedRetrievalProcedures());
 
-                    scripts.AddRange(GenerateRepeatingSectionProcedures(formDef, repeatingSectionAnalysis));
+                    // 10. Create reporting views
+                    scripts.Add(GenerateNormalizedReportingViews());
 
+                    // 11. Create indexes for performance
+                    scripts.Add(GenerateNormalizedIndexes());
 
-                    // Order scripts by execution order
                     result.Scripts = scripts.OrderBy(s => s.ExecutionOrder).ToList();
                 });
 
@@ -91,6 +163,1026 @@ namespace FormGenerator.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Create base tables without foreign keys to LookupValues
+        /// </summary>
+        private SqlScript GenerateNormalizedBaseTables()
+        {
+            var sb = new StringBuilder();
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine("-- Base Tables for Normalized Q&A Structure (without FK to LookupValues)");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            // Forms table - stores form definitions
+            sb.AppendLine("-- Forms table (all form definitions)");
+            sb.AppendLine("IF OBJECT_ID('dbo.Forms', 'U') IS NOT NULL DROP TABLE [dbo].[Forms];");
+            sb.AppendLine("CREATE TABLE [dbo].[Forms] (");
+            sb.AppendLine("    [FormId] INT IDENTITY(1,1) NOT NULL,");
+            sb.AppendLine("    [FormName] NVARCHAR(255) NOT NULL,");
+            sb.AppendLine("    [FormFileName] NVARCHAR(255) NULL,");
+            sb.AppendLine("    [FormVersion] NVARCHAR(50) NULL,");
+            sb.AppendLine("    [IsActive] BIT DEFAULT 1 NOT NULL,");
+            sb.AppendLine("    [CreatedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    [ModifiedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    CONSTRAINT [PK_Forms] PRIMARY KEY CLUSTERED ([FormId] ASC),");
+            sb.AppendLine("    CONSTRAINT [UQ_Forms_Name] UNIQUE ([FormName])");
+            sb.AppendLine(");");
+            sb.AppendLine();
+
+            // Questions table - stores all form fields/questions
+            sb.AppendLine("-- Questions table (all form fields across all forms)");
+            sb.AppendLine("IF OBJECT_ID('dbo.Questions', 'U') IS NOT NULL DROP TABLE [dbo].[Questions];");
+            sb.AppendLine("CREATE TABLE [dbo].[Questions] (");
+            sb.AppendLine("    [QuestionId] INT IDENTITY(1,1) NOT NULL,");
+            sb.AppendLine("    [FormId] INT NOT NULL,");
+            sb.AppendLine("    [FieldName] NVARCHAR(255) NOT NULL,");
+            sb.AppendLine("    [DisplayName] NVARCHAR(500) NULL,");
+            sb.AppendLine("    [FieldType] NVARCHAR(50) NOT NULL,");
+            sb.AppendLine("    [SectionName] NVARCHAR(255) NULL,");
+            sb.AppendLine("    [IsInRepeatingSection] BIT DEFAULT 0 NOT NULL,");
+            sb.AppendLine("    [RepeatingSectionName] NVARCHAR(255) NULL,");
+            sb.AppendLine("    [IsConditional] BIT DEFAULT 0 NOT NULL,");
+            sb.AppendLine("    [ConditionalOnField] NVARCHAR(255) NULL,");
+            sb.AppendLine("    [DisplayOrder] INT DEFAULT 0 NOT NULL,");
+            sb.AppendLine("    [IsRequired] BIT DEFAULT 0 NOT NULL,");
+            sb.AppendLine("    [DefaultValue] NVARCHAR(MAX) NULL,");
+            sb.AppendLine("    [ValidationRule] NVARCHAR(MAX) NULL,");
+            sb.AppendLine("    [HasLookupValues] BIT DEFAULT 0 NOT NULL,");
+            sb.AppendLine("    [CreatedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    CONSTRAINT [PK_Questions] PRIMARY KEY CLUSTERED ([QuestionId] ASC),");
+            sb.AppendLine("    CONSTRAINT [FK_Questions_Forms] FOREIGN KEY ([FormId]) REFERENCES [dbo].[Forms] ([FormId]),");
+            sb.AppendLine("    CONSTRAINT [UQ_Questions_FormField] UNIQUE ([FormId], [FieldName], [RepeatingSectionName])");
+            sb.AppendLine(");");
+            sb.AppendLine();
+
+            // Repeating Sections table
+            sb.AppendLine("-- RepeatingSections table (defines all repeating sections)");
+            sb.AppendLine("IF OBJECT_ID('dbo.RepeatingSections', 'U') IS NOT NULL DROP TABLE [dbo].[RepeatingSections];");
+            sb.AppendLine("CREATE TABLE [dbo].[RepeatingSections] (");
+            sb.AppendLine("    [SectionId] INT IDENTITY(1,1) NOT NULL,");
+            sb.AppendLine("    [FormId] INT NOT NULL,");
+            sb.AppendLine("    [SectionName] NVARCHAR(255) NOT NULL,");
+            sb.AppendLine("    [SectionType] NVARCHAR(50) DEFAULT 'repeating' NOT NULL,");
+            sb.AppendLine("    [ParentSectionId] INT NULL,");
+            sb.AppendLine("    [MinItems] INT DEFAULT 0,");
+            sb.AppendLine("    [MaxItems] INT NULL,");
+            sb.AppendLine("    [CreatedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    CONSTRAINT [PK_RepeatingSections] PRIMARY KEY CLUSTERED ([SectionId] ASC),");
+            sb.AppendLine("    CONSTRAINT [FK_RepeatingSections_Forms] FOREIGN KEY ([FormId]) REFERENCES [dbo].[Forms] ([FormId]),");
+            sb.AppendLine("    CONSTRAINT [FK_RepeatingSections_Parent] FOREIGN KEY ([ParentSectionId]) REFERENCES [dbo].[RepeatingSections] ([SectionId]),");
+            sb.AppendLine("    CONSTRAINT [UQ_RepeatingSections] UNIQUE ([FormId], [SectionName])");
+            sb.AppendLine(");");
+            sb.AppendLine();
+
+            // Submissions table
+            sb.AppendLine("-- Submissions table (all form submissions)");
+            sb.AppendLine("IF OBJECT_ID('dbo.Submissions', 'U') IS NOT NULL DROP TABLE [dbo].[Submissions];");
+            sb.AppendLine("CREATE TABLE [dbo].[Submissions] (");
+            sb.AppendLine("    [SubmissionId] INT IDENTITY(1,1) NOT NULL,");
+            sb.AppendLine("    [SubmissionGuid] UNIQUEIDENTIFIER DEFAULT NEWID() NOT NULL,");
+            sb.AppendLine("    [FormId] INT NOT NULL,");
+            sb.AppendLine("    [SubmittedBy] NVARCHAR(255) NULL,");
+            sb.AppendLine("    [SubmissionStatus] NVARCHAR(50) DEFAULT 'Draft' NOT NULL,");
+            sb.AppendLine("    [SubmittedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    [ModifiedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    [Version] INT DEFAULT 1 NOT NULL,");
+            sb.AppendLine("    CONSTRAINT [PK_Submissions] PRIMARY KEY CLUSTERED ([SubmissionId] ASC),");
+            sb.AppendLine("    CONSTRAINT [FK_Submissions_Forms] FOREIGN KEY ([FormId]) REFERENCES [dbo].[Forms] ([FormId]),");
+            sb.AppendLine("    CONSTRAINT [UQ_Submissions_Guid] UNIQUE ([SubmissionGuid])");
+            sb.AppendLine(");");
+            sb.AppendLine();
+
+            // Repeating Section Instances table
+            sb.AppendLine("-- RepeatingSectionInstances table (tracks each instance of a repeating section)");
+            sb.AppendLine("IF OBJECT_ID('dbo.RepeatingSectionInstances', 'U') IS NOT NULL DROP TABLE [dbo].[RepeatingSectionInstances];");
+            sb.AppendLine("CREATE TABLE [dbo].[RepeatingSectionInstances] (");
+            sb.AppendLine("    [InstanceId] INT IDENTITY(1,1) NOT NULL,");
+            sb.AppendLine("    [SubmissionId] INT NOT NULL,");
+            sb.AppendLine("    [SectionId] INT NOT NULL,");
+            sb.AppendLine("    [ParentInstanceId] INT NULL,");
+            sb.AppendLine("    [ItemOrder] INT NOT NULL DEFAULT 0,");
+            sb.AppendLine("    [CreatedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    CONSTRAINT [PK_RepeatingSectionInstances] PRIMARY KEY CLUSTERED ([InstanceId] ASC),");
+            sb.AppendLine("    CONSTRAINT [FK_RSI_Submissions] FOREIGN KEY ([SubmissionId]) REFERENCES [dbo].[Submissions] ([SubmissionId]) ON DELETE CASCADE,");
+            sb.AppendLine("    CONSTRAINT [FK_RSI_Sections] FOREIGN KEY ([SectionId]) REFERENCES [dbo].[RepeatingSections] ([SectionId]),");
+            sb.AppendLine("    CONSTRAINT [FK_RSI_Parent] FOREIGN KEY ([ParentInstanceId]) REFERENCES [dbo].[RepeatingSectionInstances] ([InstanceId])");
+            sb.AppendLine(");");
+            sb.AppendLine();
+
+            // Answers table WITHOUT foreign key to LookupValues
+            sb.AppendLine("-- Answers table (without FK to LookupValues yet)");
+            sb.AppendLine("IF OBJECT_ID('dbo.Answers', 'U') IS NOT NULL DROP TABLE [dbo].[Answers];");
+            sb.AppendLine("CREATE TABLE [dbo].[Answers] (");
+            sb.AppendLine("    [AnswerId] INT IDENTITY(1,1) NOT NULL,");
+            sb.AppendLine("    [SubmissionId] INT NOT NULL,");
+            sb.AppendLine("    [QuestionId] INT NOT NULL,");
+            sb.AppendLine("    [RepeatingSectionInstanceId] INT NULL,");
+            sb.AppendLine("    [AnswerText] NVARCHAR(MAX) NULL,");
+            sb.AppendLine("    [AnswerNumeric] DECIMAL(18,4) NULL,");
+            sb.AppendLine("    [AnswerDate] DATETIME2(3) NULL,");
+            sb.AppendLine("    [AnswerBit] BIT NULL,");
+            sb.AppendLine("    [AnswerLookupId] INT NULL,"); // Will add FK later
+            sb.AppendLine("    [CreatedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    [ModifiedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    CONSTRAINT [PK_Answers] PRIMARY KEY CLUSTERED ([AnswerId] ASC),");
+            sb.AppendLine("    CONSTRAINT [FK_Answers_Submissions] FOREIGN KEY ([SubmissionId]) REFERENCES [dbo].[Submissions] ([SubmissionId]) ON DELETE CASCADE,");
+            sb.AppendLine("    CONSTRAINT [FK_Answers_Questions] FOREIGN KEY ([QuestionId]) REFERENCES [dbo].[Questions] ([QuestionId]),");
+            sb.AppendLine("    CONSTRAINT [FK_Answers_RSI] FOREIGN KEY ([RepeatingSectionInstanceId]) REFERENCES [dbo].[RepeatingSectionInstances] ([InstanceId])");
+            sb.AppendLine(");");
+            sb.AppendLine();
+
+            return new SqlScript
+            {
+                Name = "Create_Normalized_Base_Tables",
+                Type = ScriptType.Table,
+                Content = sb.ToString(),
+                ExecutionOrder = 1,
+                Description = "Base tables for normalized Q&A structure without LookupValues FK"
+            };
+        }
+
+        /// <summary>
+        /// Create lookup table only
+        /// </summary>
+        private SqlScript GenerateLookupTableOnly()
+        {
+            var sb = new StringBuilder();
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine("-- Lookup Table for All Dropdown Values");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            sb.AppendLine("IF OBJECT_ID('dbo.LookupValues', 'U') IS NOT NULL DROP TABLE [dbo].[LookupValues];");
+            sb.AppendLine("CREATE TABLE [dbo].[LookupValues] (");
+            sb.AppendLine("    [LookupId] INT IDENTITY(1,1) NOT NULL,");
+            sb.AppendLine("    [FormId] INT NULL,");
+            sb.AppendLine("    [QuestionId] INT NULL,");
+            sb.AppendLine("    [LookupCategory] NVARCHAR(255) NULL,");
+            sb.AppendLine("    [LookupValue] NVARCHAR(500) NOT NULL,");
+            sb.AppendLine("    [LookupDisplayText] NVARCHAR(500) NOT NULL,");
+            sb.AppendLine("    [LookupCode] NVARCHAR(50) NULL,");
+            sb.AppendLine("    [ParentLookupId] INT NULL,");
+            sb.AppendLine("    [SortOrder] INT DEFAULT 0 NOT NULL,");
+            sb.AppendLine("    [IsActive] BIT DEFAULT 1 NOT NULL,");
+            sb.AppendLine("    [IsDefault] BIT DEFAULT 0 NOT NULL,");
+            sb.AppendLine("    [CreatedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    [ModifiedDate] DATETIME2(3) DEFAULT GETDATE() NOT NULL,");
+            sb.AppendLine("    CONSTRAINT [PK_LookupValues] PRIMARY KEY CLUSTERED ([LookupId] ASC),");
+            sb.AppendLine("    CONSTRAINT [FK_LookupValues_Forms] FOREIGN KEY ([FormId]) REFERENCES [dbo].[Forms] ([FormId]),");
+            sb.AppendLine("    CONSTRAINT [FK_LookupValues_Questions] FOREIGN KEY ([QuestionId]) REFERENCES [dbo].[Questions] ([QuestionId]),");
+            sb.AppendLine("    CONSTRAINT [FK_LookupValues_Parent] FOREIGN KEY ([ParentLookupId]) REFERENCES [dbo].[LookupValues] ([LookupId])");
+            sb.AppendLine(");");
+            sb.AppendLine();
+
+            return new SqlScript
+            {
+                Name = "Create_Lookup_Table",
+                Type = ScriptType.Table,
+                Content = sb.ToString(),
+                ExecutionOrder = 2,
+                Description = "Lookup table for all dropdown values"
+            };
+        }
+
+        /// <summary>
+        /// Add foreign key constraints after all tables exist
+        /// </summary>
+        private SqlScript GenerateNormalizedForeignKeys()
+        {
+            var sb = new StringBuilder();
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine("-- Add Foreign Key Constraints");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            sb.AppendLine("-- Add foreign key from Answers to LookupValues");
+            sb.AppendLine("ALTER TABLE [dbo].[Answers]");
+            sb.AppendLine("ADD CONSTRAINT [FK_Answers_Lookup] FOREIGN KEY ([AnswerLookupId])");
+            sb.AppendLine("REFERENCES [dbo].[LookupValues] ([LookupId]);");
+            sb.AppendLine();
+
+            return new SqlScript
+            {
+                Name = "Add_Foreign_Keys",
+                Type = ScriptType.Table,
+                Content = sb.ToString(),
+                ExecutionOrder = 3,
+                Description = "Add foreign key constraints after all tables are created"
+            };
+        }
+
+        /// <summary>
+        /// Generate drop statements for normalized Q&A structure
+        /// </summary>
+        private SqlScript GenerateNormalizedDropStatements()
+        {
+            var sb = new StringBuilder();
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine("-- Drop existing Q&A structure objects if they exist");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            // Drop views first
+            sb.AppendLine("IF OBJECT_ID('dbo.vw_FormAnswersPivot', 'V') IS NOT NULL DROP VIEW [dbo].[vw_FormAnswersPivot];");
+            sb.AppendLine("IF OBJECT_ID('dbo.vw_AllSubmissions', 'V') IS NOT NULL DROP VIEW [dbo].[vw_AllSubmissions];");
+            sb.AppendLine();
+
+            // Drop stored procedures
+            var procedures = new[] {
+                "sp_GetSubmissionData", "sp_AddRepeatingSectionInstance",
+                "sp_SubmitFormData", "sp_RegisterForm", "sp_UpdateSubmission",
+                "sp_DeleteSubmission", "sp_ListSubmissions"
+            };
+            foreach (var proc in procedures)
+            {
+                sb.AppendLine($"IF OBJECT_ID('dbo.{proc}', 'P') IS NOT NULL DROP PROCEDURE [dbo].[{proc}];");
+            }
+            sb.AppendLine();
+
+            // Drop foreign key constraints first
+            sb.AppendLine("-- Drop foreign key constraints");
+            sb.AppendLine("IF OBJECT_ID('dbo.FK_Answers_RSI', 'F') IS NOT NULL ALTER TABLE [dbo].[Answers] DROP CONSTRAINT [FK_Answers_RSI];");
+            sb.AppendLine("IF OBJECT_ID('dbo.FK_Answers_Lookup', 'F') IS NOT NULL ALTER TABLE [dbo].[Answers] DROP CONSTRAINT [FK_Answers_Lookup];");
+            sb.AppendLine("IF OBJECT_ID('dbo.FK_Answers_Questions', 'F') IS NOT NULL ALTER TABLE [dbo].[Answers] DROP CONSTRAINT [FK_Answers_Questions];");
+            sb.AppendLine("IF OBJECT_ID('dbo.FK_Answers_Submissions', 'F') IS NOT NULL ALTER TABLE [dbo].[Answers] DROP CONSTRAINT [FK_Answers_Submissions];");
+            sb.AppendLine();
+
+            // Drop tables in correct order (due to foreign keys)
+            sb.AppendLine("-- Drop tables");
+            sb.AppendLine("IF OBJECT_ID('dbo.Answers', 'U') IS NOT NULL DROP TABLE [dbo].[Answers];");
+            sb.AppendLine("IF OBJECT_ID('dbo.RepeatingSectionInstances', 'U') IS NOT NULL DROP TABLE [dbo].[RepeatingSectionInstances];");
+            sb.AppendLine("IF OBJECT_ID('dbo.LookupValues', 'U') IS NOT NULL DROP TABLE [dbo].[LookupValues];");
+            sb.AppendLine("IF OBJECT_ID('dbo.Questions', 'U') IS NOT NULL DROP TABLE [dbo].[Questions];");
+            sb.AppendLine("IF OBJECT_ID('dbo.RepeatingSections', 'U') IS NOT NULL DROP TABLE [dbo].[RepeatingSections];");
+            sb.AppendLine("IF OBJECT_ID('dbo.Submissions', 'U') IS NOT NULL DROP TABLE [dbo].[Submissions];");
+            sb.AppendLine("IF OBJECT_ID('dbo.Forms', 'U') IS NOT NULL DROP TABLE [dbo].[Forms];");
+            sb.AppendLine();
+
+            return new SqlScript
+            {
+                Name = "Drop_QA_Structure_Objects",
+                Type = ScriptType.Table,
+                Content = sb.ToString(),
+                ExecutionOrder = 0,
+                Description = "Drop existing Q&A structure objects for clean deployment"
+            };
+        }
+
+        /// <summary>
+        /// Generate script to register the specific form and its structure
+        /// </summary>
+        private SqlScript GenerateFormRegistrationScript(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
+        {
+            var sb = new StringBuilder();
+            var formName = SanitizeTableName(formDef.FormName);
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine($"-- Register Form: {formName}");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            sb.AppendLine("DECLARE @FormId INT;");
+            sb.AppendLine("DECLARE @QuestionId INT;");
+            sb.AppendLine("DECLARE @SectionId INT;");
+            sb.AppendLine();
+
+            // Insert or update the form
+            sb.AppendLine($"-- Register form: {formName}");
+            sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM [dbo].[Forms] WHERE FormName = N'{formName}')");
+            sb.AppendLine("BEGIN");
+            sb.AppendLine($"    INSERT INTO [dbo].[Forms] (FormName, FormFileName, FormVersion)");
+            sb.AppendLine($"    VALUES (N'{formName}', N'{formDef.FileName ?? formName}', '1.0');");
+            sb.AppendLine("    SET @FormId = SCOPE_IDENTITY();");
+            sb.AppendLine("END");
+            sb.AppendLine("ELSE");
+            sb.AppendLine("BEGIN");
+            sb.AppendLine($"    SELECT @FormId = FormId FROM [dbo].[Forms] WHERE FormName = N'{formName}';");
+            sb.AppendLine($"    UPDATE [dbo].[Forms] SET ModifiedDate = GETDATE() WHERE FormId = @FormId;");
+            sb.AppendLine("END");
+            sb.AppendLine();
+
+            // Register repeating sections
+            if (analysis.RepeatingSections.Any())
+            {
+                sb.AppendLine("-- Register repeating sections");
+                foreach (var section in analysis.RepeatingSections)
+                {
+                    var sectionName = section.Key.Replace("'", "''");
+                    sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM [dbo].[RepeatingSections] WHERE FormId = @FormId AND SectionName = N'{sectionName}')");
+                    sb.AppendLine("BEGIN");
+                    sb.AppendLine($"    INSERT INTO [dbo].[RepeatingSections] (FormId, SectionName, SectionType)");
+                    sb.AppendLine($"    VALUES (@FormId, N'{sectionName}', 'repeating');");
+                    sb.AppendLine("END");
+                    sb.AppendLine();
+                }
+            }
+
+            // Register questions (main table fields)
+            if (analysis.MainTableColumns.Any())
+            {
+                sb.AppendLine("-- Register main form questions");
+                int displayOrder = 0;
+                foreach (var control in analysis.MainTableColumns.OrderBy(c => c.Name))
+                {
+                    var fieldName = SanitizeColumnName(control.Name);
+                    var displayName = (control.Label ?? control.Name).Replace("'", "''");
+                    var fieldType = control.Type;
+                    var isRequired = control.Properties?.ContainsKey("Required") == true &&
+                                   control.Properties["Required"] == "true" ? "1" : "0";
+                    var hasLookup = control.HasStaticData && control.DataOptions != null && control.DataOptions.Any() ? "1" : "0";
+
+                    sb.AppendLine($"-- Question: {fieldName}");
+                    sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM [dbo].[Questions] WHERE FormId = @FormId AND FieldName = N'{fieldName}' AND RepeatingSectionName IS NULL)");
+                    sb.AppendLine("BEGIN");
+                    sb.AppendLine($"    INSERT INTO [dbo].[Questions] (FormId, FieldName, DisplayName, FieldType, DisplayOrder, IsRequired, HasLookupValues, IsInRepeatingSection)");
+                    sb.AppendLine($"    VALUES (@FormId, N'{fieldName}', N'{displayName}', N'{fieldType}', {displayOrder}, {isRequired}, {hasLookup}, 0);");
+
+                    if (hasLookup == "1")
+                    {
+                        sb.AppendLine("    SET @QuestionId = SCOPE_IDENTITY();");
+                        sb.AppendLine();
+                        sb.AppendLine($"    -- Insert lookup values for {fieldName}");
+                        foreach (var option in control.DataOptions.OrderBy(o => o.Order))
+                        {
+                            var value = option.Value.Replace("'", "''");
+                            var displayText = option.DisplayText.Replace("'", "''");
+                            var isDefault = option.IsDefault ? "1" : "0";
+
+                            sb.AppendLine($"    INSERT INTO [dbo].[LookupValues] (FormId, QuestionId, LookupCategory, LookupValue, LookupDisplayText, SortOrder, IsDefault)");
+                            sb.AppendLine($"    VALUES (@FormId, @QuestionId, N'{fieldName}', N'{value}', N'{displayText}', {option.Order}, {isDefault});");
+                        }
+                    }
+
+                    sb.AppendLine("END");
+                    sb.AppendLine();
+                    displayOrder++;
+                }
+            }
+
+            // Register questions in repeating sections
+            foreach (var section in analysis.RepeatingSections)
+            {
+                if (section.Value.Controls.Any())
+                {
+                    var sectionName = section.Key.Replace("'", "''");
+                    sb.AppendLine($"-- Register questions for repeating section: {sectionName}");
+
+                    int displayOrder = 0;
+                    foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                    {
+                        var fieldName = SanitizeColumnName(control.Name);
+                        var displayName = (control.Label ?? control.Name).Replace("'", "''");
+                        var fieldType = control.Type;
+                        var isRequired = control.Properties?.ContainsKey("Required") == true &&
+                                       control.Properties["Required"] == "true" ? "1" : "0";
+                        var hasLookup = control.HasStaticData && control.DataOptions != null && control.DataOptions.Any() ? "1" : "0";
+
+                        sb.AppendLine($"-- Repeating section question: {fieldName}");
+                        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM [dbo].[Questions] WHERE FormId = @FormId AND FieldName = N'{fieldName}' AND RepeatingSectionName = N'{sectionName}')");
+                        sb.AppendLine("BEGIN");
+                        sb.AppendLine($"    INSERT INTO [dbo].[Questions] (FormId, FieldName, DisplayName, FieldType, RepeatingSectionName, DisplayOrder, IsRequired, HasLookupValues, IsInRepeatingSection)");
+                        sb.AppendLine($"    VALUES (@FormId, N'{fieldName}', N'{displayName}', N'{fieldType}', N'{sectionName}', {displayOrder}, {isRequired}, {hasLookup}, 1);");
+
+                        if (hasLookup == "1" && control.DataOptions != null)
+                        {
+                            sb.AppendLine("    SET @QuestionId = SCOPE_IDENTITY();");
+                            sb.AppendLine();
+                            sb.AppendLine($"    -- Insert lookup values for {fieldName}");
+                            foreach (var option in control.DataOptions.OrderBy(o => o.Order))
+                            {
+                                var value = option.Value.Replace("'", "''");
+                                var displayText = option.DisplayText.Replace("'", "''");
+                                var isDefault = option.IsDefault ? "1" : "0";
+
+                                sb.AppendLine($"    INSERT INTO [dbo].[LookupValues] (FormId, QuestionId, LookupCategory, LookupValue, LookupDisplayText, SortOrder, IsDefault)");
+                                sb.AppendLine($"    VALUES (@FormId, @QuestionId, N'{sectionName}_{fieldName}', N'{value}', N'{displayText}', {option.Order}, {isDefault});");
+                            }
+                        }
+
+                        sb.AppendLine("END");
+                        sb.AppendLine();
+                        displayOrder++;
+                    }
+                }
+            }
+
+            sb.AppendLine($"PRINT 'Form registration completed for: {formName}';");
+
+            return new SqlScript
+            {
+                Name = $"Register_{formName}_Form",
+                Type = ScriptType.Data,
+                Content = sb.ToString(),
+                ExecutionOrder = 50,
+                Description = $"Register form structure for {formName}"
+            };
+        }
+
+        /// <summary>
+        /// Generate form-specific stored procedures for submission and retrieval
+        /// </summary>
+        private SqlScript GenerateFormSpecificProcedures(InfoPathFormDefinition formDef, RepeatingSectionAnalysis analysis)
+        {
+            var sb = new StringBuilder();
+            var formName = SanitizeTableName(formDef.FormName);
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine($"-- Form-Specific Procedures for: {formName}");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            // 3. Create table types for repeating sections FIRST (before procedures)
+            foreach (var section in analysis.RepeatingSections)
+            {
+                var sectionName = SanitizeTableName(section.Key);
+
+                sb.AppendLine($"-- Table type for {section.Key} repeating section");
+                sb.AppendLine($"IF TYPE_ID(N'[dbo].[{formName}_{sectionName}_TableType]') IS NOT NULL");
+                sb.AppendLine($"    DROP TYPE [dbo].[{formName}_{sectionName}_TableType];");
+                sb.AppendLine("GO");
+                sb.AppendLine();
+
+                sb.AppendLine($"CREATE TYPE [dbo].[{formName}_{sectionName}_TableType] AS TABLE (");
+                sb.AppendLine("    [ItemOrder] INT NOT NULL");
+
+                // Track column names to ensure uniqueness
+                var usedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                usedColumnNames.Add("ItemOrder");
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var colName = SanitizeColumnName(control.Name);
+
+                    // Ensure column name is unique
+                    var uniqueColName = colName;
+                    int suffix = 1;
+                    while (usedColumnNames.Contains(uniqueColName))
+                    {
+                        uniqueColName = $"{colName}_{suffix}";
+                        suffix++;
+                    }
+                    usedColumnNames.Add(uniqueColName);
+
+                    var sqlType = GetSqlType(control.Type);
+                    sb.AppendLine($"    ,[{uniqueColName}] {sqlType} NULL -- {control.Label ?? control.Name}");
+                }
+
+                sb.AppendLine(");");
+                sb.AppendLine("GO");
+                sb.AppendLine();
+            }
+
+            // NOW create the submit procedure that uses these table types
+            sb.AppendLine($"-- Submit procedure for {formName}");
+            sb.AppendLine($"CREATE PROCEDURE [dbo].[sp_Submit_{formName}]");
+            sb.AppendLine("    @SubmissionGuid UNIQUEIDENTIFIER OUTPUT,");
+            sb.AppendLine("    @SubmittedBy NVARCHAR(255) = NULL,");
+            sb.AppendLine("    @Status NVARCHAR(50) = 'Draft'");
+
+            // Add parameters for each main field
+            foreach (var control in analysis.MainTableColumns.OrderBy(c => c.Name))
+            {
+                var paramName = SanitizeColumnName(control.Name);
+                var sqlType = GetSqlType(control.Type);
+                sb.AppendLine($"    ,@{paramName} {sqlType} = NULL");
+            }
+
+            // Add table-valued parameters for each repeating section
+            foreach (var section in analysis.RepeatingSections)
+            {
+                var sectionName = SanitizeTableName(section.Key);
+                sb.AppendLine($"    ,@{sectionName}Data [dbo].[{formName}_{sectionName}_TableType] READONLY");
+            }
+
+            sb.AppendLine("AS");
+            sb.AppendLine("BEGIN");
+            sb.AppendLine("    SET NOCOUNT ON;");
+            sb.AppendLine();
+            sb.AppendLine("    DECLARE @FormId INT;");
+            sb.AppendLine("    DECLARE @SubmissionId INT;");
+            sb.AppendLine("    DECLARE @QuestionId INT;");
+            sb.AppendLine();
+            sb.AppendLine("    BEGIN TRY");
+            sb.AppendLine("        BEGIN TRANSACTION;");
+            sb.AppendLine();
+            sb.AppendLine("        -- Get FormId");
+            sb.AppendLine($"        SELECT @FormId = FormId FROM [dbo].[Forms] WHERE FormName = N'{formName}';");
+            sb.AppendLine();
+            sb.AppendLine("        IF @FormId IS NULL");
+            sb.AppendLine($"            RAISERROR('Form {formName} not found in database', 16, 1);");
+            sb.AppendLine();
+            sb.AppendLine("        -- Create submission");
+            sb.AppendLine("        SET @SubmissionGuid = ISNULL(@SubmissionGuid, NEWID());");
+            sb.AppendLine();
+            sb.AppendLine("        INSERT INTO [dbo].[Submissions] (SubmissionGuid, FormId, SubmittedBy, SubmissionStatus)");
+            sb.AppendLine("        VALUES (@SubmissionGuid, @FormId, @SubmittedBy, @Status);");
+            sb.AppendLine();
+            sb.AppendLine("        SET @SubmissionId = SCOPE_IDENTITY();");
+            sb.AppendLine();
+
+            // Insert answers for main fields
+            sb.AppendLine("        -- Insert main form answers");
+            foreach (var control in analysis.MainTableColumns.OrderBy(c => c.Name))
+            {
+                var paramName = SanitizeColumnName(control.Name);
+                var fieldName = SanitizeColumnName(control.Name);
+
+                sb.AppendLine($"        -- {control.Label ?? control.Name}");
+                sb.AppendLine($"        IF @{paramName} IS NOT NULL");
+                sb.AppendLine("        BEGIN");
+                sb.AppendLine($"            SELECT @QuestionId = QuestionId FROM [dbo].[Questions] WHERE FormId = @FormId AND FieldName = N'{fieldName}' AND RepeatingSectionName IS NULL;");
+                sb.AppendLine();
+
+                switch (control.Type?.ToLower())
+                {
+                    case "textfield":
+                    case "richtext":
+                        sb.AppendLine($"            INSERT INTO [dbo].[Answers] (SubmissionId, QuestionId, AnswerText)");
+                        sb.AppendLine($"            VALUES (@SubmissionId, @QuestionId, @{paramName});");
+                        break;
+                    case "datepicker":
+                        sb.AppendLine($"            INSERT INTO [dbo].[Answers] (SubmissionId, QuestionId, AnswerDate)");
+                        sb.AppendLine($"            VALUES (@SubmissionId, @QuestionId, @{paramName});");
+                        break;
+                    case "checkbox":
+                        sb.AppendLine($"            INSERT INTO [dbo].[Answers] (SubmissionId, QuestionId, AnswerBit)");
+                        sb.AppendLine($"            VALUES (@SubmissionId, @QuestionId, @{paramName});");
+                        break;
+                    case "number":
+                    case "integer":
+                    case "decimal":
+                        sb.AppendLine($"            INSERT INTO [dbo].[Answers] (SubmissionId, QuestionId, AnswerNumeric)");
+                        sb.AppendLine($"            VALUES (@SubmissionId, @QuestionId, @{paramName});");
+                        break;
+                    case "dropdown":
+                    case "radiobutton":
+                    case "combobox":
+                        sb.AppendLine($"            -- For dropdown, store the lookup value");
+                        sb.AppendLine($"            DECLARE @LookupId_{paramName} INT;");
+                        sb.AppendLine($"            SELECT @LookupId_{paramName} = LookupId FROM [dbo].[LookupValues] WHERE QuestionId = @QuestionId AND LookupValue = @{paramName};");
+                        sb.AppendLine($"            INSERT INTO [dbo].[Answers] (SubmissionId, QuestionId, AnswerText, AnswerLookupId)");
+                        sb.AppendLine($"            VALUES (@SubmissionId, @QuestionId, @{paramName}, @LookupId_{paramName});");
+                        break;
+                    default:
+                        sb.AppendLine($"            INSERT INTO [dbo].[Answers] (SubmissionId, QuestionId, AnswerText)");
+                        sb.AppendLine($"            VALUES (@SubmissionId, @QuestionId, @{paramName});");
+                        break;
+                }
+                sb.AppendLine("        END");
+                sb.AppendLine();
+            }
+
+            // Handle repeating sections
+            foreach (var section in analysis.RepeatingSections)
+            {
+                var sectionName = SanitizeTableName(section.Key);
+
+                sb.AppendLine($"        -- Insert {section.Key} repeating section data");
+                sb.AppendLine($"        DECLARE @SectionId_{sectionName} INT;");
+                sb.AppendLine($"        SELECT @SectionId_{sectionName} = SectionId FROM [dbo].[RepeatingSections] WHERE FormId = @FormId AND SectionName = N'{section.Key}';");
+                sb.AppendLine();
+                sb.AppendLine($"        INSERT INTO [dbo].[RepeatingSectionInstances] (SubmissionId, SectionId, ItemOrder)");
+                sb.AppendLine($"        SELECT @SubmissionId, @SectionId_{sectionName}, ItemOrder");
+                sb.AppendLine($"        FROM @{sectionName}Data;");
+                sb.AppendLine();
+
+                // Insert answers for each field in the repeating section
+                sb.AppendLine($"        -- Insert answers for {section.Key} fields");
+                sb.AppendLine($"        INSERT INTO [dbo].[Answers] (SubmissionId, QuestionId, RepeatingSectionInstanceId, AnswerText, AnswerNumeric, AnswerDate, AnswerBit)");
+                sb.AppendLine("        SELECT");
+                sb.AppendLine("            @SubmissionId,");
+                sb.AppendLine("            q.QuestionId,");
+                sb.AppendLine("            rsi.InstanceId,");
+
+                // Build AnswerText CASE
+                var textControls = section.Value.Controls.Where(c => c.Type?.ToLower() == "textfield" || c.Type?.ToLower() == "richtext").ToList();
+                if (textControls.Any())
+                {
+                    sb.AppendLine("            CASE");
+                    foreach (var control in textControls)
+                    {
+                        var colName = SanitizeColumnName(control.Name);
+                        sb.AppendLine($"                WHEN q.FieldName = N'{colName}' THEN td.[{colName}]");
+                    }
+                    sb.AppendLine("                ELSE NULL");
+                    sb.AppendLine("            END,");
+                }
+                else
+                {
+                    sb.AppendLine("            NULL, -- No text fields");
+                }
+
+                // Build AnswerNumeric CASE
+                var numericControls = section.Value.Controls.Where(c => c.Type?.ToLower() == "number" || c.Type?.ToLower() == "decimal" || c.Type?.ToLower() == "integer").ToList();
+                if (numericControls.Any())
+                {
+                    sb.AppendLine("            CASE");
+                    foreach (var control in numericControls)
+                    {
+                        var colName = SanitizeColumnName(control.Name);
+                        sb.AppendLine($"                WHEN q.FieldName = N'{colName}' THEN TRY_CAST(td.[{colName}] AS DECIMAL(18,4))");
+                    }
+                    sb.AppendLine("                ELSE NULL");
+                    sb.AppendLine("            END,");
+                }
+                else
+                {
+                    sb.AppendLine("            NULL, -- No numeric fields");
+                }
+
+                // Build AnswerDate CASE
+                var dateControls = section.Value.Controls.Where(c => c.Type?.ToLower() == "datepicker").ToList();
+                if (dateControls.Any())
+                {
+                    sb.AppendLine("            CASE");
+                    foreach (var control in dateControls)
+                    {
+                        var colName = SanitizeColumnName(control.Name);
+                        sb.AppendLine($"                WHEN q.FieldName = N'{colName}' THEN TRY_CAST(td.[{colName}] AS DATETIME2)");
+                    }
+                    sb.AppendLine("                ELSE NULL");
+                    sb.AppendLine("            END,");
+                }
+                else
+                {
+                    sb.AppendLine("            NULL, -- No date fields");
+                }
+
+                // Build AnswerBit CASE
+                var bitControls = section.Value.Controls.Where(c => c.Type?.ToLower() == "checkbox").ToList();
+                if (bitControls.Any())
+                {
+                    sb.AppendLine("            CASE");
+                    foreach (var control in bitControls)
+                    {
+                        var colName = SanitizeColumnName(control.Name);
+                        sb.AppendLine($"                WHEN q.FieldName = N'{colName}' THEN TRY_CAST(td.[{colName}] AS BIT)");
+                    }
+                    sb.AppendLine("                ELSE NULL");
+                    sb.AppendLine("            END");
+                }
+                else
+                {
+                    sb.AppendLine("            NULL -- No checkbox fields");
+                }
+
+                sb.AppendLine($"        FROM @{sectionName}Data td");
+                sb.AppendLine($"        CROSS JOIN [dbo].[Questions] q");
+                sb.AppendLine($"        INNER JOIN [dbo].[RepeatingSectionInstances] rsi ON rsi.SubmissionId = @SubmissionId AND rsi.SectionId = @SectionId_{sectionName} AND rsi.ItemOrder = td.ItemOrder");
+                sb.AppendLine($"        WHERE q.FormId = @FormId AND q.RepeatingSectionName = N'{section.Key}';");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("        COMMIT TRANSACTION;");
+            sb.AppendLine();
+            sb.AppendLine($"        PRINT 'Submission created successfully for {formName}. SubmissionGuid: ' + CAST(@SubmissionGuid AS NVARCHAR(50));");
+            sb.AppendLine();
+            sb.AppendLine("    END TRY");
+            sb.AppendLine("    BEGIN CATCH");
+            sb.AppendLine("        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;");
+            sb.AppendLine("        THROW;");
+            sb.AppendLine("    END CATCH");
+            sb.AppendLine("END");
+            sb.AppendLine("GO");
+            sb.AppendLine();
+
+            // 2. Get procedure for this specific form
+            sb.AppendLine($"-- Get procedure for {formName}");
+            sb.AppendLine($"CREATE PROCEDURE [dbo].[sp_Get_{formName}]");
+            sb.AppendLine("    @SubmissionGuid UNIQUEIDENTIFIER");
+            sb.AppendLine("AS");
+            sb.AppendLine("BEGIN");
+            sb.AppendLine("    SET NOCOUNT ON;");
+            sb.AppendLine();
+            sb.AppendLine("    DECLARE @SubmissionId INT;");
+            sb.AppendLine("    DECLARE @FormId INT;");
+            sb.AppendLine();
+            sb.AppendLine($"    SELECT @FormId = FormId FROM [dbo].[Forms] WHERE FormName = N'{formName}';");
+            sb.AppendLine("    SELECT @SubmissionId = SubmissionId FROM [dbo].[Submissions] WHERE SubmissionGuid = @SubmissionGuid AND FormId = @FormId;");
+            sb.AppendLine();
+            sb.AppendLine("    IF @SubmissionId IS NULL");
+            sb.AppendLine("    BEGIN");
+            sb.AppendLine($"        RAISERROR('Submission not found for form {formName}', 16, 1);");
+            sb.AppendLine("        RETURN;");
+            sb.AppendLine("    END");
+            sb.AppendLine();
+
+            // Return submission metadata
+            sb.AppendLine("    -- Return submission metadata");
+            sb.AppendLine("    SELECT");
+            sb.AppendLine("        s.SubmissionGuid,");
+            sb.AppendLine("        s.SubmissionStatus,");
+            sb.AppendLine("        s.SubmittedBy,");
+            sb.AppendLine("        s.SubmittedDate,");
+            sb.AppendLine("        s.ModifiedDate,");
+            sb.AppendLine("        s.Version");
+            sb.AppendLine("    FROM [dbo].[Submissions] s");
+            sb.AppendLine("    WHERE s.SubmissionId = @SubmissionId;");
+            sb.AppendLine();
+
+            // Return main form fields as a single row
+            sb.AppendLine("    -- Return main form data");
+            if (analysis.MainTableColumns.Any())
+            {
+                sb.AppendLine("    SELECT");
+                foreach (var control in analysis.MainTableColumns.OrderBy(c => c.Name))
+                {
+                    var colName = SanitizeColumnName(control.Name);
+                    // Ensure we have a valid alias - use field name if label is empty
+                    var aliasName = !string.IsNullOrWhiteSpace(control.Label) ? control.Label :
+                                   !string.IsNullOrWhiteSpace(control.Name) ? control.Name :
+                                   $"Field_{colName}";
+                    // Sanitize the alias to ensure it's valid SQL
+                    aliasName = SanitizeColumnName(aliasName);
+
+                    sb.AppendLine($"        MAX(CASE WHEN q.FieldName = N'{colName}' THEN");
+
+                    switch (control.Type?.ToLower())
+                    {
+                        case "textfield":
+                        case "richtext":
+                            sb.AppendLine("            a.AnswerText");
+                            break;
+                        case "datepicker":
+                            sb.AppendLine("            CONVERT(NVARCHAR, a.AnswerDate, 121)");
+                            break;
+                        case "checkbox":
+                            sb.AppendLine("            CASE WHEN a.AnswerBit = 1 THEN 'true' ELSE 'false' END");
+                            break;
+                        case "number":
+                        case "decimal":
+                        case "integer":
+                            sb.AppendLine("            CAST(a.AnswerNumeric AS NVARCHAR)");
+                            break;
+                        case "dropdown":
+                        case "radiobutton":
+                        case "combobox":
+                            sb.AppendLine("            ISNULL(lv.LookupValue, a.AnswerText)");
+                            break;
+                        default:
+                            sb.AppendLine("            a.AnswerText");
+                            break;
+                    }
+
+                    sb.AppendLine($"        END) AS [{aliasName}],");
+                }
+                // Remove last comma
+                sb.Length -= 3;
+                sb.AppendLine();
+
+                sb.AppendLine("    FROM [dbo].[Questions] q");
+                sb.AppendLine("    LEFT JOIN [dbo].[Answers] a ON q.QuestionId = a.QuestionId AND a.SubmissionId = @SubmissionId AND a.RepeatingSectionInstanceId IS NULL");
+                sb.AppendLine("    LEFT JOIN [dbo].[LookupValues] lv ON a.AnswerLookupId = lv.LookupId");
+                sb.AppendLine("    WHERE q.FormId = @FormId AND q.IsInRepeatingSection = 0;");
+            }
+            else
+            {
+                sb.AppendLine("    -- No main form fields");
+                sb.AppendLine("    SELECT 'No main form data' AS Message;");
+            }
+            sb.AppendLine();
+
+            // Return each repeating section's data
+            foreach (var section in analysis.RepeatingSections)
+            {
+                sb.AppendLine($"    -- Return {section.Key} repeating section data");
+                sb.AppendLine("    SELECT");
+                sb.AppendLine("        rsi.ItemOrder");
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var colName = SanitizeColumnName(control.Name);
+                    // Ensure we have a valid alias
+                    var aliasName = !string.IsNullOrWhiteSpace(control.Label) ? control.Label :
+                                   !string.IsNullOrWhiteSpace(control.Name) ? control.Name :
+                                   $"Field_{colName}";
+                    aliasName = SanitizeColumnName(aliasName);
+
+                    sb.AppendLine($"        ,MAX(CASE WHEN q.FieldName = N'{colName}' THEN");
+
+                    switch (control.Type?.ToLower())
+                    {
+                        case "textfield":
+                        case "richtext":
+                            sb.AppendLine("            a.AnswerText");
+                            break;
+                        case "datepicker":
+                            sb.AppendLine("            CONVERT(NVARCHAR, a.AnswerDate, 121)");
+                            break;
+                        case "checkbox":
+                            sb.AppendLine("            CASE WHEN a.AnswerBit = 1 THEN 'true' ELSE 'false' END");
+                            break;
+                        case "number":
+                        case "decimal":
+                        case "integer":
+                            sb.AppendLine("            CAST(a.AnswerNumeric AS NVARCHAR)");
+                            break;
+                        case "dropdown":
+                        case "radiobutton":
+                        case "combobox":
+                            sb.AppendLine("            ISNULL(lv.LookupValue, a.AnswerText)");
+                            break;
+                        default:
+                            sb.AppendLine("            a.AnswerText");
+                            break;
+                    }
+
+                    sb.AppendLine($"        END) AS [{aliasName}]");
+                }
+
+                sb.AppendLine("    FROM [dbo].[RepeatingSectionInstances] rsi");
+                sb.AppendLine("    INNER JOIN [dbo].[RepeatingSections] rs ON rsi.SectionId = rs.SectionId");
+                sb.AppendLine("    INNER JOIN [dbo].[Questions] q ON q.FormId = @FormId AND q.RepeatingSectionName = rs.SectionName");
+                sb.AppendLine("    LEFT JOIN [dbo].[Answers] a ON a.QuestionId = q.QuestionId AND a.RepeatingSectionInstanceId = rsi.InstanceId");
+                sb.AppendLine("    LEFT JOIN [dbo].[LookupValues] lv ON a.AnswerLookupId = lv.LookupId");
+                sb.AppendLine($"    WHERE rsi.SubmissionId = @SubmissionId AND rs.SectionName = N'{section.Key}'");
+                sb.AppendLine("    GROUP BY rsi.ItemOrder");
+                sb.AppendLine("    ORDER BY rsi.ItemOrder;");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("END");
+            sb.AppendLine("GO");
+            sb.AppendLine();
+
+            // 4. Create procedures to add single items to repeating sections
+            foreach (var section in analysis.RepeatingSections)
+            {
+                var sectionName = SanitizeTableName(section.Key);
+
+                // Create procedure to add single item to repeating section
+                sb.AppendLine($"-- Add single item to {section.Key} repeating section");
+                sb.AppendLine($"CREATE PROCEDURE [dbo].[sp_{formName}_{sectionName}_AddItem]");
+                sb.AppendLine("    @SubmissionGuid UNIQUEIDENTIFIER,");
+                sb.AppendLine("    @ItemOrder INT = NULL");
+
+                // Track parameter names to ensure uniqueness
+                var usedParamNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var parameterMapping = new Dictionary<string, string>(); // Maps original to unique param name
+
+                foreach (var control in section.Value.Controls.OrderBy(c => c.Name))
+                {
+                    var paramName = SanitizeColumnName(control.Name);
+
+                    // Ensure parameter name is unique
+                    var uniqueParamName = paramName;
+                    int suffix = 1;
+                    while (usedParamNames.Contains(uniqueParamName))
+                    {
+                        uniqueParamName = $"{paramName}_{suffix}";
+                        suffix++;
+                    }
+                    usedParamNames.Add(uniqueParamName);
+                    parameterMapping[control.Name] = uniqueParamName;
+
+                    var sqlType = GetSqlType(control.Type);
+                    sb.AppendLine($"    ,@{uniqueParamName} {sqlType} = NULL -- {control.Label ?? control.Name}");
+                }
+
+                sb.AppendLine("AS");
+                sb.AppendLine("BEGIN");
+                sb.AppendLine("    SET NOCOUNT ON;");
+                sb.AppendLine();
+                sb.AppendLine("    DECLARE @SubmissionId INT;");
+                sb.AppendLine("    DECLARE @FormId INT;");
+                sb.AppendLine("    DECLARE @SectionId INT;");
+                sb.AppendLine("    DECLARE @InstanceId INT;");
+                sb.AppendLine();
+                sb.AppendLine($"    SELECT @FormId = FormId FROM [dbo].[Forms] WHERE FormName = N'{formName}';");
+                sb.AppendLine("    SELECT @SubmissionId = SubmissionId FROM [dbo].[Submissions] WHERE SubmissionGuid = @SubmissionGuid AND FormId = @FormId;");
+                sb.AppendLine($"    SELECT @SectionId = SectionId FROM [dbo].[RepeatingSections] WHERE FormId = @FormId AND SectionName = N'{section.Key}';");
+                sb.AppendLine();
+                sb.AppendLine("    IF @ItemOrder IS NULL");
+                sb.AppendLine("    BEGIN");
+                sb.AppendLine("        SELECT @ItemOrder = ISNULL(MAX(ItemOrder), 0) + 1");
+                sb.AppendLine("        FROM [dbo].[RepeatingSectionInstances]");
+                sb.AppendLine("        WHERE SubmissionId = @SubmissionId AND SectionId = @SectionId;");
+                sb.AppendLine("    END");
+                sb.AppendLine();
+                sb.AppendLine("    -- Create instance");
+                sb.AppendLine("    INSERT INTO [dbo].[RepeatingSectionInstances] (SubmissionId, SectionId, ItemOrder)");
+                sb.AppendLine("    VALUES (@SubmissionId, @SectionId, @ItemOrder);");
+                sb.AppendLine();
+                sb.AppendLine("    SET @InstanceId = SCOPE_IDENTITY();");
+                sb.AppendLine();
+
+                // Insert each field's answer using the unique parameter names
+                foreach (var control in section.Value.Controls)
+                {
+                    var uniqueParamName = parameterMapping[control.Name];
+                    var fieldName = SanitizeColumnName(control.Name);
+
+                    sb.AppendLine($"    -- {control.Label ?? control.Name}");
+                    sb.AppendLine($"    IF @{uniqueParamName} IS NOT NULL");
+                    sb.AppendLine("    BEGIN");
+                    sb.AppendLine("        INSERT INTO [dbo].[Answers] (SubmissionId, QuestionId, RepeatingSectionInstanceId, ");
+
+                    switch (control.Type?.ToLower())
+                    {
+                        case "textfield":
+                        case "richtext":
+                            sb.AppendLine("AnswerText)");
+                            sb.AppendLine($"        SELECT @SubmissionId, QuestionId, @InstanceId, @{uniqueParamName}");
+                            break;
+                        case "datepicker":
+                            sb.AppendLine("AnswerDate)");
+                            sb.AppendLine($"        SELECT @SubmissionId, QuestionId, @InstanceId, @{uniqueParamName}");
+                            break;
+                        case "checkbox":
+                            sb.AppendLine("AnswerBit)");
+                            sb.AppendLine($"        SELECT @SubmissionId, QuestionId, @InstanceId, @{uniqueParamName}");
+                            break;
+                        case "number":
+                        case "decimal":
+                        case "integer":
+                            sb.AppendLine("AnswerNumeric)");
+                            sb.AppendLine($"        SELECT @SubmissionId, QuestionId, @InstanceId, @{uniqueParamName}");
+                            break;
+                        default:
+                            sb.AppendLine("AnswerText)");
+                            sb.AppendLine($"        SELECT @SubmissionId, QuestionId, @InstanceId, @{uniqueParamName}");
+                            break;
+                    }
+
+                    sb.AppendLine($"        FROM [dbo].[Questions]");
+                    sb.AppendLine($"        WHERE FormId = @FormId AND FieldName = N'{fieldName}' AND RepeatingSectionName = N'{section.Key}';");
+                    sb.AppendLine("    END");
+                    sb.AppendLine();
+                }
+
+                sb.AppendLine("    SELECT @InstanceId AS NewInstanceId;");
+                sb.AppendLine("END");
+                sb.AppendLine("GO");
+                sb.AppendLine();
+            }
+
+            return new SqlScript
+            {
+                Name = $"Create_{formName}_Procedures",
+                Type = ScriptType.StoredProcedure,
+                Content = sb.ToString(),
+                ExecutionOrder = 110,
+                Description = $"Form-specific procedures for {formName}"
+            };
+        }
+        private SqlScript GenerateNormalizedIndexes()
+        {
+            var sb = new StringBuilder();
+
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine("-- Performance Indexes for Q&A Structure");
+            sb.AppendLine("-- ===============================================");
+            sb.AppendLine();
+
+            // Forms indexes
+            sb.AppendLine("-- Forms table indexes");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_Forms_Active] ON [dbo].[Forms] ([IsActive]) INCLUDE ([FormName]);");
+            sb.AppendLine();
+
+            // Questions indexes
+            sb.AppendLine("-- Questions table indexes");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_Questions_FormId] ON [dbo].[Questions] ([FormId]);");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_Questions_Repeating] ON [dbo].[Questions] ([IsInRepeatingSection], [RepeatingSectionName]);");
+            sb.AppendLine();
+
+            // Submissions indexes
+            sb.AppendLine("-- Submissions table indexes");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_Submissions_FormId] ON [dbo].[Submissions] ([FormId], [SubmittedDate] DESC);");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_Submissions_Status] ON [dbo].[Submissions] ([SubmissionStatus]) INCLUDE ([FormId], [SubmittedDate]);");
+            sb.AppendLine();
+
+            // Answers indexes
+            sb.AppendLine("-- Answers table indexes");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_Answers_SubmissionId] ON [dbo].[Answers] ([SubmissionId], [QuestionId]);");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_Answers_RSI] ON [dbo].[Answers] ([RepeatingSectionInstanceId]) WHERE [RepeatingSectionInstanceId] IS NOT NULL;");
+            sb.AppendLine();
+
+            // RepeatingSectionInstances indexes
+            sb.AppendLine("-- RepeatingSectionInstances table indexes");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_RSI_Submission] ON [dbo].[RepeatingSectionInstances] ([SubmissionId], [SectionId], [ItemOrder]);");
+            sb.AppendLine();
+
+            // LookupValues indexes
+            sb.AppendLine("-- LookupValues table indexes");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_LookupValues_Category] ON [dbo].[LookupValues] ([LookupCategory], [IsActive]);");
+            sb.AppendLine("CREATE NONCLUSTERED INDEX [IX_LookupValues_Question] ON [dbo].[LookupValues] ([QuestionId], [IsActive]) WHERE [QuestionId] IS NOT NULL;");
+            sb.AppendLine();
+
+            return new SqlScript
+            {
+                Name = "Create_QA_Indexes",
+                Type = ScriptType.Index,
+                Content = sb.ToString(),
+                ExecutionOrder = 300,
+                Description = "Performance indexes for Q&A structure"
+            };
         }
 
         /// <summary>
