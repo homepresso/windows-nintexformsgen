@@ -1,13 +1,26 @@
 ﻿using System;
 using System.Linq;
 using FormGenerator.Analyzers.Infopath;
+using FormGenerator.Core.Models;
 
 namespace FormGenerator.Analyzers.InfoPath
 {
+
+
     public static class InfoPathFormDefinitionExtensions
     {
+        public static SqlDeploymentInfo CurrentSqlDeploymentInfo { get; set; }
+
         public static object ToEnhancedJson(this InfoPathFormDefinition formDef)
         {
+            // Check if we have SQL deployment info for this form
+            FormSqlMapping formMapping = null;
+            if (CurrentSqlDeploymentInfo != null)
+            {
+                formMapping = CurrentSqlDeploymentInfo.FormMappings?.FirstOrDefault(f =>
+                    f.FormName.Equals(formDef.FormName, StringComparison.OrdinalIgnoreCase));
+            }
+
             return new
             {
                 Views = formDef.Views.Select(v => new
@@ -50,7 +63,9 @@ namespace FormGenerator.Analyzers.InfoPath
                         AdditionalProperties = c.Properties != null
                             ? c.Properties.Where(p => p.Key != "CtrlId" && p.Key != "DefaultValue")
                                          .ToDictionary(p => p.Key, p => p.Value)
-                            : null
+                            : null,
+                        // ADD SQL MAPPING INFO WHEN AVAILABLE
+                        SqlMapping = formMapping != null ? GetControlSqlMapping(c, formMapping) : null
                     }).ToList(),
                     // Include sections summary for the view
                     Sections = v.Sections.Select(s => new
@@ -60,7 +75,11 @@ namespace FormGenerator.Analyzers.InfoPath
                         s.CtrlId,
                         s.StartRow,
                         s.EndRow,
-                        ControlCount = s.ControlIds?.Count ?? 0
+                        ControlCount = s.ControlIds?.Count ?? 0,
+                        // ADD SQL TABLE MAPPING WHEN AVAILABLE
+                        SqlTableName = formMapping?.RepeatingSectionMappings?
+                            .FirstOrDefault(rs => rs.SectionName.Equals(s.Name, StringComparison.OrdinalIgnoreCase))
+                            ?.TableName
                     }).ToList()
                 }).ToList(),
                 Rules = formDef.Rules,
@@ -80,7 +99,9 @@ namespace FormGenerator.Analyzers.InfoPath
                     ValidValues = d.HasConstraints
                         ? d.ValidValues?.Select(v => new { v.Value, v.DisplayText, v.IsDefault })
                         : null,
-                    d.DefaultValue
+                    d.DefaultValue,
+                    // ADD SQL MAPPING WHEN AVAILABLE
+                    SqlMapping = formMapping != null ? GetDataColumnSqlMapping(d, formMapping) : null
                 }).ToList(),
                 DynamicSections = formDef.DynamicSections.Select(ds => new
                 {
@@ -109,7 +130,104 @@ namespace FormGenerator.Analyzers.InfoPath
                     ControlsWithIds = GetControlsWithIds(formDef),
                     // ADD THIS: Summary of which controls are in which repeating sections
                     RepeatingSectionMembership = GetRepeatingSectionMembership(formDef)
-                }
+                },
+                // ADD SQL DEPLOYMENT INFO WHEN AVAILABLE
+                SqlDeploymentInfo = CurrentSqlDeploymentInfo != null && formMapping != null ? new
+                {
+                    ServerName = CurrentSqlDeploymentInfo.ServerName,
+                    DatabaseName = CurrentSqlDeploymentInfo.DatabaseName,
+                    DeploymentDate = CurrentSqlDeploymentInfo.DeploymentDate,
+                    AuthenticationType = CurrentSqlDeploymentInfo.AuthenticationType,
+                    TableStructureType = CurrentSqlDeploymentInfo.TableStructureType,
+                    MainTable = formMapping.MainTableName,
+                    RepeatingSectionTables = formMapping.RepeatingSectionMappings?.Select(rs => new
+                    {
+                        rs.SectionName,
+                        rs.TableName,
+                        rs.ForeignKeyColumn,
+                        ColumnCount = rs.Columns?.Count ?? 0
+                    }),
+                    LookupTables = formMapping.LookupTableMappings?.Select(lt => new
+                    {
+                        lt.FieldName,
+                        lt.LookupTableName,
+                        lt.ValueCount,
+                        Values = lt.LookupValues.Take(5) // Show first 5 values as sample
+                    }),
+                    StoredProcedures = formMapping.StoredProcedures,
+                    Views = formMapping.Views
+                } : null
+            };
+        }
+
+        private static object GetControlSqlMapping(ControlDefinition control, FormSqlMapping mapping)
+        {
+            // Skip labels and non-data controls
+            if (control.Type == "Label" || control.Type == "span" || string.IsNullOrEmpty(control.Name))
+                return null;
+
+            var columnMapping = mapping.ColumnMappings?.FirstOrDefault(cm =>
+                cm.FieldName.Equals(control.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (columnMapping == null)
+                return null;
+
+            string tableName = columnMapping.IsInMainTable ? mapping.MainTableName : null;
+
+            // If in repeating section, find the table
+            if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+            {
+                var sectionMapping = mapping.RepeatingSectionMappings?.FirstOrDefault(rs =>
+                    rs.SectionName.Equals(control.RepeatingSectionName, StringComparison.OrdinalIgnoreCase));
+                tableName = sectionMapping?.TableName;
+            }
+
+            // Check for lookup table
+            string lookupTable = null;
+            if (control.HasStaticData && control.DataOptions != null && control.DataOptions.Any())
+            {
+                var lookupMapping = mapping.LookupTableMappings?.FirstOrDefault(lt =>
+                    lt.FieldName.Equals(control.Name, StringComparison.OrdinalIgnoreCase));
+                lookupTable = lookupMapping?.LookupTableName;
+            }
+
+            return new
+            {
+                TableName = tableName,
+                ColumnName = columnMapping.ColumnName,
+                SqlDataType = columnMapping.SqlDataType,
+                IsInMainTable = columnMapping.IsInMainTable,
+                LookupTable = lookupTable
+            };
+        }
+
+        private static object GetDataColumnSqlMapping(DataColumn dataColumn, FormSqlMapping mapping)
+        {
+            // Skip non-data columns
+            if (dataColumn.Type == "RepeatingTable" || dataColumn.Type == "span" ||
+                dataColumn.ColumnName?.StartsWith("string(") == true)
+                return null;
+
+            var columnMapping = mapping.ColumnMappings?.FirstOrDefault(cm =>
+                cm.FieldName.Equals(dataColumn.ColumnName, StringComparison.OrdinalIgnoreCase));
+
+            if (columnMapping == null)
+                return null;
+
+            string tableName = mapping.MainTableName;
+            if (dataColumn.IsRepeating && !string.IsNullOrEmpty(dataColumn.RepeatingSection))
+            {
+                var sectionMapping = mapping.RepeatingSectionMappings?.FirstOrDefault(rs =>
+                    rs.SectionName.Equals(dataColumn.RepeatingSection, StringComparison.OrdinalIgnoreCase));
+                tableName = sectionMapping?.TableName ?? tableName;
+            }
+
+            return new
+            {
+                TableName = tableName,
+                ColumnName = columnMapping.ColumnName,
+                SqlDataType = columnMapping.SqlDataType,
+                IsInMainTable = !dataColumn.IsRepeating
             };
         }
 

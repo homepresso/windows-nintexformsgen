@@ -1188,7 +1188,7 @@ namespace FormGenerator.Services
         /// <summary>
         /// Enhanced repeating section analysis - focuses ONLY on true repeating sections from Data
         /// </summary>
-        private RepeatingSectionAnalysis AnalyzeRepeatingSections(InfoPathFormDefinition formDef)
+        public RepeatingSectionAnalysis AnalyzeRepeatingSections(InfoPathFormDefinition formDef)
         {
             var analysis = new RepeatingSectionAnalysis();
 
@@ -2472,7 +2472,7 @@ namespace FormGenerator.Services
             return "";
         }
 
-        private string GetSqlType(string controlType)
+        public string GetSqlType(string controlType)
         {
             if (Dialect == SqlDialect.SqlServer)
             {
@@ -3095,7 +3095,7 @@ namespace FormGenerator.Services
             };
         }
 
-        private string SanitizeTableName(string name)
+        public string SanitizeTableName(string name)
         {
             if (string.IsNullOrEmpty(name))
                 return "FormTable";
@@ -3114,7 +3114,7 @@ namespace FormGenerator.Services
             return string.IsNullOrEmpty(sanitized) ? "FormTable" : sanitized;
         }
 
-        private string SanitizeColumnName(string name)
+        public string SanitizeColumnName(string name)
         {
             if (string.IsNullOrEmpty(name))
                 return "Column";

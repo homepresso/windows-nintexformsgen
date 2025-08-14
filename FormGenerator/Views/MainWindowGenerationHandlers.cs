@@ -6,6 +6,8 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using FormGenerator.Analyzers.Infopath;
+using FormGenerator.Analyzers.InfoPath;
 using FormGenerator.Core.Models;
 using FormGenerator.Services;
 using Microsoft.Win32;
@@ -15,12 +17,12 @@ namespace FormGenerator.Views
     /// <summary>
     /// Handles all generation tab logic (SQL, Nintex, K2)
     /// </summary>
-    internal class MainWindowGenerationHandlers
+    public class MainWindowGenerationHandlers
     {
-        private readonly MainWindow _mainWindow;
-        private readonly SqlGeneratorService _sqlGenerator;
-        private readonly SqlConnectionService _sqlConnection;
-        private string _currentConnectionString;
+        public readonly MainWindow _mainWindow;
+        public readonly SqlGeneratorService _sqlGenerator;
+        public readonly SqlConnectionService _sqlConnection;
+        public string _currentConnectionString;
 
         public MainWindowGenerationHandlers(MainWindow mainWindow)
         {
@@ -468,12 +470,169 @@ namespace FormGenerator.Views
                         }
                     }
 
-                    _mainWindow.UpdateStatus("SQL deployment completed successfully", MessageSeverity.Info);
+                    // CREATE COMPREHENSIVE SQL DEPLOYMENT INFO
+                    var sqlDeploymentInfo = new SqlDeploymentInfo
+                    {
+                        ServerName = _mainWindow.SqlServerTextBox.Text,
+                        DatabaseName = _mainWindow.SqlDatabaseTextBox.Text,
+                        DeploymentDate = DateTime.Now,
+                        AuthenticationType = _mainWindow.WindowsAuthRadio.IsChecked == true ? "Windows" : "SQL",
+                        TableStructureType = _mainWindow.FlatTablesRadio.IsChecked == true ? "FlatTables" : "NormalizedQA"
+                    };
+
+                    // Create a single instance of SqlGeneratorService to use for all operations
+                    var sqlGenerator = new SqlGeneratorService();
+
+                    // Build mappings for each form
+                    foreach (var formResult in _mainWindow._allAnalysisResults)
+                    {
+                        var formDef = formResult.Value.FormDefinition as InfoPathFormDefinition;
+                        if (formDef == null) continue;
+
+                        var formName = sqlGenerator.SanitizeTableName(formDef.FormName);
+
+                        var formMapping = new FormSqlMapping
+                        {
+                            FormName = formDef.FormName,
+                            MainTableName = formName
+                        };
+
+                        // Use SqlGeneratorService to analyze the form structure
+                        var analysis = sqlGenerator.AnalyzeRepeatingSections(formDef);
+
+                        // Add column mappings for main table
+                        foreach (var control in analysis.MainTableColumns)
+                        {
+                            formMapping.ColumnMappings.Add(new ColumnMapping
+                            {
+                                FieldName = control.Name,
+                                ColumnName = sqlGenerator.SanitizeColumnName(control.Name),
+                                SqlDataType = sqlGenerator.GetSqlType(control.Type),
+                                ControlType = control.Type,
+                                IsInMainTable = true
+                            });
+                        }
+
+                        // Add repeating section mappings AND their column mappings
+                        foreach (var section in analysis.RepeatingSections)
+                        {
+                            var sectionTableName = $"{formName}_{sqlGenerator.SanitizeTableName(section.Key)}";
+                            var sectionMapping = new RepeatingSectionMapping
+                            {
+                                SectionName = section.Key,
+                                TableName = sectionTableName,
+                                ForeignKeyColumn = "ParentFormId",
+                                Columns = new List<ColumnMapping>()
+                            };
+
+                            foreach (var control in section.Value.Controls)
+                            {
+                                var columnMapping = new ColumnMapping
+                                {
+                                    FieldName = control.Name,
+                                    ColumnName = sqlGenerator.SanitizeColumnName(control.Name),
+                                    SqlDataType = sqlGenerator.GetSqlType(control.Type),
+                                    ControlType = control.Type,
+                                    IsInMainTable = false
+                                };
+
+                                sectionMapping.Columns.Add(columnMapping);
+
+                                // IMPORTANT: Also add to the main ColumnMappings collection so it can be found
+                                // This allows the ToEnhancedJson method to find the mapping for repeating section controls
+                                formMapping.ColumnMappings.Add(columnMapping);
+                            }
+
+                            formMapping.RepeatingSectionMappings.Add(sectionMapping);
+                        }
+
+                        // Add lookup table mappings for dropdowns
+                        var controlsWithLookups = formDef.Views
+                            .SelectMany(v => v.Controls)
+                            .Where(c => c.HasStaticData && c.DataOptions != null && c.DataOptions.Any())
+                            .GroupBy(c => c.Name);
+
+                        foreach (var controlGroup in controlsWithLookups)
+                        {
+                            var control = controlGroup.First();
+                            formMapping.LookupTableMappings.Add(new LookupTableMapping
+                            {
+                                FieldName = control.Name,
+                                LookupTableName = $"{formName}_{sqlGenerator.SanitizeTableName(control.Name)}_Lookup",
+                                ValueCount = control.DataOptions.Count,
+                                LookupValues = control.DataOptions.Select(o => o.Value).ToList()
+                            });
+                        }
+
+                        // Add stored procedures based on structure type
+                        if (_mainWindow.FlatTablesRadio.IsChecked == true)
+                        {
+                            // Flat table structure procedures
+                            formMapping.StoredProcedures.Add($"sp_{formName}_Insert");
+                            formMapping.StoredProcedures.Add($"sp_{formName}_Update");
+                            formMapping.StoredProcedures.Add($"sp_{formName}_Get");
+                            formMapping.StoredProcedures.Add($"sp_{formName}_Delete");
+                            formMapping.StoredProcedures.Add($"sp_{formName}_List");
+
+                            // Add repeating section procedures - use different variable names to avoid conflict
+                            foreach (var repeatSection in analysis.RepeatingSections)
+                            {
+                                var repeatSectionTableName = sqlGenerator.SanitizeTableName(repeatSection.Key);
+                                var fullTableName = $"{formName}_{repeatSectionTableName}";
+                                formMapping.StoredProcedures.Add($"sp_{fullTableName}_InsertItem");
+                                formMapping.StoredProcedures.Add($"sp_{fullTableName}_UpdateItem");
+                                formMapping.StoredProcedures.Add($"sp_{fullTableName}_DeleteItem");
+                                formMapping.StoredProcedures.Add($"sp_{fullTableName}_GetByParent");
+                            }
+                        }
+                        else
+                        {
+                            // Normalized Q&A structure procedures
+                            formMapping.StoredProcedures.Add($"sp_Submit_{formName}");
+                            formMapping.StoredProcedures.Add($"sp_Get_{formName}");
+                            formMapping.StoredProcedures.Add("sp_RegisterForm");
+                            formMapping.StoredProcedures.Add("sp_SubmitFormData");
+                            formMapping.StoredProcedures.Add("sp_GetSubmissionData");
+                            formMapping.StoredProcedures.Add("sp_AddRepeatingSectionInstance");
+
+                            // Add procedures for each repeating section in normalized structure - use different variable names
+                            foreach (var normSection in analysis.RepeatingSections)
+                            {
+                                var normSectionTableName = sqlGenerator.SanitizeTableName(normSection.Key);
+                                formMapping.StoredProcedures.Add($"sp_{formName}_{normSectionTableName}_AddItem");
+                            }
+                        }
+
+                        // Add views
+                        if (_mainWindow.FlatTablesRadio.IsChecked == true)
+                        {
+                            formMapping.Views.Add($"vw_{formName}_Summary");
+                        }
+                        else
+                        {
+                            formMapping.Views.Add("vw_AllSubmissions");
+                            formMapping.Views.Add("vw_FormAnswersPivot");
+                        }
+
+                        sqlDeploymentInfo.FormMappings.Add(formMapping);
+                    }
+
+                    // SET THE STATIC PROPERTY to make SQL info available to JSON generation
+                    InfoPathFormDefinitionExtensions.CurrentSqlDeploymentInfo = sqlDeploymentInfo;
+
+                    // REFRESH THE JSON OUTPUT with SQL mappings
+                    // Using the public method in MainWindow to avoid accessibility issues
+                    await _mainWindow.RefreshJsonOutputWithCurrentData();
+
+                    _mainWindow.UpdateStatus("SQL deployment completed - JSON updated with database mappings", MessageSeverity.Info);
+
+                    _mainWindow.SqlGenerationLog.Text += "\n✅ JSON output has been updated with SQL deployment mappings\n";
 
                     MessageBox.Show(
                         "SQL scripts have been successfully deployed to the database!\n\n" +
                         $"Database: {_mainWindow.SqlDatabaseTextBox.Text}\n" +
-                        $"Tables created/updated: {tables.Count}",
+                        $"Tables created/updated: {tables.Count}\n\n" +
+                        "The JSON output has been updated with SQL table and column mappings.",
                         "Deployment Successful",
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);

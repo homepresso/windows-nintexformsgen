@@ -1384,6 +1384,19 @@ namespace FormGenerator.Views
             return matchCount;
         }
 
+        private void ClearSqlDeploymentInfo()
+        {
+            InfoPathFormDefinitionExtensions.CurrentSqlDeploymentInfo = null;
+        }
+
+        public async Task RefreshJsonOutputWithCurrentData()
+        {
+            if (_analysisHandlers != null && _allAnalysisResults != null && _allAnalysisResults.Any())
+            {
+                await _analysisHandlers.DisplayCombinedAnalysisResults(_allAnalysisResults);
+            }
+        }
+
         /// <summary>
         /// Resets tree view highlight
         /// </summary>
