@@ -75,6 +75,63 @@ namespace FormGenerator.Views
             StructureTreeView.PreviewKeyDown += StructureTreeView_PreviewKeyDown;
         }
 
+        private void ChangeConnection_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Show connection fields again
+                ConnectionFieldsPanel.Visibility = Visibility.Visible;
+                ConnectionSummaryPanel.Visibility = Visibility.Collapsed;
+                ConnectionStatusPanel.Visibility = Visibility.Collapsed;
+
+                // Reset buttons
+                TestSqlConnectionButton.IsEnabled = true;
+                GenerateSqlButton.IsEnabled = false;
+                DeploySqlButton.IsEnabled = false;
+
+                // Clear the current connection string
+                if (_generationHandlers != null)
+                {
+                    _generationHandlers.ClearCurrentConnection();
+                }
+
+                // Clear the log
+                SqlGenerationLog.Text = "Ready to configure new SQL connection...\n";
+
+                UpdateStatus("SQL connection reset. Please configure new connection.", MessageSeverity.Info);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error resetting connection: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        internal void ShowConnectionSuccess(string server, string database, bool isWindowsAuth)
+        {
+            try
+            {
+                // Update connection summary
+                ConnectedServerText.Text = server;
+                ConnectedDatabaseText.Text = database;
+                ConnectedAuthText.Text = isWindowsAuth ? "Windows Authentication" : "SQL Server Authentication";
+
+                // Show/hide appropriate panels
+                ConnectionFieldsPanel.Visibility = Visibility.Collapsed;
+                ConnectionSummaryPanel.Visibility = Visibility.Visible;
+                ConnectionStatusPanel.Visibility = Visibility.Visible;
+
+                // Enable deployment button immediately after successful connection
+                DeploySqlButton.IsEnabled = true;
+
+                // Keep generate button enabled based on analysis results
+                GenerateSqlButton.IsEnabled = _allAnalysisResults != null && _allAnalysisResults.Any();
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error updating connection UI: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
         private void SetupSimplifiedTreeViewContextMenu()
         {
             // Create context menu if it doesn't exist

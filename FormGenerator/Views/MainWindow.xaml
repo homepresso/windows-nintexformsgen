@@ -1200,13 +1200,45 @@
 									<!-- SQL Connection Settings -->
 									<Border Grid.Row="0" Style="{StaticResource CardStyle}">
 										<StackPanel>
-											<TextBlock Text="SQL Database Connection"
-													  FontSize="18"
-													  FontWeight="Medium"
-													  Foreground="{StaticResource TextPrimary}"
-													  Margin="0,0,0,15"/>
-
 											<Grid>
+												<Grid.ColumnDefinitions>
+													<ColumnDefinition Width="*"/>
+													<ColumnDefinition Width="Auto"/>
+												</Grid.ColumnDefinitions>
+
+												<TextBlock Grid.Column="0"
+														  Text="SQL Database Connection"
+														  FontSize="18"
+														  FontWeight="Medium"
+														  Foreground="{StaticResource TextPrimary}"/>
+
+												<!-- Connection Status Indicator -->
+												<StackPanel Grid.Column="1"
+														   Name="ConnectionStatusPanel"
+														   Orientation="Horizontal"
+														   Visibility="Collapsed">
+													<TextBlock Text="✅"
+															  FontSize="20"
+															  Foreground="{StaticResource SuccessColor}"
+															  Margin="0,0,5,0"
+															  VerticalAlignment="Center"/>
+													<TextBlock Text="Connected"
+															  FontSize="14"
+															  FontWeight="Medium"
+															  Foreground="{StaticResource SuccessColor}"
+															  VerticalAlignment="Center"
+															  Margin="0,0,10,0"/>
+													<Button Name="ChangeConnectionButton"
+														   Content="Change Connection"
+														   Style="{StaticResource ModernButton}"
+														   Height="30"
+														   Padding="10,5"
+														   FontSize="12"
+														   Click="ChangeConnection_Click"/>
+												</StackPanel>
+											</Grid>
+
+											<Grid Margin="0,15,0,0">
 												<Grid.ColumnDefinitions>
 													<ColumnDefinition Width="150"/>
 													<ColumnDefinition Width="*"/>
@@ -1220,84 +1252,150 @@
 													<RowDefinition Height="Auto"/>
 												</Grid.RowDefinitions>
 
-												<!-- Server -->
-												<TextBlock Grid.Row="0" Grid.Column="0"
-														  Text="Server:"
-														  VerticalAlignment="Center"
-														  Foreground="{StaticResource TextSecondary}"/>
-												<TextBox Grid.Row="0" Grid.Column="1"
-														Name="SqlServerTextBox"
-														Style="{StaticResource ModernTextBox}"
-														Text="localhost\SQLEXPRESS"
-														Margin="5,2"/>
+												<!-- Connection Fields Panel -->
+												<Grid Name="ConnectionFieldsPanel"
+													  Grid.Row="0" Grid.Column="0"
+													  Grid.RowSpan="6" Grid.ColumnSpan="2">
+													<Grid.ColumnDefinitions>
+														<ColumnDefinition Width="150"/>
+														<ColumnDefinition Width="*"/>
+													</Grid.ColumnDefinitions>
+													<Grid.RowDefinitions>
+														<RowDefinition Height="Auto"/>
+														<RowDefinition Height="Auto"/>
+														<RowDefinition Height="Auto"/>
+														<RowDefinition Height="Auto"/>
+														<RowDefinition Height="Auto"/>
+														<RowDefinition Height="Auto"/>
+													</Grid.RowDefinitions>
 
-												<!-- Database -->
-												<TextBlock Grid.Row="1" Grid.Column="0"
-														  Text="Database:"
-														  VerticalAlignment="Center"
-														  Foreground="{StaticResource TextSecondary}"/>
-												<TextBox Grid.Row="1" Grid.Column="1"
-														Name="SqlDatabaseTextBox"
-														Style="{StaticResource ModernTextBox}"
-														Text="FormDatabase"
-														Margin="5,2"/>
+													<!-- Server -->
+													<TextBlock Grid.Row="0" Grid.Column="0"
+															  Text="Server:"
+															  VerticalAlignment="Center"
+															  Foreground="{StaticResource TextSecondary}"/>
+													<TextBox Grid.Row="0" Grid.Column="1"
+															Name="SqlServerTextBox"
+															Style="{StaticResource ModernTextBox}"
+															Text="localhost\SQLEXPRESS"
+															Margin="5,2"/>
 
-												<!-- Authentication -->
-												<TextBlock Grid.Row="2" Grid.Column="0"
-														  Text="Authentication:"
-														  VerticalAlignment="Center"
-														  Foreground="{StaticResource TextSecondary}"/>
-												<StackPanel Grid.Row="2" Grid.Column="1"
-														   Orientation="Horizontal"
-														   Margin="5,5">
-													<RadioButton Name="WindowsAuthRadio"
-																Content="Windows Authentication"
-																Style="{StaticResource ModernRadioButton}"
-																IsChecked="True"
-																GroupName="SqlAuth"
-																Checked="SqlAuthRadio_Changed"/>
-													<RadioButton Name="SqlAuthRadio"
-																Content="SQL Server Authentication"
-																Style="{StaticResource ModernRadioButton}"
-																GroupName="SqlAuth"
-																Checked="SqlAuthRadio_Changed"/>
-												</StackPanel>
+													<!-- Database -->
+													<TextBlock Grid.Row="1" Grid.Column="0"
+															  Text="Database:"
+															  VerticalAlignment="Center"
+															  Foreground="{StaticResource TextSecondary}"/>
+													<TextBox Grid.Row="1" Grid.Column="1"
+															Name="SqlDatabaseTextBox"
+															Style="{StaticResource ModernTextBox}"
+															Text="FormDatabase"
+															Margin="5,2"/>
 
-												<!-- Username (for SQL Auth) -->
-												<TextBlock Grid.Row="3" Grid.Column="0"
-														  Text="Username:"
-														  VerticalAlignment="Center"
-														  Foreground="{StaticResource TextSecondary}"
-														  Name="SqlUsernameLabel"
-														  Visibility="Collapsed"/>
-												<TextBox Grid.Row="3" Grid.Column="1"
-														Name="SqlUsernameTextBox"
-														Style="{StaticResource ModernTextBox}"
-														Margin="5,2"
-														Visibility="Collapsed"/>
+													<!-- Authentication -->
+													<TextBlock Grid.Row="2" Grid.Column="0"
+															  Text="Authentication:"
+															  VerticalAlignment="Center"
+															  Foreground="{StaticResource TextSecondary}"/>
+													<StackPanel Grid.Row="2" Grid.Column="1"
+															   Orientation="Horizontal"
+															   Margin="5,5">
+														<RadioButton Name="WindowsAuthRadio"
+																	Content="Windows Authentication"
+																	Style="{StaticResource ModernRadioButton}"
+																	IsChecked="True"
+																	GroupName="SqlAuth"
+																	Checked="SqlAuthRadio_Changed"/>
+														<RadioButton Name="SqlAuthRadio"
+																	Content="SQL Server Authentication"
+																	Style="{StaticResource ModernRadioButton}"
+																	GroupName="SqlAuth"
+																	Checked="SqlAuthRadio_Changed"/>
+													</StackPanel>
 
-												<!-- Password (for SQL Auth) -->
-												<TextBlock Grid.Row="4" Grid.Column="0"
-														  Text="Password:"
-														  VerticalAlignment="Center"
-														  Foreground="{StaticResource TextSecondary}"
-														  Name="SqlPasswordLabel"
-														  Visibility="Collapsed"/>
-												<PasswordBox Grid.Row="4" Grid.Column="1"
-															Name="SqlPasswordBox"
-															Style="{StaticResource ModernPasswordBox}"
+													<!-- Username (for SQL Auth) -->
+													<TextBlock Grid.Row="3" Grid.Column="0"
+															  Text="Username:"
+															  VerticalAlignment="Center"
+															  Foreground="{StaticResource TextSecondary}"
+															  Name="SqlUsernameLabel"
+															  Visibility="Collapsed"/>
+													<TextBox Grid.Row="3" Grid.Column="1"
+															Name="SqlUsernameTextBox"
+															Style="{StaticResource ModernTextBox}"
 															Margin="5,2"
 															Visibility="Collapsed"/>
 
-												<!-- Test Connection Button -->
-												<Button Grid.Row="5" Grid.Column="1"
-													   Name="TestSqlConnectionButton"
-													   Content="Test Connection"
-													   Style="{StaticResource ModernButton}"
-													   HorizontalAlignment="Left"
-													   Margin="5,10,0,0"
-													   Width="150"
-													   Click="TestSqlConnection_Click"/>
+													<!-- Password (for SQL Auth) -->
+													<TextBlock Grid.Row="4" Grid.Column="0"
+															  Text="Password:"
+															  VerticalAlignment="Center"
+															  Foreground="{StaticResource TextSecondary}"
+															  Name="SqlPasswordLabel"
+															  Visibility="Collapsed"/>
+													<PasswordBox Grid.Row="4" Grid.Column="1"
+																Name="SqlPasswordBox"
+																Style="{StaticResource ModernPasswordBox}"
+																Margin="5,2"
+																Visibility="Collapsed"/>
+
+													<!-- Test Connection Button -->
+													<Button Grid.Row="5" Grid.Column="1"
+														   Name="TestSqlConnectionButton"
+														   Content="Test Connection"
+														   Style="{StaticResource ModernButton}"
+														   HorizontalAlignment="Left"
+														   Margin="5,10,0,0"
+														   Width="150"
+														   Click="TestSqlConnection_Click"/>
+												</Grid>
+
+												<!-- Connection Summary Panel (shown after successful connection) -->
+												<Border Name="ConnectionSummaryPanel"
+														Grid.Row="0" Grid.Column="0"
+														Grid.RowSpan="6" Grid.ColumnSpan="2"
+														Background="{StaticResource BackgroundMedium}"
+														BorderBrush="{StaticResource SuccessColor}"
+														BorderThickness="1"
+														CornerRadius="5"
+														Padding="15"
+														Visibility="Collapsed">
+													<Grid>
+														<Grid.RowDefinitions>
+															<RowDefinition Height="Auto"/>
+															<RowDefinition Height="Auto"/>
+															<RowDefinition Height="Auto"/>
+															<RowDefinition Height="Auto"/>
+														</Grid.RowDefinitions>
+
+														<TextBlock Grid.Row="0"
+																  Text="✅ Connection Established"
+																  FontSize="16"
+																  FontWeight="Medium"
+																  Foreground="{StaticResource SuccessColor}"
+																  Margin="0,0,0,10"/>
+
+														<StackPanel Grid.Row="1" Margin="0,0,0,5">
+															<TextBlock FontSize="12" Foreground="{StaticResource TextSecondary}">
+																<Run Text="Server: " FontWeight="Medium"/>
+																<Run Name="ConnectedServerText" Text=""/>
+															</TextBlock>
+														</StackPanel>
+
+														<StackPanel Grid.Row="2" Margin="0,0,0,5">
+															<TextBlock FontSize="12" Foreground="{StaticResource TextSecondary}">
+																<Run Text="Database: " FontWeight="Medium"/>
+																<Run Name="ConnectedDatabaseText" Text=""/>
+															</TextBlock>
+														</StackPanel>
+
+														<StackPanel Grid.Row="3" Margin="0,0,0,0">
+															<TextBlock FontSize="12" Foreground="{StaticResource TextSecondary}">
+																<Run Text="Authentication: " FontWeight="Medium"/>
+																<Run Name="ConnectedAuthText" Text=""/>
+															</TextBlock>
+														</StackPanel>
+													</Grid>
+												</Border>
 											</Grid>
 										</StackPanel>
 									</Border>
