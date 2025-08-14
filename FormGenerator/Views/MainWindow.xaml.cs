@@ -173,99 +173,6 @@ namespace FormGenerator.Views
 
 
 
-        private void SetupTreeViewContextMenu()
-        {
-            // Create context menu if it doesn't exist
-            if (StructureTreeView.ContextMenu == null)
-            {
-                StructureTreeView.ContextMenu = new ContextMenu();
-            }
-
-            var contextMenu = StructureTreeView.ContextMenu;
-            contextMenu.Items.Clear();
-
-            // Add Control
-            var addMenuItem = new MenuItem { Header = "Add Control", InputGestureText = "Ctrl+Shift+A" };
-            addMenuItem.Icon = new TextBlock { Text = "➕", FontSize = 14 };
-            addMenuItem.Click += (s, e) =>
-            {
-                var (view, section) = GetSelectedViewAndSection();
-                if (view == null)
-                {
-                    UpdateStatus("Select a view (or a section within a view) first.", MessageSeverity.Warning);
-                    return;
-                }
-                _analysisHandlers?.ShowAddControlDialog(view, section);
-            };
-            contextMenu.Items.Add(addMenuItem);
-
-            // Edit
-            var editMenuItem = new MenuItem { Header = "Edit", InputGestureText = "F2" };
-            editMenuItem.Icon = new TextBlock { Text = "✏️", FontSize = 14 };
-            editMenuItem.Click += (s, e) => EditSelectedControl();
-            contextMenu.Items.Add(editMenuItem);
-
-            // Delete
-            var deleteMenuItem = new MenuItem { Header = "Delete", InputGestureText = "Delete" };
-            deleteMenuItem.Icon = new TextBlock { Text = "🗑️", FontSize = 14 };
-            deleteMenuItem.Click += (s, e) => DeleteSelectedControl();
-            contextMenu.Items.Add(deleteMenuItem);
-
-            contextMenu.Items.Add(new Separator());
-
-            // Convert to Repeating Section (uses selected control)
-            var convertMenuItem = new MenuItem { Header = "Convert to Repeating Section", InputGestureText = "Ctrl+Shift+R" };
-            convertMenuItem.Icon = new TextBlock { Text = "🔁", FontSize = 14 };
-            convertMenuItem.Click += (s, e) =>
-            {
-                var control = GetSelectedControl();
-                if (control == null)
-                {
-                    UpdateStatus("Select a control to move/convert.", MessageSeverity.Warning);
-                    return;
-                }
-                _analysisHandlers?.ShowMoveSectionDialog(control);
-            };
-            contextMenu.Items.Add(convertMenuItem);
-
-            // Remove from Repeating Section
-            var removeMenuItem = new MenuItem { Header = "Remove from Repeating Section" };
-            removeMenuItem.Icon = new TextBlock { Text = "➖", FontSize = 14 };
-            removeMenuItem.Click += (s, e) => RemoveSelectedFromRepeating();
-            contextMenu.Items.Add(removeMenuItem);
-
-            contextMenu.Items.Add(new Separator());
-
-            // Copy as JSON
-            var copyJsonMenuItem = new MenuItem { Header = "Copy as JSON" };
-            copyJsonMenuItem.Icon = new TextBlock { Text = "📋", FontSize = 14 };
-            copyJsonMenuItem.Click += (s, e) => CopySelectedAsJson();
-            contextMenu.Items.Add(copyJsonMenuItem);
-
-            // Export Section
-            var exportMenuItem = new MenuItem { Header = "Export Section" };
-            exportMenuItem.Icon = new TextBlock { Text = "📥", FontSize = 14 };
-            exportMenuItem.Click += (s, e) => ExportSelectedSection();
-            contextMenu.Items.Add(exportMenuItem);
-
-            contextMenu.Items.Add(new Separator());
-
-            // Expand All
-            var expandAllMenuItem = new MenuItem { Header = "Expand All" };
-            expandAllMenuItem.Icon = new TextBlock { Text = "⊞", FontSize = 14 };
-            expandAllMenuItem.Click += (s, e) => ExpandAllTreeItems(StructureTreeView.Items);
-            contextMenu.Items.Add(expandAllMenuItem);
-
-            // Collapse All
-            var collapseAllMenuItem = new MenuItem { Header = "Collapse All" };
-            collapseAllMenuItem.Icon = new TextBlock { Text = "⊟", FontSize = 14 };
-            collapseAllMenuItem.Click += (s, e) => CollapseAllTreeItems(StructureTreeView.Items);
-            contextMenu.Items.Add(collapseAllMenuItem);
-
-            // Context menu opening event to enable/disable items based on selection
-            contextMenu.Opened += TreeViewContextMenu_Opening;
-        }
-
         private void TreeViewContextMenu_Opening(object sender, RoutedEventArgs e)
         {
             var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
@@ -347,11 +254,6 @@ namespace FormGenerator.Views
             return (null, section);
         }
 
-        private ControlDefinition GetSelectedControl()
-        {
-            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-            return selectedItem?.Tag as ControlDefinition;
-        }
 
         #endregion
 
@@ -453,60 +355,6 @@ namespace FormGenerator.Views
         }
 
 
-        private void RemoveSelectedFromRepeating()
-        {
-            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-            if (selectedItem?.Tag is ControlDefinition control && control.IsInRepeatingSection)
-            {
-                _analysisHandlers?.RemoveFromRepeatingSectionWithRefresh(control);
-            }
-        }
-
-        private void CopySelectedAsJson()
-        {
-            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-            if (selectedItem?.Tag != null)
-            {
-                try
-                {
-                    var json = JsonConvert.SerializeObject(selectedItem.Tag, Formatting.Indented);
-                    Clipboard.SetText(json);
-                    UpdateStatus("JSON copied to clipboard", MessageSeverity.Info);
-                }
-                catch (Exception ex)
-                {
-                    UpdateStatus($"Failed to copy JSON: {ex.Message}", MessageSeverity.Error);
-                }
-            }
-        }
-
-        private void ExportSelectedSection()
-        {
-            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-            if (selectedItem?.Tag is string || selectedItem?.Tag is ViewDefinition)
-            {
-                var dialog = new SaveFileDialog
-                {
-                    Title = "Export Section",
-                    Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
-                    FileName = $"Section_{DateTime.Now:yyyyMMdd_HHmmss}.json"
-                };
-
-                if (dialog.ShowDialog() == true)
-                {
-                    try
-                    {
-                        var json = JsonConvert.SerializeObject(selectedItem.Tag, Formatting.Indented);
-                        File.WriteAllText(dialog.FileName, json);
-                        UpdateStatus($"Section exported to {dialog.FileName}", MessageSeverity.Info);
-                    }
-                    catch (Exception ex)
-                    {
-                        UpdateStatus($"Export failed: {ex.Message}", MessageSeverity.Error);
-                    }
-                }
-            }
-        }
 
         private void ExpandAllTreeItems(ItemCollection items)
         {

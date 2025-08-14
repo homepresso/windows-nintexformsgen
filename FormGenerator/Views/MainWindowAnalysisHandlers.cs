@@ -1567,24 +1567,10 @@ namespace FormGenerator.Views
                 Margin = new Thickness(0, 0, 0, 5)
             };
         }
-        // Helper method to create consistent labels
 
 
-        private StackPanel CreateLabeledControl(string label)
-        {
-            var panel = new StackPanel();
-            var labelControl = new TextBlock
-            {
-                Text = label,
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                FontWeight = FontWeights.Medium,
-                Margin = new Thickness(0, 0, 0, 5)
-            };
-            panel.Children.Add(labelControl);
-            return panel;
-        }
 
-        // In MainWindowAnalysisHandlers.cs, make sure ShowControlEditDialog is public and properly updates JSON:
+
 
         public void ShowControlEditDialog(ControlDefinition control)
         {
@@ -2095,185 +2081,8 @@ namespace FormGenerator.Views
             dialog.ShowDialog();
         }
 
-        /// <summary>
-        /// Converts a regular section to a repeating section
-        /// </summary>
-        private void ConvertSectionToRepeating(SectionInfo section, ViewDefinition view)
-        {
-            var result = MessageBox.Show(
-                $"Convert '{section.Name}' to a repeating section?\n\n" +
-                "This will make all controls in this section repeatable.",
-                "Convert to Repeating Section",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
+    
 
-            if (result == MessageBoxResult.Yes)
-            {
-                // Update section type
-                section.Type = "repeating";
-
-                // Update all controls in this section
-                foreach (var control in view.Controls.Where(c => c.ParentSection == section.Name))
-                {
-                    control.IsInRepeatingSection = true;
-                    control.RepeatingSectionName = section.Name;
-                    control.SectionType = "repeating";
-                }
-
-                // Refresh tree view
-                RefreshStructureTree();
-
-                _mainWindow.UpdateStatus($"Converted '{section.Name}' to repeating section", MessageSeverity.Info);
-            }
-        }
-
-        /// <summary>
-        /// Moves an entire section into a repeating section (nesting)
-        /// </summary>
-        private void MoveSectionToRepeatingSection(SectionInfo section, ViewDefinition view)
-        {
-            var dialog = new Window
-            {
-                Title = "Move Section to Repeating Section",
-                Width = 400,
-                Height = 250,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = _mainWindow,
-                Background = (Brush)_mainWindow.FindResource("BackgroundMedium")
-            };
-
-            var grid = new Grid { Margin = new Thickness(20) };
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            // Info
-            var infoLabel = new TextBlock
-            {
-                Text = $"Move '{section.Name}' into a repeating section",
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                FontWeight = FontWeights.Medium,
-                Margin = new Thickness(0, 0, 0, 10)
-            };
-            Grid.SetRow(infoLabel, 0);
-            grid.Children.Add(infoLabel);
-
-            // Target repeating section
-            var targetLabel = new TextBlock
-            {
-                Text = "Target Repeating Section:",
-                Foreground = (Brush)_mainWindow.FindResource("TextPrimary"),
-                Margin = new Thickness(0, 0, 0, 5)
-            };
-            Grid.SetRow(targetLabel, 1);
-            grid.Children.Add(targetLabel);
-
-            var repeatingSectionCombo = new ComboBox
-            {
-                Style = (Style)_mainWindow.FindResource("ModernComboBox"),
-                Margin = new Thickness(0, 0, 0, 10)
-            };
-            Grid.SetRow(repeatingSectionCombo, 2);
-            grid.Children.Add(repeatingSectionCombo);
-
-            // Get all repeating sections (excluding self)
-            var repeatingSections = view.Sections
-                .Where(s => s.Type == "repeating" && s.Name != section.Name)
-                .Select(s => s.Name)
-                .ToList();
-
-            // Add repeating tables
-            var repeatingTables = view.Controls
-                .Where(c => c.Type == "RepeatingTable")
-                .Select(c => c.Label ?? c.Name)
-                .ToList();
-
-            repeatingSections.AddRange(repeatingTables);
-
-            if (!repeatingSections.Any())
-            {
-                MessageBox.Show("No repeating sections available to move into.",
-                              "No Target Available",
-                              MessageBoxButton.OK,
-                              MessageBoxImage.Information);
-                return;
-            }
-
-            repeatingSectionCombo.ItemsSource = repeatingSections;
-            repeatingSectionCombo.SelectedIndex = 0;
-
-            // Buttons
-            var buttonPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(0, 20, 0, 0)
-            };
-
-            var moveButton = new Button
-            {
-                Content = "Move Section",
-                Width = 100,
-                Height = 35,
-                Margin = new Thickness(0, 0, 10, 0),
-                Style = (Style)_mainWindow.FindResource("ModernButton")
-            };
-
-            var cancelButton = new Button
-            {
-                Content = "Cancel",
-                Width = 100,
-                Height = 35,
-                Style = (Style)_mainWindow.FindResource("ModernButton")
-            };
-
-            moveButton.Click += (s, e) =>
-            {
-                var targetSection = repeatingSectionCombo.SelectedItem?.ToString();
-                if (!string.IsNullOrEmpty(targetSection))
-                {
-                    // Update all controls in this section to be in the target repeating section
-                    foreach (var control in view.Controls.Where(c => c.ParentSection == section.Name))
-                    {
-                        control.IsInRepeatingSection = true;
-                        control.RepeatingSectionName = targetSection;
-                        control.Properties["ParentRepeatingSections"] = targetSection;
-
-                        // Keep the original section as a subsection marker
-                        control.Properties["OriginalSection"] = section.Name;
-                    }
-
-                    // Update section to indicate it's nested
-                    section.Type = "nested-repeating";
-
-                    // Refresh tree view
-                    RefreshStructureTree();
-
-                    _mainWindow.UpdateStatus($"Moved section '{section.Name}' into repeating section '{targetSection}'",
-                                            MessageSeverity.Info);
-                }
-
-                dialog.DialogResult = true;
-                dialog.Close();
-            };
-
-            cancelButton.Click += (s, e) =>
-            {
-                dialog.DialogResult = false;
-                dialog.Close();
-            };
-
-            buttonPanel.Children.Add(moveButton);
-            buttonPanel.Children.Add(cancelButton);
-
-            Grid.SetRow(buttonPanel, 4);
-            grid.Children.Add(buttonPanel);
-
-            dialog.Content = grid;
-            dialog.ShowDialog();
-        }
 
         #endregion
 
@@ -2344,67 +2153,7 @@ namespace FormGenerator.Views
 
         #region Updated Context Menu Creation
 
-        private void AddControlContextMenu(TreeViewItem item, ControlDefinition control)
-        {
-            var contextMenu = new ContextMenu();
-
-            // Edit Properties
-            var editMenuItem = new MenuItem
-            {
-                Header = "Edit Control Properties",
-                Icon = new TextBlock { Text = "✏️" }
-            };
-            editMenuItem.Click += (s, e) => ShowEditPanel(control, item);
-            contextMenu.Items.Add(editMenuItem);
-
-            // Move to Section
-            var moveMenuItem = new MenuItem
-            {
-                Header = "Move to Section...",
-                Icon = new TextBlock { Text = "➡️" }
-            };
-            moveMenuItem.Click += (s, e) =>
-            {
-                var view = GetViewForControl(control);
-                if (view != null)
-                    MoveControlToSection(control, view);
-            };
-            contextMenu.Items.Add(moveMenuItem);
-
-            contextMenu.Items.Add(new Separator());
-
-            // Duplicate Control
-            var duplicateMenuItem = new MenuItem
-            {
-                Header = "Duplicate Control",
-                Icon = new TextBlock { Text = "📋" }
-            };
-            duplicateMenuItem.Click += (s, e) => DuplicateControl(control);
-            contextMenu.Items.Add(duplicateMenuItem);
-
-            // Delete Control
-            var deleteMenuItem = new MenuItem
-            {
-                Header = "Delete Control",
-                Icon = new TextBlock { Text = "🗑️" }
-            };
-            deleteMenuItem.Click += (s, e) => DeleteControl(control);
-            contextMenu.Items.Add(deleteMenuItem);
-
-            contextMenu.Items.Add(new Separator());
-
-            // Copy as JSON
-            var copyJsonMenuItem = new MenuItem
-            {
-                Header = "Copy as JSON",
-                Icon = new TextBlock { Text = "📄" }
-            };
-            copyJsonMenuItem.Click += (s, e) => CopyControlAsJson(control);
-            contextMenu.Items.Add(copyJsonMenuItem);
-
-            item.ContextMenu = contextMenu;
-        }
-
+      
     
 
         private ViewDefinition GetViewForControl(ControlDefinition control)
@@ -2675,56 +2424,6 @@ namespace FormGenerator.Views
         }
 
   
-
-        private object CreateEnhancedSectionHeader(string sectionName, string sectionType, int controlCount)
-        {
-            var panel = new StackPanel { Orientation = Orientation.Horizontal };
-
-            // Section icon
-            panel.Children.Add(new TextBlock
-            {
-                Text = GetSectionIcon(sectionType) + " ",
-                FontSize = 16,
-                VerticalAlignment = VerticalAlignment.Center
-            });
-
-            // Section name
-            panel.Children.Add(new TextBlock
-            {
-                Text = sectionName,
-                FontWeight = FontWeights.Medium,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 8, 0)
-            });
-
-            // Section type badge
-            var typeBadge = new Border
-            {
-                Background = GetSectionTypeBrush(sectionType),
-                CornerRadius = new CornerRadius(3),
-                Padding = new Thickness(6, 2, 6, 2),
-                Margin = new Thickness(0, 0, 8, 0)
-            };
-            typeBadge.Child = new TextBlock
-            {
-                Text = FormatSectionType(sectionType),
-                Foreground = Brushes.White,
-                FontSize = 10,
-                FontWeight = FontWeights.Medium
-            };
-            panel.Children.Add(typeBadge);
-
-            // Control count
-            panel.Children.Add(new TextBlock
-            {
-                Text = $"({controlCount} controls)",
-                Foreground = (Brush)_mainWindow.FindResource("TextSecondary"),
-                FontStyle = FontStyles.Italic,
-                VerticalAlignment = VerticalAlignment.Center
-            });
-
-            return panel;
-        }
 
         private TreeViewItem CreateViewStatisticsItem(ViewDefinition view)
         {
