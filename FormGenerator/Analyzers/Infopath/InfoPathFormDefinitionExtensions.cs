@@ -5,8 +5,6 @@ using FormGenerator.Core.Models;
 
 namespace FormGenerator.Analyzers.InfoPath
 {
-
-
     public static class InfoPathFormDefinitionExtensions
     {
         public static SqlDeploymentInfo CurrentSqlDeploymentInfo { get; set; }
@@ -93,8 +91,7 @@ namespace FormGenerator.Analyzers.InfoPath
                     Section = !string.IsNullOrEmpty(d.RepeatingSection) ? d.RepeatingSection : null,
                     RepeatingSectionName = d.IsRepeating ? d.RepeatingSection : null,  // ADD THIS FOR CLARITY
                     d.IsRepeating,
-                    d.IsConditional,
-                    ConditionalOnField = d.IsConditional ? d.ConditionalOnField : null,
+                    // REMOVED: IsConditional and ConditionalOnField properties
                     // Include valid values for columns
                     ValidValues = d.HasConstraints
                         ? d.ValidValues?.Select(v => new { v.Value, v.DisplayText, v.IsDefault })
@@ -278,8 +275,6 @@ namespace FormGenerator.Analyzers.InfoPath
             return baseName;
         }
 
-     
-
         private static string GetSectionLabel(string sectionType)
         {
             return sectionType?.ToLower() switch
@@ -318,7 +313,6 @@ namespace FormGenerator.Analyzers.InfoPath
             };
         }
 
-
         /// <summary>
         /// Gets a summary of controls that have CtrlIds
         /// </summary>
@@ -343,8 +337,5 @@ namespace FormGenerator.Analyzers.InfoPath
                 Controls = controlsWithIds
             };
         }
-
-       
-
     }
 }

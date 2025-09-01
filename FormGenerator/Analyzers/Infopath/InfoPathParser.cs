@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml.Linq;
+using static FormGenerator.Analyzers.Infopath.SectionAwareParser;
 
 namespace FormGenerator.Analyzers.Infopath
 {
@@ -25,6 +26,8 @@ namespace FormGenerator.Analyzers.Infopath
         public List<DynamicSection> DynamicSections { get; set; } = new List<DynamicSection>();
         public Dictionary<string, List<string>> ConditionalVisibility { get; set; } = new Dictionary<string, List<string>>();
         public FormMetadata Metadata { get; set; } = new FormMetadata();
+
+       
     }
 
     public class ViewDefinition
@@ -154,6 +157,10 @@ public class DataColumn
 
     public class EnhancedInfoPathParser
     {
+
+
+        private static Dictionary<string, int> sectionNameCounts = new Dictionary<string, int>();
+        private static Dictionary<string, string> activeRepeatingSections = new Dictionary<string, string>();
         public InfoPathFormDefinition ParseXsnFile(string xsnFilePath)
         {
             string tempDir = Path.Combine(
@@ -208,6 +215,243 @@ public class DataColumn
                 }
             }
         }
+
+        public static string CleanRepeatingSectionName(string rawName, string contextBinding = null)
+        {
+            if (string.IsNullOrEmpty(rawName))
+                return "RepeatingSection";
+
+            // Check if we already have a clean name for this binding/context
+            if (!string.IsNullOrEmpty(contextBinding) && activeRepeatingSections.ContainsKey(contextBinding))
+            {
+                return activeRepeatingSections[contextBinding];
+            }
+
+            // Split by " > " to handle nested sections
+            var parts = rawName.Split(new[] { " > " }, StringSplitOptions.RemoveEmptyEntries);
+
+            // Remove duplicates while preserving order
+            var uniqueParts = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var part in parts)
+            {
+                var cleanPart = CleanSinglePart(part);
+
+                // Skip if we've already seen this exact name
+                if (!seen.Contains(cleanPart))
+                {
+                    uniqueParts.Add(cleanPart);
+                    seen.Add(cleanPart);
+                }
+            }
+
+            // Join the parts
+            string finalName;
+            if (uniqueParts.Count > 1)
+            {
+                finalName = string.Join("_", uniqueParts);
+            }
+            else if (uniqueParts.Count == 1)
+            {
+                finalName = uniqueParts[0];
+            }
+            else
+            {
+                finalName = "RepeatingSection";
+            }
+
+            // Store the clean name for this context if we have a binding
+            if (!string.IsNullOrEmpty(contextBinding))
+            {
+                activeRepeatingSections[contextBinding] = finalName;
+            }
+
+            return finalName;
+        }
+        private static string CleanSinglePart(string part)
+        {
+            if (string.IsNullOrEmpty(part))
+                return "";
+
+            // Remove CTRL references and clean up
+            if (part.StartsWith("Table_CTRL", StringComparison.OrdinalIgnoreCase))
+            {
+                // Try to extract a meaningful name or just use "Table"
+                return "Table";
+            }
+
+            if (part.StartsWith("CTRL", StringComparison.OrdinalIgnoreCase))
+            {
+                // Skip pure CTRL references
+                return "Section";
+            }
+
+            // Remove "Nested Table" generic names
+            if (part.Equals("Nested Table", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Table";
+            }
+
+            // Clean up the name
+            var cleaned = part;
+
+            // Remove special characters and normalize
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"[^\w\s]", " ");
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", "_");
+            cleaned = cleaned.Trim('_');
+
+            // Convert to proper case
+            if (!string.IsNullOrEmpty(cleaned))
+            {
+                cleaned = ConvertToProperCase(cleaned);
+            }
+
+            return string.IsNullOrEmpty(cleaned) ? "Section" : cleaned;
+        }
+
+        /// <summary>
+        /// Converts underscore-separated string to proper case
+        /// </summary>
+        private static string ConvertToProperCase(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return text;
+
+            var parts = text.Split('_');
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(parts[i]))
+                {
+                    // Capitalize first letter of each part
+                    parts[i] = char.ToUpper(parts[i][0]) +
+                              (parts[i].Length > 1 ? parts[i].Substring(1).ToLower() : "");
+                }
+            }
+
+            return string.Join("_", parts);
+        }
+
+        private static string EnsureUniqueName(string baseName)
+        {
+            if (!sectionNameCounts.ContainsKey(baseName))
+            {
+                sectionNameCounts[baseName] = 1;
+                return baseName;
+            }
+
+            sectionNameCounts[baseName]++;
+            return $"{baseName}_{sectionNameCounts[baseName]}";
+        }
+
+        public static void ResetNameCounts()
+        {
+            sectionNameCounts.Clear();
+            activeRepeatingSections.Clear();
+        }
+
+        public static string GenerateDescriptiveName(XElement elem, Stack<RepeatingContext> parentContexts)
+        {
+            var baseName = "";
+
+            // Try to get a meaningful name from table headers
+            var headers = elem.Descendants()
+                .Where(e => e.Name.LocalName.ToLower() == "th" ||
+                           (e.Name.LocalName.ToLower() == "td" &&
+                            e.Parent?.Parent?.Name.LocalName.ToLower() == "thead"))
+                .Select(e => ExtractTextContent(e))
+                .Where(t => !string.IsNullOrWhiteSpace(t) && t.Length > 1 && t.Length < 30)
+                .Take(2)
+                .ToList();
+
+            if (headers.Any())
+            {
+                // Use the first meaningful header
+                baseName = headers.First();
+
+                // If it's generic, try to combine first two headers
+                if (IsGenericName(baseName) && headers.Count > 1)
+                {
+                    baseName = $"{headers[0]}_{headers[1]}";
+                }
+            }
+
+            // If still no good name, check for caption or title
+            if (string.IsNullOrEmpty(baseName) || IsGenericName(baseName))
+            {
+                var title = elem.Attribute("title")?.Value;
+                var caption = GetAttributeValue(elem, "caption");
+
+                baseName = !string.IsNullOrEmpty(title) ? title :
+                          !string.IsNullOrEmpty(caption) ? caption : "";
+            }
+
+            // Clean up the base name
+            if (!string.IsNullOrEmpty(baseName))
+            {
+                baseName = CleanSinglePart(baseName);
+            }
+            else
+            {
+                // Generate based on parent context
+                if (parentContexts != null && parentContexts.Count > 0)
+                {
+                    var parentName = CleanSinglePart(parentContexts.Peek().DisplayName);
+                    baseName = $"{parentName}_Items";
+                }
+                else
+                {
+                    baseName = "Items";
+                }
+            }
+
+            return baseName;
+        }
+
+        private static bool IsGenericName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                return true;
+
+            var genericNames = new[]
+            {
+            "table", "item", "row", "record", "entry", "data",
+            "section", "list", "details", "information"
+        };
+
+            var lowerName = name.ToLower().Trim();
+            return genericNames.Any(g => lowerName.Equals(g) || lowerName.Equals(g + "s"));
+        }
+
+        private static string ExtractTextContent(XElement elem)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var node in elem.Nodes())
+            {
+                if (node is XText textNode)
+                {
+                    sb.Append(textNode.Value);
+                }
+                else if (node is XElement childElem)
+                {
+                    var childName = childElem.Name.LocalName.ToLower();
+                    if (childName is "strong" or "em" or "font" or "span" or "b" or "i")
+                    {
+                        sb.Append(ExtractTextContent(childElem));
+                    }
+                }
+            }
+            return sb.ToString().Trim();
+        }
+
+        private static string GetAttributeValue(XElement elem, string localName)
+        {
+            var attr = elem.Attributes()
+                .FirstOrDefault(a => a.Name.LocalName.Equals(localName, StringComparison.OrdinalIgnoreCase));
+            return attr?.Value ?? "";
+        }
+
+
 
         private bool ExtractXsn(string xsnFilePath, string tempDir)
         {
@@ -338,7 +582,11 @@ public class DataColumn
                 string colName = string.IsNullOrWhiteSpace(ctrl.Name) ? ctrl.Binding : ctrl.Name;
                 if (string.IsNullOrWhiteSpace(colName)) continue;
 
-                string repeating = ctrl.IsInRepeatingSection ? ctrl.RepeatingSectionName : ctrl.ParentSection;
+                // Use the already cleaned repeating section name from the control
+                string repeating = ctrl.IsInRepeatingSection ?
+                    ctrl.RepeatingSectionName :
+                    ctrl.ParentSection;
+
                 var key = (colName, repeating);
 
                 if (!dict.ContainsKey(key))
@@ -347,7 +595,7 @@ public class DataColumn
                     {
                         ColumnName = colName,
                         Type = ctrl.Type,
-                        RepeatingSection = repeating,  // This will now have the correct value
+                        RepeatingSection = repeating,  // Already cleaned
                         IsRepeating = ctrl.SectionType == "repeating" || ctrl.IsInRepeatingSection,
                         RepeatingSectionPath = ctrl.IsInRepeatingSection ? ctrl.RepeatingSectionBinding : repeating,
                         DisplayName = ctrl.Label
@@ -578,92 +826,24 @@ public class DataColumn
 
         private string GenerateNestedRepeatingName(XElement elem)
         {
-            // Build the full context name from parent repeating sections
-            var contextParts = new List<string>();
+            // Use the helper to generate a descriptive name
+            var descriptiveName = EnhancedInfoPathParser.GenerateDescriptiveName(elem, repeatingContextStack);
 
-            // Add all parent repeating contexts
+            // If we're nested, add parent context
             if (repeatingContextStack != null && repeatingContextStack.Count > 0)
             {
-                foreach (var context in repeatingContextStack.Reverse())
+                var parentName = EnhancedInfoPathParser.CleanRepeatingSectionName(repeatingContextStack.Peek().DisplayName);
+
+                // Don't duplicate if the descriptive name already contains parent info
+                if (!descriptiveName.StartsWith(parentName, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!string.IsNullOrEmpty(context.DisplayName))
-                    {
-                        contextParts.Add(context.DisplayName);
-                    }
+                    var combined = $"{parentName}_{descriptiveName}";
+                    // Clean the combined name to ensure no duplicates or CTRL references
+                    return EnhancedInfoPathParser.CleanRepeatingSectionName(combined);
                 }
             }
 
-            // Try to find a name for this nested repeating table
-            string tableName = "";
-
-            // Check for title attribute
-            var title = elem.Attribute("title")?.Value;
-            if (!string.IsNullOrEmpty(title))
-            {
-                tableName = title;
-            }
-
-            // Check for preceding label
-            if (string.IsNullOrEmpty(tableName) && recentLabels != null && recentLabels.Count > 0)
-            {
-                // Look for unused labels that might be for this table
-                var unusedLabels = recentLabels.Where(l => !l.Used &&
-                                                            Math.Abs(l.Row - currentRow) <= 1)
-                                               .OrderByDescending(l => l.DocIndex)
-                                               .ToList();
-
-                if (unusedLabels.Any())
-                {
-                    var label = unusedLabels.First();
-                    tableName = label.Text;
-                    label.Used = true;
-                }
-            }
-
-            // If still no name, check the table headers
-            if (string.IsNullOrEmpty(tableName))
-            {
-                var headerCells = elem.Descendants()
-                    .Where(e => e.Name.LocalName.ToLower() == "th" ||
-                               (e.Name.LocalName.ToLower() == "td" &&
-                                e.Parent?.Parent?.Name.LocalName.ToLower() == "thead"))
-                    .ToList();
-
-                if (headerCells.Any())
-                {
-                    // Try to create a name from headers
-                    var headers = headerCells.Select(h => ExtractLabelText(h))
-                                            .Where(t => !string.IsNullOrWhiteSpace(t))
-                                            .Take(2)
-                                            .ToList();
-
-                    if (headers.Any())
-                    {
-                        tableName = string.Join(" ", headers) + " Table";
-                    }
-                }
-            }
-
-            // If still no name, generate one
-            if (string.IsNullOrEmpty(tableName))
-            {
-                var ctrlId = GetAttributeValue(elem, "CtrlId");
-                if (!string.IsNullOrEmpty(ctrlId))
-                {
-                    tableName = $"Table_{ctrlId}";
-                }
-                else
-                {
-                    // Count how many nested tables we already have in this context
-                    var existingNestedCount = sections.Count(s =>
-                        s.Name.StartsWith(string.Join(" > ", contextParts) + " > "));
-                    tableName = $"Nested Table {existingNestedCount + 1}";
-                }
-            }
-
-            // Build the full name
-            contextParts.Add(tableName);
-            return string.Join(" > ", contextParts);
+            return EnhancedInfoPathParser.CleanRepeatingSectionName(descriptiveName);
         }
 
         private string GenerateControlName(XElement elem, string label, string binding, string controlType)
@@ -914,10 +1094,12 @@ public class DataColumn
         public List<ControlDefinition> ParseViewFile(string viewFile)
         {
             ResetParserState();
+            EnhancedInfoPathParser.ResetNameCounts(); // Reset name counts for each view
             XDocument doc = XDocument.Load(viewFile);
             ProcessElement(doc.Root);
             return new List<ControlDefinition>(allControls);
         }
+
 
         private void ResetParserState()
         {
@@ -1356,25 +1538,31 @@ public class DataColumn
                 var currentRepeating = repeatingContextStack.Peek();
                 control.IsInRepeatingSection = true;
 
-                // For nested repeating contexts, use the full composite name
+                // For nested repeating contexts
                 if (repeatingContextStack.Count > 1)
                 {
                     // Build composite name for nested context
                     var contextNames = repeatingContextStack.Reverse().Select(c => c.DisplayName).ToList();
-                    control.RepeatingSectionName = string.Join(" > ", contextNames);
+                    var rawName = string.Join(" > ", contextNames);
+
+                    // Use the binding as context key to ensure consistent naming
+                    var contextKey = string.Join("|", repeatingContextStack.Reverse().Select(c => c.Binding ?? c.Name));
+                    control.RepeatingSectionName = EnhancedInfoPathParser.CleanRepeatingSectionName(rawName, contextKey);
 
                     // Keep the immediate parent's binding
                     control.RepeatingSectionBinding = currentRepeating.Binding;
 
-                    // Store parent sections separately
+                    // Store parent sections separately (cleaned)
                     var parentContexts = repeatingContextStack.ToArray().Skip(1).Reverse();
                     control.Properties["ParentRepeatingSections"] = string.Join("|",
                         parentContexts.Select(c => c.DisplayName));
                 }
                 else
                 {
-                    // Single-level repeating section
-                    control.RepeatingSectionName = currentRepeating.DisplayName;
+                    // Single-level repeating section - use binding as key for consistency
+                    control.RepeatingSectionName = EnhancedInfoPathParser.CleanRepeatingSectionName(
+                        currentRepeating.DisplayName,
+                        currentRepeating.Binding ?? currentRepeating.Name);
                     control.RepeatingSectionBinding = currentRepeating.Binding;
                 }
             }
@@ -1393,7 +1581,8 @@ public class DataColumn
                     // Build full context path if needed
                     if (!string.IsNullOrEmpty(control.RepeatingSectionName))
                     {
-                        control.ParentSection = $"{control.RepeatingSectionName} > {currentSection.DisplayName}";
+                        // Don't add numbers to the parent section name
+                        control.ParentSection = $"{control.RepeatingSectionName}_{currentSection.DisplayName}";
                         control.SectionType = "conditional-in-repeating";
                     }
                 }
@@ -1474,87 +1663,31 @@ public class DataColumn
 
                 if (ifElements.Any())
                 {
-                    bool hasProcessedConditional = false;
-
                     foreach (var ifElement in ifElements)
                     {
                         var testCondition = ifElement.Attribute("test")?.Value;
                         Debug.WriteLine($"Found conditional in template with test: {testCondition}");
 
-                        // Check if this conditional creates a section
-                        var sectionDiv = ifElement.Descendants()
-                            .FirstOrDefault(e => GetAttributeValue(e, "xctname") == "Section" ||
-                                                e.Attribute("class")?.Value?.Contains("xdSection") == true);
-
-                        if (sectionDiv != null)
-                        {
-                            var ctrlId = GetAttributeValue(sectionDiv, "CtrlId");
-
-                            // CRITICAL: Only process if we're in the right context
-                            // If we're NOT in a repeating section, skip conditional sections that belong to repeating sections
-                            if (repeatingContextStack.Count == 0 && IsConditionalForRepeatingSection(testCondition, ctrlId))
-                            {
-                                Debug.WriteLine($"Skipping conditional section {ctrlId} - belongs to repeating section but not in repeating context");
-                                continue;
-                            }
-
-                            // If we ARE in a repeating section, only process if it's for our current repeating section
-                            if (repeatingContextStack.Count > 0)
-                            {
-                                var currentRepeating = repeatingContextStack.Peek();
-                                if (!IsConditionalForCurrentContext(testCondition, currentRepeating))
-                                {
-                                    Debug.WriteLine($"Skipping conditional section {ctrlId} - not for current repeating context");
-                                    continue;
-                                }
-                            }
-
-                            // Check if already processed
-                            if (IsSectionAlreadyProcessed(ctrlId, mode))
-                            {
-                                Debug.WriteLine($"Section {ctrlId} already processed, skipping");
-                                continue;
-                            }
-
-                            ProcessConditionalSection(ifElement, mode);
-                            hasProcessedConditional = true;
-                        }
-                        else
-                        {
-                            // Process conditional content without creating a section
-                            // BUT only if we're in the right context
-                            if (ShouldProcessContentInCurrentContext(ifElement))
-                            {
-                                foreach (var child in ifElement.Elements())
-                                {
-                                    ProcessElement(child);
-                                }
-                            }
-                        }
+                        // IMPORTANT CHANGE: Process ALL conditional sections to capture their controls
+                        // We'll mark them as conditional but still include them in the view
+                        ProcessConditionalContent(ifElement, testCondition, mode);
                     }
 
-                    // Process non-conditional elements ONLY if we haven't processed a conditional section
-                    // AND we're not in a situation where this would create duplicates
-                    if (!hasProcessedConditional && !WouldCreateDuplicates(templateElem))
-                    {
-                        var nonConditionalElements = templateElem.Elements()
-                            .Where(e => e.Name.LocalName != "if");
+                    // Also process non-conditional elements in the template
+                    var nonConditionalElements = templateElem.Elements()
+                        .Where(e => e.Name.LocalName != "if");
 
-                        foreach (var child in nonConditionalElements)
-                        {
-                            ProcessElement(child);
-                        }
+                    foreach (var child in nonConditionalElements)
+                    {
+                        ProcessElement(child);
                     }
                 }
                 else
                 {
-                    // No conditional logic - but still check if this would create duplicates
-                    if (!WouldCreateDuplicates(templateElem))
+                    // No conditional logic - process normally
+                    foreach (var child in templateElem.Elements())
                     {
-                        foreach (var child in templateElem.Elements())
-                        {
-                            ProcessElement(child);
-                        }
+                        ProcessElement(child);
                     }
                 }
             }
@@ -1565,6 +1698,203 @@ public class DataColumn
                 processedTemplates.Remove(templateKey);
             }
         }
+
+        private void ProcessConditionalContent(XElement ifElement, string testCondition, string mode)
+        {
+            // Check if this conditional creates a section
+            var sectionDiv = ifElement.Descendants()
+                .FirstOrDefault(e => GetAttributeValue(e, "xctname") == "Section" ||
+                                    e.Attribute("class")?.Value?.Contains("xdSection") == true);
+
+            if (sectionDiv != null)
+            {
+                var ctrlId = GetAttributeValue(sectionDiv, "CtrlId");
+
+                // Check if already processed
+                if (IsSectionAlreadyProcessed(ctrlId, mode))
+                {
+                    Debug.WriteLine($"Section {ctrlId} already processed, skipping");
+                    return;
+                }
+
+                // Process as a conditional section
+                ProcessConditionalSectionWithControls(ifElement, testCondition, mode, ctrlId);
+            }
+            else
+            {
+                // Process conditional controls without a section wrapper
+                // Mark these controls as conditional
+                var controlsBefore = allControls.Count;
+
+                foreach (var child in ifElement.Elements())
+                {
+                    ProcessElement(child);
+                }
+
+                // Mark any controls added as conditional
+                var controlsAdded = allControls.Skip(controlsBefore).ToList();
+                foreach (var control in controlsAdded)
+                {
+                    control.Properties["IsConditional"] = "true";
+                    control.Properties["ConditionalTest"] = testCondition;
+
+                    // Extract the field being tested
+                    var conditionField = ExtractConditionField(testCondition);
+                    if (!string.IsNullOrEmpty(conditionField))
+                    {
+                        control.Properties["ConditionalOnField"] = conditionField;
+                    }
+                }
+            }
+        }
+
+        private void ProcessConditionalSectionWithControls(XElement ifElement, string testCondition, string mode, string ctrlId)
+        {
+            if (ifElement == null) return;
+
+            Debug.WriteLine($"Processing conditional section - test: {testCondition}, ctrlId: {ctrlId}");
+
+            // Find section div within the conditional
+            var sectionDiv = ifElement.Descendants()
+                .FirstOrDefault(e =>
+                    e.Attribute("class")?.Value?.Contains("xdSection") == true ||
+                    GetAttributeValue(e, "xctname") == "Section");
+
+            if (sectionDiv != null)
+            {
+                var caption = GetAttributeValue(sectionDiv, "caption_0") ??
+                              GetAttributeValue(sectionDiv, "caption");
+
+                // Determine section name
+                var sectionName = DetermineSectionNameFromCondition(testCondition, caption, ctrlId, mode);
+
+                // Determine section type based on context
+                var sectionType = "conditional";
+                bool isInRepeatingContext = repeatingContextStack.Count > 0;
+
+                if (isInRepeatingContext)
+                {
+                    sectionType = "conditional-in-repeating"; // Keep this distinction for metadata
+                    var parentRepeating = repeatingContextStack.Peek();
+                    Debug.WriteLine($"Conditional section '{sectionName}' is within repeating '{parentRepeating.Name}'");
+                }
+
+                var conditionalSection = new SectionContext
+                {
+                    Name = sectionName,
+                    Type = sectionType,
+                    StartRow = currentRow,
+                    CtrlId = ctrlId,
+                    DisplayName = sectionName
+                };
+
+                sectionStack.Push(conditionalSection);
+
+                var sectionInfo = new SectionInfo
+                {
+                    Name = sectionName,
+                    Type = conditionalSection.Type,
+                    CtrlId = ctrlId,
+                    StartRow = currentRow
+                };
+
+                sections.Add(sectionInfo);
+
+                // Track controls being added to this section
+                var controlCountBefore = allControls.Count;
+
+                // Process the section contents - THIS IS THE KEY PART
+                // We process ALL controls in the conditional section
+                foreach (var child in sectionDiv.Elements())
+                {
+                    ProcessElement(child);
+                }
+
+                var controlsAdded = allControls.Skip(controlCountBefore).ToList();
+                Debug.WriteLine($"Added {controlsAdded.Count} controls to conditional section '{sectionName}'");
+
+                // Mark all controls in this conditional section as conditional
+                foreach (var control in controlsAdded)
+                {
+                    control.Properties["IsConditional"] = "true";
+                    control.Properties["ConditionalTest"] = testCondition;
+                    control.Properties["ConditionalSectionName"] = sectionName;
+                    control.Properties["ConditionalSectionId"] = ctrlId;
+
+                    // Extract and store the field being tested
+                    var conditionField = ExtractConditionField(testCondition);
+                    if (!string.IsNullOrEmpty(conditionField))
+                    {
+                        control.Properties["ConditionalOnField"] = conditionField;
+                    }
+                }
+
+                sectionStack.Pop();
+                sectionInfo.EndRow = currentRow;
+
+                // Store control IDs that belong to this section
+                if (!string.IsNullOrEmpty(ctrlId))
+                {
+                    sectionInfo.ControlIds = controlsAdded
+                        .Where(c => c.Properties?.ContainsKey("CtrlId") == true)
+                        .Select(c => c.Properties["CtrlId"])
+                        .ToList();
+                }
+            }
+            else
+            {
+                // No explicit section div but still conditional content
+                // Process and mark as conditional
+                var controlsBefore = allControls.Count;
+
+                foreach (var child in ifElement.Elements())
+                {
+                    ProcessElement(child);
+                }
+
+                var controlsAdded = allControls.Skip(controlsBefore).ToList();
+                foreach (var control in controlsAdded)
+                {
+                    control.Properties["IsConditional"] = "true";
+                    control.Properties["ConditionalTest"] = testCondition;
+
+                    var conditionField = ExtractConditionField(testCondition);
+                    if (!string.IsNullOrEmpty(conditionField))
+                    {
+                        control.Properties["ConditionalOnField"] = conditionField;
+                    }
+                }
+            }
+        }
+
+        private string ExtractConditionField(string testCondition)
+        {
+            if (string.IsNullOrEmpty(testCondition))
+                return "";
+
+            // Try different patterns to extract the field name
+            var patterns = new[]
+            {
+        @"my:(\w+)\s*=",           // my:fieldName = 
+        @"my:(\w+)\s*!=",          // my:fieldName !=
+        @"\.\.\/my:(\w+)",         // ../my:fieldName
+        @"not\(.*my:(\w+).*\)",    // not(...my:fieldName...)
+        @"boolean\(my:(\w+)\)",    // boolean(my:fieldName)
+        @"contains\(my:(\w+)",     // contains(my:fieldName, ...)
+    };
+
+            foreach (var pattern in patterns)
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(testCondition, pattern);
+                if (match.Success)
+                {
+                    return match.Groups[1].Value;
+                }
+            }
+
+            return "";
+        }
+
 
         private bool WouldCreateDuplicates(XElement templateElem)
         {
@@ -2001,7 +2331,6 @@ public class DataColumn
                 else
                 {
                     // This might be labeled as repeating but isn't actually
-                    // Check the immediate context
                     Debug.WriteLine($"Section marked as repeating but pattern '{selectValue}' doesn't indicate repetition");
 
                     // If we're already in a repeating context, this is probably just a subsection
@@ -2019,6 +2348,9 @@ public class DataColumn
             var bestLabel = FindBestLabelForSection(elem, sectionName);
             if (!string.IsNullOrEmpty(bestLabel))
                 sectionName = bestLabel;
+
+            // Clean the section name
+            sectionName = EnhancedInfoPathParser.CleanRepeatingSectionName(sectionName);
 
             var repeatingContext = new RepeatingContext
             {
@@ -2046,7 +2378,6 @@ public class DataColumn
             repeatingContextStack.Pop();
             sectionInfo.EndRow = currentRow;
         }
-
 
         private bool IsRegularSection(XElement elem)
         {
@@ -2183,22 +2514,23 @@ public class DataColumn
 
             if (isNested)
             {
-                // Generate a composite name for nested repeating table
+                // Generate a clean composite name for nested repeating table
                 repeatingTable.DisplayName = GenerateNestedRepeatingName(elem);
-                repeatingTable.Name = repeatingTable.DisplayName;
+                repeatingTable.Name = EnhancedInfoPathParser.CleanRepeatingSectionName(repeatingTable.DisplayName);
             }
             else
             {
-                // Top-level repeating table - use existing logic
+                // Top-level repeating table - use existing logic but clean the result
                 var bestLabel = FindBestLabelForSection(elem, repeatingTable.Name);
                 if (!string.IsNullOrEmpty(bestLabel))
                 {
-                    repeatingTable.DisplayName = bestLabel;
-                    repeatingTable.Name = bestLabel;
+                    repeatingTable.DisplayName = EnhancedInfoPathParser.CleanRepeatingSectionName(bestLabel);
+                    repeatingTable.Name = repeatingTable.DisplayName;
                 }
                 else
                 {
-                    repeatingTable.DisplayName = repeatingTable.Name;
+                    repeatingTable.DisplayName = EnhancedInfoPathParser.CleanRepeatingSectionName(repeatingTable.Name);
+                    repeatingTable.Name = repeatingTable.DisplayName;
                 }
             }
 
@@ -2207,6 +2539,7 @@ public class DataColumn
 
             var tableControl = new ControlDefinition
             {
+                // Clean the name for the control as well
                 Name = RemoveSpaces(repeatingTable.DisplayName.Replace(" > ", "_")),
                 Type = "RepeatingTable",
                 Label = repeatingTable.DisplayName,
@@ -2225,17 +2558,17 @@ public class DataColumn
                 controlsById[ctrlId] = tableControl;
             }
 
-            // If nested, add parent context info
+            // If nested, add parent context info (cleaned)
             if (isNested && repeatingContextStack.Count > 1)
             {
                 var parentContexts = repeatingContextStack.ToArray().Skip(1).Reverse();
                 tableControl.Properties["ParentRepeatingSections"] = string.Join("|",
-                    parentContexts.Select(c => c.DisplayName));
+                    parentContexts.Select(c => EnhancedInfoPathParser.CleanRepeatingSectionName(c.DisplayName)));
 
                 // Also set the repeating section info for the table control itself
                 var immediateParent = repeatingContextStack.ToArray()[1]; // Get the parent before we pushed
                 tableControl.IsInRepeatingSection = true;
-                tableControl.RepeatingSectionName = immediateParent.DisplayName;
+                tableControl.RepeatingSectionName = EnhancedInfoPathParser.CleanRepeatingSectionName(immediateParent.DisplayName);
                 tableControl.RepeatingSectionBinding = immediateParent.Binding;
             }
 
@@ -2248,7 +2581,6 @@ public class DataColumn
 
             repeatingContextStack.Pop();
         }
-
         private string FindBestLabelForSection(XElement elem, string defaultName)
         {
             var unusedLabels = recentLabels.Where(l => !l.Used).ToList();
