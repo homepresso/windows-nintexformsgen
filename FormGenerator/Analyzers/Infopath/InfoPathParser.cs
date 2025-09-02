@@ -777,6 +777,9 @@ public class DataColumn
         private string currentTemplateMode = null;
         private HashSet<string> processedTemplates;
 
+        private Dictionary<string, HashSet<string>> viewRepeatingSectionNames;
+        private string currentViewName;
+
         public class LabelInfo
         {
             public string Text { get; set; }
@@ -1090,11 +1093,51 @@ public class DataColumn
 
             return text;
         }
+        private string EnsureUniqueRepeatingSectionName(string baseName, string binding = null)
+        {
+            if (string.IsNullOrEmpty(currentViewName) || viewRepeatingSectionNames == null)
+                return baseName;
+
+            if (!viewRepeatingSectionNames.ContainsKey(currentViewName))
+                viewRepeatingSectionNames[currentViewName] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            var viewNames = viewRepeatingSectionNames[currentViewName];
+
+            // If the base name hasn't been used, use it
+            if (!viewNames.Contains(baseName))
+            {
+                viewNames.Add(baseName);
+                return baseName;
+            }
+
+            // Name exists, need to make it unique
+            int counter = 2;
+            string uniqueName = $"{baseName}_{counter}";
+
+            while (viewNames.Contains(uniqueName))
+            {
+                counter++;
+                uniqueName = $"{baseName}_{counter}";
+            }
+
+            viewNames.Add(uniqueName);
+            return uniqueName;
+        }
+
 
         public List<ControlDefinition> ParseViewFile(string viewFile)
         {
             ResetParserState();
-            EnhancedInfoPathParser.ResetNameCounts(); // Reset name counts for each view
+            currentViewName = Path.GetFileName(viewFile); // Store current view name
+
+            // Initialize tracking for this view
+            if (viewRepeatingSectionNames == null)
+                viewRepeatingSectionNames = new Dictionary<string, HashSet<string>>();
+
+            if (!viewRepeatingSectionNames.ContainsKey(currentViewName))
+                viewRepeatingSectionNames[currentViewName] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            EnhancedInfoPathParser.ResetNameCounts();
             XDocument doc = XDocument.Load(viewFile);
             ProcessElement(doc.Root);
             return new List<ControlDefinition>(allControls);
@@ -1423,7 +1466,6 @@ public class DataColumn
             // Extract section name from the select pattern
             string sectionName = ExtractSectionNameFromSelect(select);
 
-            // CRITICAL CHECK: Don't create a repeating section for templates that are actually conditionals
             // Check if this mode represents a conditional section rather than a true repeating section
             if (IsConditionalTemplateMode(mode, elem.Document))
             {
@@ -1437,6 +1479,9 @@ public class DataColumn
                 }
                 return;
             }
+
+            // Ensure unique name for the section
+            sectionName = EnsureUniqueRepeatingSectionName(sectionName, select);
 
             // Check if we're already in this repeating context
             bool alreadyInContext = repeatingContextStack.Any(r =>
@@ -1493,7 +1538,6 @@ public class DataColumn
                     sectionInfo.EndRow = currentRow;
             }
         }
-
 
         private string ExtractSectionNameFromSelect(string select)
         {
@@ -1766,7 +1810,10 @@ public class DataColumn
                               GetAttributeValue(sectionDiv, "caption");
 
                 // Determine section name
-                var sectionName = DetermineSectionNameFromCondition(testCondition, caption, ctrlId, mode);
+                var baseSectionName = DetermineSectionNameFromCondition(testCondition, caption, ctrlId, mode);
+
+                // Ensure uniqueness for conditional sections too
+                var sectionName = EnsureUniqueRepeatingSectionName(baseSectionName);
 
                 // Determine section type based on context
                 var sectionType = "conditional";
@@ -1774,7 +1821,7 @@ public class DataColumn
 
                 if (isInRepeatingContext)
                 {
-                    sectionType = "conditional-in-repeating"; // Keep this distinction for metadata
+                    sectionType = "conditional-in-repeating";
                     var parentRepeating = repeatingContextStack.Peek();
                     Debug.WriteLine($"Conditional section '{sectionName}' is within repeating '{parentRepeating.Name}'");
                 }
@@ -1803,8 +1850,7 @@ public class DataColumn
                 // Track controls being added to this section
                 var controlCountBefore = allControls.Count;
 
-                // Process the section contents - THIS IS THE KEY PART
-                // We process ALL controls in the conditional section
+                // Process the section contents
                 foreach (var child in sectionDiv.Elements())
                 {
                     ProcessElement(child);
@@ -2344,13 +2390,14 @@ public class DataColumn
                 }
             }
 
-            // If we get here, treat it as a proper repeating section
+            // Find best label for section
             var bestLabel = FindBestLabelForSection(elem, sectionName);
             if (!string.IsNullOrEmpty(bestLabel))
                 sectionName = bestLabel;
 
-            // Clean the section name
+            // Clean and ensure uniqueness
             sectionName = EnhancedInfoPathParser.CleanRepeatingSectionName(sectionName);
+            sectionName = EnsureUniqueRepeatingSectionName(sectionName, binding);
 
             var repeatingContext = new RepeatingContext
             {
@@ -2515,21 +2562,24 @@ public class DataColumn
             if (isNested)
             {
                 // Generate a clean composite name for nested repeating table
-                repeatingTable.DisplayName = GenerateNestedRepeatingName(elem);
-                repeatingTable.Name = EnhancedInfoPathParser.CleanRepeatingSectionName(repeatingTable.DisplayName);
+                var baseName = GenerateNestedRepeatingName(elem);
+                repeatingTable.DisplayName = EnsureUniqueRepeatingSectionName(baseName);
+                repeatingTable.Name = repeatingTable.DisplayName;
             }
             else
             {
-                // Top-level repeating table - use existing logic but clean the result
+                // Top-level repeating table - use existing logic but ensure uniqueness
                 var bestLabel = FindBestLabelForSection(elem, repeatingTable.Name);
                 if (!string.IsNullOrEmpty(bestLabel))
                 {
-                    repeatingTable.DisplayName = EnhancedInfoPathParser.CleanRepeatingSectionName(bestLabel);
+                    var cleanName = EnhancedInfoPathParser.CleanRepeatingSectionName(bestLabel);
+                    repeatingTable.DisplayName = EnsureUniqueRepeatingSectionName(cleanName);
                     repeatingTable.Name = repeatingTable.DisplayName;
                 }
                 else
                 {
-                    repeatingTable.DisplayName = EnhancedInfoPathParser.CleanRepeatingSectionName(repeatingTable.Name);
+                    var cleanName = EnhancedInfoPathParser.CleanRepeatingSectionName(repeatingTable.Name);
+                    repeatingTable.DisplayName = EnsureUniqueRepeatingSectionName(cleanName);
                     repeatingTable.Name = repeatingTable.DisplayName;
                 }
             }
@@ -2563,12 +2613,12 @@ public class DataColumn
             {
                 var parentContexts = repeatingContextStack.ToArray().Skip(1).Reverse();
                 tableControl.Properties["ParentRepeatingSections"] = string.Join("|",
-                    parentContexts.Select(c => EnhancedInfoPathParser.CleanRepeatingSectionName(c.DisplayName)));
+                    parentContexts.Select(c => c.DisplayName));
 
                 // Also set the repeating section info for the table control itself
                 var immediateParent = repeatingContextStack.ToArray()[1]; // Get the parent before we pushed
                 tableControl.IsInRepeatingSection = true;
-                tableControl.RepeatingSectionName = EnhancedInfoPathParser.CleanRepeatingSectionName(immediateParent.DisplayName);
+                tableControl.RepeatingSectionName = immediateParent.DisplayName;
                 tableControl.RepeatingSectionBinding = immediateParent.Binding;
             }
 
