@@ -1616,19 +1616,13 @@ public class DataColumn
             {
                 var currentSection = sectionStack.Peek();
 
-                // If this is a conditional section within a repeating section
-                if (currentSection.Type == "conditional-in-repeating")
+                // CHANGED: Simplified logic - no more "conditional-in-repeating" type
+                // If we're in a repeating context, the section is already marked as "repeating"
+                if (currentSection.Type == "repeating" && repeatingContextStack.Count > 0)
                 {
+                    // This is a conditional section that's been marked as repeating
                     control.Properties["ConditionalSection"] = currentSection.DisplayName;
                     control.Properties["ConditionalSectionId"] = currentSection.CtrlId;
-
-                    // Build full context path if needed
-                    if (!string.IsNullOrEmpty(control.RepeatingSectionName))
-                    {
-                        // Don't add numbers to the parent section name
-                        control.ParentSection = $"{control.RepeatingSectionName}_{currentSection.DisplayName}";
-                        control.SectionType = "conditional-in-repeating";
-                    }
                 }
                 else if (repeatingContextStack == null || repeatingContextStack.Count == 0)
                 {
@@ -1816,14 +1810,15 @@ public class DataColumn
                 var sectionName = EnsureUniqueRepeatingSectionName(baseSectionName);
 
                 // Determine section type based on context
-                var sectionType = "conditional";
                 bool isInRepeatingContext = repeatingContextStack.Count > 0;
+
+                // CHANGED: If we're in a repeating context, mark as "repeating" not "conditional-in-repeating"
+                var sectionType = isInRepeatingContext ? "repeating" : "conditional";
 
                 if (isInRepeatingContext)
                 {
-                    sectionType = "conditional-in-repeating";
                     var parentRepeating = repeatingContextStack.Peek();
-                    Debug.WriteLine($"Conditional section '{sectionName}' is within repeating '{parentRepeating.Name}'");
+                    Debug.WriteLine($"Conditional section '{sectionName}' is within repeating '{parentRepeating.Name}' - marking as repeating");
                 }
 
                 var conditionalSection = new SectionContext
@@ -1840,7 +1835,7 @@ public class DataColumn
                 var sectionInfo = new SectionInfo
                 {
                     Name = sectionName,
-                    Type = conditionalSection.Type,
+                    Type = sectionType,  // Will be "repeating" if in repeating context
                     CtrlId = ctrlId,
                     StartRow = currentRow
                 };
@@ -1857,7 +1852,7 @@ public class DataColumn
                 }
 
                 var controlsAdded = allControls.Skip(controlCountBefore).ToList();
-                Debug.WriteLine($"Added {controlsAdded.Count} controls to conditional section '{sectionName}'");
+                Debug.WriteLine($"Added {controlsAdded.Count} controls to section '{sectionName}' (type: {sectionType})");
 
                 // Mark all controls in this conditional section as conditional
                 foreach (var control in controlsAdded)
