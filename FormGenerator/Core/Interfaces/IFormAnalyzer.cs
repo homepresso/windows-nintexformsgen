@@ -68,8 +68,23 @@ namespace FormGenerator.Core.Models
         public bool Success { get; set; }
         public string ErrorMessage { get; set; }
 
+        public object SimplifiedJson { get; set; }
+
         public Dictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
+
+        public string GetSimplifiedJsonString()
+        {
+            if (SimplifiedJson == null)
+                return "{}";
+
+            return System.Text.Json.JsonSerializer.Serialize(SimplifiedJson, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            });
+        }
     }
+}
 
     /// <summary>
     /// Analysis message (info, warning, error)
@@ -162,4 +177,3 @@ namespace FormGenerator.Core.Models
         public DateTime UploadedDate { get; set; }
         public FormAnalysisResult AnalysisResult { get; set; }
     }
-}

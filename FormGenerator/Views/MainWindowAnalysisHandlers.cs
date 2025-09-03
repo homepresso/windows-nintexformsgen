@@ -1183,8 +1183,8 @@ namespace FormGenerator.Views
                         DisplayName = column.DisplayName,
                         Section = column.RepeatingSection,
                         IsRepeating = column.IsRepeating,
-                        IsConditional = column.IsConditional,
-                        ConditionalOnField = column.ConditionalOnField,
+       //                 IsConditional = column.IsConditional,
+       //                 ConditionalOnField = column.ConditionalOnField,
                         HasConstraints = column.HasConstraints,
                         DefaultValue = column.DefaultValue,
                         ValidValuesCount = column.ValidValues?.Count ?? 0

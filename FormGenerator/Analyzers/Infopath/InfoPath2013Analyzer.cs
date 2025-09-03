@@ -55,78 +55,41 @@ namespace FormGenerator.Analyzers.InfoPath
 
             try
             {
-                // Log start of analysis
                 Debug.WriteLine($"Starting analysis of {filePath}");
 
-                // Run analysis in background thread to keep UI responsive
+                // Run analysis in background thread
                 var formDefinition = await Task.Run(() => _parser.ParseXsnFile(filePath));
 
-                // IMPORTANT: Set the form name and file properties
                 if (formDefinition != null)
                 {
-                    // Set the form name from the file (e.g., "ExpenseClaims" instead of "View1")
+                    // Set basic properties
                     formDefinition.FormName = Path.GetFileNameWithoutExtension(filePath);
                     formDefinition.FileName = Path.GetFileName(filePath);
 
-                    // Try to get a better title from the form definition if available
                     if (string.IsNullOrEmpty(formDefinition.Title))
                     {
                         formDefinition.Title = formDefinition.FormName;
                     }
 
-                    // Ensure Data columns are properly populated and unique
-                    EnsureUniqueDataColumns(formDefinition);
+                    // Build simplified data columns
+                    BuildSimplifiedDataColumns(formDefinition);
 
-                    // Process dropdown values from Data columns
-                    ProcessDropdownValues(formDefinition);
+                    result.FormDefinition = formDefinition;
+                    result.Success = true;
+
+                    // Add simplified JSON representation
+                    result.SimplifiedJson = formDefinition.ToSimplifiedJson();
+
+                    // Add analysis messages
+                    AddSimplifiedAnalysisMessages(result, formDefinition);
+
+                    Debug.WriteLine($"Analysis completed successfully for {filePath}");
                 }
-
-                result.FormDefinition = formDefinition;
-                result.Success = true;
-
-                // Add analysis messages based on what was found
-                AddAnalysisMessages(result, formDefinition);
-
-                // Add metadata about the analysis
-                AddMetadata(result, filePath, formDefinition);
-
-                Debug.WriteLine($"Analysis completed successfully for {filePath}");
-            }
-            catch (FileNotFoundException fnfEx)
-            {
-                result.Success = false;
-                result.ErrorMessage = $"File not found: {fnfEx.FileName}";
-
-                result.Messages.Add(new AnalysisMessage
-                {
-                    Severity = MessageSeverity.Error,
-                    Message = "File not found",
-                    Details = fnfEx.Message,
-                    Source = "FileSystem"
-                });
-
-                Debug.WriteLine($"File not found error: {fnfEx.Message}");
-            }
-            catch (UnauthorizedAccessException uaEx)
-            {
-                result.Success = false;
-                result.ErrorMessage = "Access denied to the file";
-
-                result.Messages.Add(new AnalysisMessage
-                {
-                    Severity = MessageSeverity.Error,
-                    Message = "Access denied",
-                    Details = uaEx.Message,
-                    Source = "FileSystem"
-                });
-
-                Debug.WriteLine($"Access denied error: {uaEx.Message}");
             }
             catch (Exception ex)
             {
                 result.Success = false;
                 result.ErrorMessage = ex.Message;
-
                 result.Messages.Add(new AnalysisMessage
                 {
                     Severity = MessageSeverity.Error,
@@ -134,7 +97,6 @@ namespace FormGenerator.Analyzers.InfoPath
                     Details = ex.ToString(),
                     Source = "InfoPath2013Analyzer"
                 });
-
                 Debug.WriteLine($"Analysis error: {ex}");
             }
             finally
@@ -146,6 +108,146 @@ namespace FormGenerator.Analyzers.InfoPath
 
             return result;
         }
+
+        private void BuildSimplifiedDataColumns(InfoPathFormDefinition formDef)
+        {
+            var dataColumns = new Dictionary<string, DataColumn>();
+
+            // Iterate through all controls in all views
+            foreach (var view in formDef.Views)
+            {
+                foreach (var control in view.Controls)
+                {
+                    // Skip non-data controls
+                    if (IsNonDataControl(control))
+                        continue;
+
+                    var columnName = !string.IsNullOrEmpty(control.Binding)
+                        ? ExtractColumnName(control.Binding)
+                        : control.Name;
+
+                    if (string.IsNullOrEmpty(columnName))
+                        continue;
+
+                    // Create unique key
+                    var key = control.IsInRepeatingSection
+                        ? $"{control.RepeatingSectionName}.{columnName}"
+                        : columnName;
+
+                    if (!dataColumns.ContainsKey(key))
+                    {
+                        dataColumns[key] = new DataColumn
+                        {
+                            ColumnName = columnName,
+                            DisplayName = control.Label ?? control.Name,
+                            Type = control.Type,
+                            IsRepeating = control.IsInRepeatingSection,
+                            RepeatingSection = control.RepeatingSectionName,
+                            ValidValues = control.DataOptions,
+                            DefaultValue = control.Properties?.ContainsKey("DefaultValue") == true
+                                ? control.Properties["DefaultValue"]
+                                : null
+                        };
+                    }
+                }
+            }
+
+            formDef.Data = dataColumns.Values.ToList();
+        }
+
+        private bool IsNonDataControl(ControlDefinition control)
+        {
+            string[] nonDataTypes = { "Label", "Button", "Section", "RepeatingSection", "RepeatingTable" };
+            return nonDataTypes.Contains(control.Type) ||
+                   control.IsMergedIntoParent ||
+                   string.IsNullOrEmpty(control.Name);
+        }
+
+        private string ExtractColumnName(string binding)
+        {
+            if (string.IsNullOrEmpty(binding))
+                return "";
+
+            // Extract last part of binding path
+            var parts = binding.Split('/');
+            var lastPart = parts.Last();
+
+            // Remove namespace prefix if present
+            if (lastPart.Contains(':'))
+                lastPart = lastPart.Split(':').Last();
+
+            return lastPart;
+        }
+
+        private void AddSimplifiedAnalysisMessages(FormAnalysisResult result, InfoPathFormDefinition formDef)
+        {
+            // Count controls (excluding labels and merged)
+            var controlCount = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Count(c => !c.IsMergedIntoParent && c.Type != "Label");
+
+            // Count repeating structures
+            var repeatingSections = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => c.IsInRepeatingSection)
+                .Select(c => c.RepeatingSectionName)
+                .Distinct()
+                .Count();
+
+            var repeatingTables = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Count(c => c.Type == "RepeatingTable");
+
+            var totalRepeating = repeatingSections + repeatingTables;
+
+            // Basic success message
+            result.Messages.Add(new AnalysisMessage
+            {
+                Severity = MessageSeverity.Info,
+                Message = $"Successfully analyzed form: {formDef.FormName}",
+                Details = $"Found {formDef.Views.Count} view(s) with {controlCount} controls",
+                Source = "Analysis"
+            });
+
+            // Repeating structures message
+            if (totalRepeating > 0)
+            {
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Info,
+                    Message = $"Form contains {totalRepeating} repeating structure(s)",
+                    Details = $"Sections: {repeatingSections}, Tables: {repeatingTables}. " +
+                             "These will be created as separate related tables in SQL.",
+                    Source = "Structure"
+                });
+            }
+
+            // Data columns message
+            if (formDef.Data.Count > 0)
+            {
+                var repeatingCols = formDef.Data.Count(d => d.IsRepeating);
+                var dropdownCols = formDef.Data.Count(d => d.HasConstraints);
+
+                result.Messages.Add(new AnalysisMessage
+                {
+                    Severity = MessageSeverity.Info,
+                    Message = $"Data structure: {formDef.Data.Count} columns",
+                    Details = $"Standard: {formDef.Data.Count - repeatingCols}, " +
+                             $"Repeating: {repeatingCols}, " +
+                             $"Dropdowns: {dropdownCols}",
+                    Source = "Data"
+                });
+            }
+
+            // Add metadata
+            result.Metadata["ControlCount"] = controlCount;
+            result.Metadata["RepeatingSections"] = repeatingSections;
+            result.Metadata["RepeatingTables"] = repeatingTables;
+            result.Metadata["DataColumns"] = formDef.Data.Count;
+            result.Metadata["Views"] = formDef.Views.Select(v => v.ViewName).ToList();
+        }
+
+
 
         /// <summary>
         /// Ensures Data columns are unique and properly structured

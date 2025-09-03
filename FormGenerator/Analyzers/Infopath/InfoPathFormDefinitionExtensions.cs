@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using FormGenerator.Analyzers.Infopath;
 using FormGenerator.Core.Models;
@@ -9,6 +10,114 @@ namespace FormGenerator.Analyzers.InfoPath
     {
         public static SqlDeploymentInfo CurrentSqlDeploymentInfo { get; set; }
 
+        /// <summary>
+        /// Simplified JSON representation that treats sections as cosmetic
+        /// </summary>
+        public static object ToSimplifiedJson(this InfoPathFormDefinition formDef)
+        {
+            // Flatten all controls from all views into a single list
+            var allControls = new List<object>();
+
+            foreach (var view in formDef.Views)
+            {
+                foreach (var control in view.Controls)
+                {
+                    // Skip merged controls
+                    if (control.IsMergedIntoParent)
+                        continue;
+
+                    var simplifiedControl = new
+                    {
+                        // Core identification
+                        Name = control.Name,
+                        Type = control.Type,
+                        Label = control.Label,
+                        Binding = control.Binding,
+
+                        // Position
+                        View = view.ViewName,
+                        GridPosition = control.GridPosition,
+                        DocIndex = control.DocIndex,
+
+                        // Section context (cosmetic only)
+                        Section = !string.IsNullOrEmpty(control.ParentSection) ? new
+                        {
+                            Name = control.ParentSection,
+                            Type = control.SectionType  // "normal", "optional", etc.
+                        } : null,
+
+                        // Repeating context (structural - important!)
+                        RepeatingContext = control.IsInRepeatingSection ? new
+                        {
+                            SectionName = control.RepeatingSectionName,
+                            Binding = control.RepeatingSectionBinding,
+                            IsRepeating = true
+                        } : null,
+
+                        // Data options for dropdowns
+                        Options = control.HasStaticData ?
+                            control.DataOptions.Select(o => new
+                            {
+                                Value = o.Value,
+                                Display = o.DisplayText,
+                                IsDefault = o.IsDefault
+                            }) : null,
+
+                        // Key properties only
+                        Properties = GetKeyProperties(control.Properties)
+                    };
+
+                    allControls.Add(simplifiedControl);
+                }
+            }
+
+            // Build a simplified structure
+            return new
+            {
+                Form = new
+                {
+                    Name = formDef.FormName,
+                    FileName = formDef.FileName,
+                    Title = formDef.Title
+                },
+
+                // All controls in a flat list
+                Controls = allControls,
+
+                // Summary of repeating structures (these affect data model)
+                RepeatingStructures = GetRepeatingStructures(formDef),
+
+                // Data columns for SQL generation
+                DataColumns = formDef.Data.Select(d => new
+                {
+                    Name = d.ColumnName,
+                    Type = d.Type,
+                    DisplayName = d.DisplayName,
+                    IsRepeating = d.IsRepeating,
+                    RepeatingSectionName = d.RepeatingSection,
+                    ValidValues = d.ValidValues?.Select(v => new
+                    {
+                        v.Value,
+                        Display = v.DisplayText
+                    }),
+                    DefaultValue = d.DefaultValue
+                }),
+
+                // Metadata
+                Summary = new
+                {
+                    TotalControls = allControls.Count,
+                    TotalViews = formDef.Views.Count,
+                    RepeatingSectionCount = formDef.Metadata.RepeatingSectionCount,
+                    DynamicSectionCount = formDef.Metadata.DynamicSectionCount,
+                    ControlTypes = GetControlTypeSummary(allControls)
+                }
+            };
+        }
+
+        /// <summary>
+        /// Original enhanced JSON method (kept for compatibility)
+        /// </summary>
         public static object ToEnhancedJson(this InfoPathFormDefinition formDef)
         {
             // Check if we have SQL deployment info for this form
@@ -91,7 +200,6 @@ namespace FormGenerator.Analyzers.InfoPath
                     Section = !string.IsNullOrEmpty(d.RepeatingSection) ? d.RepeatingSection : null,
                     RepeatingSectionName = d.IsRepeating ? d.RepeatingSection : null,  // ADD THIS FOR CLARITY
                     d.IsRepeating,
-                    // REMOVED: IsConditional and ConditionalOnField properties
                     // Include valid values for columns
                     ValidValues = d.HasConstraints
                         ? d.ValidValues?.Select(v => new { v.Value, v.DisplayText, v.IsDefault })
@@ -156,6 +264,100 @@ namespace FormGenerator.Analyzers.InfoPath
                 } : null
             };
         }
+
+        #region Helper Methods for Simplified JSON
+
+        private static Dictionary<string, object> GetKeyProperties(Dictionary<string, string> props)
+        {
+            if (props == null || !props.Any())
+                return null;
+
+            var keyProps = new Dictionary<string, object>();
+
+            // Only include important properties
+            string[] importantKeys = { "CtrlId", "DefaultValue", "Required", "MaxLength", "Pattern", "ReadOnly" };
+
+            foreach (var key in importantKeys)
+            {
+                if (props.ContainsKey(key) && !string.IsNullOrEmpty(props[key]))
+                {
+                    keyProps[key] = props[key];
+                }
+            }
+
+            return keyProps.Any() ? keyProps : null;
+        }
+
+        private static List<object> GetRepeatingStructures(InfoPathFormDefinition formDef)
+        {
+            var structures = new List<object>();
+
+            // Get unique repeating sections from all views
+            var repeatingSections = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => c.IsInRepeatingSection)
+                .Select(c => c.RepeatingSectionName)
+                .Distinct()
+                .Where(name => !string.IsNullOrEmpty(name));
+
+            foreach (var sectionName in repeatingSections)
+            {
+                var controls = formDef.Views
+                    .SelectMany(v => v.Controls)
+                    .Where(c => c.RepeatingSectionName == sectionName && !c.IsMergedIntoParent)
+                    .ToList();
+
+                structures.Add(new
+                {
+                    Name = sectionName,
+                    Type = "RepeatingSection",
+                    ControlCount = controls.Count,
+                    ControlTypes = controls.GroupBy(c => c.Type)
+                        .Select(g => new { Type = g.Key, Count = g.Count() })
+                        .OrderByDescending(x => x.Count)
+                        .ToList()
+                });
+            }
+
+            // Add repeating tables
+            var repeatingTables = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => c.Type == "RepeatingTable")
+                .Select(c => c.Name)
+                .Distinct();
+
+            foreach (var tableName in repeatingTables)
+            {
+                structures.Add(new
+                {
+                    Name = tableName,
+                    Type = "RepeatingTable",
+                    ControlCount = 0,
+                    ControlTypes = (List<object>)null
+                });
+            }
+
+            return structures;
+        }
+
+        private static Dictionary<string, int> GetControlTypeSummary(List<object> controls)
+        {
+            var summary = new Dictionary<string, int>();
+
+            foreach (dynamic control in controls)
+            {
+                string type = control.Type;
+                if (!summary.ContainsKey(type))
+                    summary[type] = 0;
+                summary[type]++;
+            }
+
+            return summary;
+        }
+
+        #endregion
+
+        #region Helper Methods for Enhanced JSON (Original)
 
         private static object GetControlSqlMapping(ControlDefinition control, FormSqlMapping mapping)
         {
@@ -337,5 +539,7 @@ namespace FormGenerator.Analyzers.InfoPath
                 Controls = controlsWithIds
             };
         }
+
+        #endregion
     }
 }
