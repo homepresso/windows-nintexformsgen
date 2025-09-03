@@ -529,6 +529,8 @@ namespace FormGenerator.Analyzers.Infopath
         private int repeatingSectionCounter = 0;  // Add this counter
         private Dictionary<string, int> sectionNameCounters = new Dictionary<string, int>();
         private HashSet<string> viewRepeatingSectionNames;
+        private List<string> currentTableHeaders;
+        private int currentTableColumn;
 
         private string currentSectionName = null;
 
@@ -876,7 +878,7 @@ namespace FormGenerator.Analyzers.Infopath
                 return;
             }
 
-            // Handle apply-templates with improved duplicate prevention
+            // Handle apply-templates with improved context handling
             if (elemName == "apply-templates")
             {
                 var mode = elem.Attribute("mode")?.Value;
@@ -899,32 +901,27 @@ namespace FormGenerator.Analyzers.Infopath
 
                     if (isRepeatingPattern)
                     {
-                        // Check if we've already processed this repeating pattern
-                        if (!processedTemplates.Contains($"repeat::{select}"))
+                        // Check if we've already processed this repeating pattern in this context
+                        string repeatKey = $"repeat::{contextKey}::{select}";
+                        if (!processedTemplates.Contains(repeatKey))
                         {
-                            processedTemplates.Add($"repeat::{select}");
+                            processedTemplates.Add(repeatKey);
                             ProcessRepeatingApplyTemplates(elem, mode, select);
-                            processedTemplates.Remove($"repeat::{select}");
+                            processedTemplates.Remove(repeatKey);
                         }
                         else
                         {
-                            Debug.WriteLine($"[PROCESS] Repeating pattern {select} already processed");
+                            Debug.WriteLine($"[PROCESS] Repeating pattern {select} already processed in context {contextKey}");
                         }
                     }
                     else
                     {
-                        // Only process template if not already processed in this context
-                        if (!processedTemplates.Contains(contextKey))
+                        // For non-repeating templates, always process them
+                        // The template itself will handle duplicate prevention
+                        var matchingTemplate = FindTemplate(elem.Document, mode);
+                        if (matchingTemplate != null)
                         {
-                            var matchingTemplate = FindTemplate(elem.Document, mode);
-                            if (matchingTemplate != null)
-                            {
-                                ProcessXslTemplate(matchingTemplate);
-                            }
-                        }
-                        else
-                        {
-                            Debug.WriteLine($"[PROCESS] Template {contextKey} already processed");
+                            ProcessXslTemplate(matchingTemplate);
                         }
                     }
                     return;
@@ -971,7 +968,7 @@ namespace FormGenerator.Analyzers.Infopath
             var control = TryExtractControl(elem);
             if (control != null)
             {
-                // UPDATED DUPLICATE CHECK - More selective
+                // Context-aware duplicate check
                 bool shouldSkip = false;
 
                 if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
@@ -981,35 +978,28 @@ namespace FormGenerator.Analyzers.Infopath
                     {
                         var existing = controlsById[ctrlId];
 
-                        // Only skip if:
-                        // 1. We're in the same context (both in templates or both not in templates)
-                        // 2. AND the control has the same binding
-                        // 3. AND it's not a main form control being processed for the first time
-                        bool sameContext = (insideXslTemplate && existing.Properties.ContainsKey("FromTemplate")) ||
-                                          (!insideXslTemplate && !existing.Properties.ContainsKey("FromTemplate"));
+                        // Only skip if we're in the exact same context
+                        bool sameRepeatingContext = (existing.IsInRepeatingSection == (repeatingContextStack.Count > 0));
 
-                        bool isMainControl = string.IsNullOrEmpty(control.RepeatingSectionName) &&
-                                            repeatingContextStack.Count == 0;
-
-                        if (sameContext && existing.Binding == control.Binding && !isMainControl)
+                        if (sameRepeatingContext && existing.IsInRepeatingSection)
                         {
-                            Debug.WriteLine($"[DUPLICATE] Control with CtrlId {ctrlId} already processed in same context, skipping");
+                            // Both in repeating sections - check if same section
+                            var currentRepeatingSectionName = repeatingContextStack.Count > 0 ?
+                                repeatingContextStack.Peek().Name : "";
+
+                            if (existing.RepeatingSectionName == currentRepeatingSectionName)
+                            {
+                                Debug.WriteLine($"[DUPLICATE] Control {ctrlId} already exists in same repeating context, skipping");
+                                shouldSkip = true;
+                            }
+                        }
+                        else if (sameRepeatingContext && !existing.IsInRepeatingSection)
+                        {
+                            // Both NOT in repeating sections
+                            Debug.WriteLine($"[DUPLICATE] Control {ctrlId} already exists in main form, skipping");
                             shouldSkip = true;
                         }
-                        else if (isMainControl && !existing.Properties.ContainsKey("IsMainControl"))
-                        {
-                            // This is a main control, and the existing one isn't marked as main
-                            // Replace the existing one with this main control
-                            Debug.WriteLine($"[REPLACE] Replacing template control {ctrlId} with main control");
-                            controlsById.Remove(ctrlId);
-                            allControls.Remove(existing);
-                            shouldSkip = false;
-                        }
-                        else
-                        {
-                            Debug.WriteLine($"[DUPLICATE] Control {ctrlId} exists but in different context, may process");
-                            shouldSkip = false;
-                        }
+                        // If different contexts, don't skip - it's a valid control for the new context
                     }
                 }
 
@@ -1022,23 +1012,19 @@ namespace FormGenerator.Analyzers.Infopath
                     control.GridPosition = currentRow + GetColumnLetter(currentCol);
                     control.DocIndex = ++docIndexCounter;
 
-                    // Mark if this is from a template or main form
-                    if (insideXslTemplate)
-                    {
-                        control.Properties["FromTemplate"] = "true";
-                    }
-                    else if (repeatingContextStack.Count == 0)
-                    {
-                        control.Properties["IsMainControl"] = "true";
-                    }
-
                     // Track control by ID if it has one
                     if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
                     {
                         var ctrlId = control.Properties["CtrlId"];
                         if (!string.IsNullOrEmpty(ctrlId))
                         {
-                            controlsById[ctrlId] = control;
+                            // Store with context information
+                            string contextualKey = ctrlId;
+                            if (repeatingContextStack.Count > 0)
+                            {
+                                contextualKey = $"{repeatingContextStack.Peek().Name}::{ctrlId}";
+                            }
+                            controlsById[contextualKey] = control;
                         }
                     }
 
@@ -1075,7 +1061,6 @@ namespace FormGenerator.Analyzers.Infopath
                 inTableRow = false;
             }
         }
-
         private XElement FindTemplate(XDocument doc, string mode)
         {
             if (doc == null || string.IsNullOrEmpty(mode))
@@ -1847,22 +1832,28 @@ namespace FormGenerator.Analyzers.Infopath
             foreach (var controlElem in controlElements)
             {
                 var ctrlId = GetAttributeValue(controlElem, "CtrlId");
-                if (controlsById.ContainsKey(ctrlId))
+
+                // Build the contextual key to check
+                string keyToCheck = ctrlId;
+                if (repeatingContextStack.Count > 0)
                 {
-                    Debug.WriteLine($"Template would create duplicate control {ctrlId}, skipping");
+                    keyToCheck = $"{repeatingContextStack.Peek().Name}::{ctrlId}";
+                }
+
+                if (controlsById.ContainsKey(keyToCheck))
+                {
+                    Debug.WriteLine($"Template would create duplicate control {ctrlId} in same context, skipping");
                     return true;
                 }
-            }
 
-            // Also check if this template is creating a fake repeating section
-            // for what should be a conditional section
-            var mode = templateElem.Attribute("mode")?.Value;
-            if (mode == "_3" && repeatingContextStack.Count == 0)
-            {
-                // Mode _3 is the Round Trip template - it should only be processed
-                // when we're inside the Trips repeating context
-                Debug.WriteLine($"Template mode {mode} would create fake repeating section outside of proper context");
-                return true;
+                // Also check if the control exists in a different context
+                // If it exists in main form but we're in repeating, that's OK
+                if (controlsById.ContainsKey(ctrlId) && repeatingContextStack.Count > 0)
+                {
+                    // Control exists in main form, but we're creating it for repeating section
+                    // This is NOT a duplicate
+                    continue;
+                }
             }
 
             return false;
@@ -2516,11 +2507,14 @@ namespace FormGenerator.Analyzers.Infopath
             currentRow++;
             currentCol = 1;
 
+            // Process table header (non-repeating controls)
+            ProcessTableHeader(elem);
+
             // Create repeating context with guaranteed name
             CreateRepeatingSection(tableName, binding, "table");
 
-            // CRITICAL: Process the table structure to extract controls within it
-            Debug.WriteLine($"  Processing table structure for controls...");
+            // Process the table structure to extract controls within repeating section
+            Debug.WriteLine($"  Processing table structure for repeating controls...");
             ProcessTableStructure(elem);
 
             // Pop the repeating context
@@ -2532,13 +2526,165 @@ namespace FormGenerator.Analyzers.Infopath
                 {
                     sectionInfo.EndRow = currentRow;
                 }
-                Debug.WriteLine($"[REPEATING TABLE] Finished processing {tableName}");
+                Debug.WriteLine($"[REPEATING TABLE] Finished processing repeating section {tableName}");
+            }
+
+            // Process table footer (non-repeating controls like totals)
+            ProcessTableFooter(elem);
+
+            Debug.WriteLine($"[REPEATING TABLE] Finished processing entire table {tableName}");
+        }
+
+        private void ProcessTableHeader(XElement tableElem)
+        {
+            Debug.WriteLine($"[TABLE HEADER] Processing table header for non-repeating controls");
+
+            // Look for thead or tbody with xdTableHeader class
+            var headerSection = tableElem.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "thead" ||
+                                    (e.Name.LocalName == "tbody" &&
+                                     e.Attribute("class")?.Value?.Contains("xdTableHeader") == true));
+
+            if (headerSection == null)
+            {
+                Debug.WriteLine($"  No header section found");
+                return;
+            }
+
+            // Process any controls in the header (usually just labels, but check for others)
+            foreach (var row in headerSection.Elements().Where(e => e.Name.LocalName == "tr"))
+            {
+                currentCol = 1;
+                foreach (var cell in row.Elements().Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th"))
+                {
+                    // Try to extract any controls in header cells
+                    var control = TryExtractControl(cell);
+                    if (control == null)
+                    {
+                        // Check for label text directly in the cell
+                        var labelText = ExtractCellText(cell).Trim();
+                        if (!string.IsNullOrWhiteSpace(labelText) && labelText.Length > 1)
+                        {
+                            // This is a header label
+                            Debug.WriteLine($"    Found header label: {labelText}");
+                        }
+                    }
+                    else
+                    {
+                        // Found a control in the header
+                        ApplyControlContext(control);
+                        control.GridPosition = currentRow + GetColumnLetter(currentCol);
+                        control.DocIndex = ++docIndexCounter;
+                        allControls.Add(control);
+                        Debug.WriteLine($"    Added header control: {control.Name} ({control.Type})");
+                    }
+                    currentCol++;
+                }
+                currentRow++;
             }
         }
+
+        private void ProcessTableFooter(XElement tableElem)
+        {
+            Debug.WriteLine($"[TABLE FOOTER] Processing table footer for non-repeating controls");
+
+            // Look for tbody with xdTableFooter class
+            var footerSection = tableElem.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "tbody" &&
+                                    e.Attribute("class")?.Value?.Contains("xdTableFooter") == true);
+
+            if (footerSection == null)
+            {
+                Debug.WriteLine($"  No footer section found");
+                return;
+            }
+
+            // Process each row in the footer
+            foreach (var row in footerSection.Elements().Where(e => e.Name.LocalName == "tr"))
+            {
+                currentCol = 1;
+                Debug.WriteLine($"  Processing footer row at row {currentRow}");
+
+                foreach (var cell in row.Elements().Where(e => e.Name.LocalName == "td"))
+                {
+                    // Extract label from the cell (often in the merged cells)
+                    var labelElems = cell.Descendants()
+                        .Where(e => e.Name.LocalName == "font" || e.Name.LocalName == "strong");
+
+                    foreach (var labelElem in labelElems)
+                    {
+                        var labelText = ExtractLabelText(labelElem);
+                        if (!string.IsNullOrWhiteSpace(labelText) && labelText.Length > 1)
+                        {
+                            var labelControl = new ControlDefinition
+                            {
+                                Name = GenerateControlName(labelElem, labelText, "", "Label"),
+                                Type = "Label",
+                                Label = labelText,
+                                Binding = "",
+                                DocIndex = ++docIndexCounter,
+                                GridPosition = currentRow + GetColumnLetter(currentCol)
+                            };
+
+                            // Copy font attributes if present
+                            var color = labelElem.Attribute("color")?.Value;
+                            var face = labelElem.Attribute("face")?.Value;
+                            var size = labelElem.Attribute("size")?.Value;
+
+                            if (!string.IsNullOrEmpty(color))
+                                labelControl.Properties["color"] = color;
+                            if (!string.IsNullOrEmpty(face))
+                                labelControl.Properties["face"] = face;
+                            if (!string.IsNullOrEmpty(size))
+                                labelControl.Properties["size"] = size;
+
+                            allControls.Add(labelControl);
+                            Debug.WriteLine($"    Added footer label: {labelControl.Name} - {labelControl.Label}");
+                        }
+                    }
+
+                    // Look for input controls (like the total fields)
+                    var controls = cell.Descendants()
+                        .Where(e => e.Name.LocalName == "span" &&
+                                   (!string.IsNullOrEmpty(GetAttributeValue(e, "binding")) ||
+                                    !string.IsNullOrEmpty(GetAttributeValue(e, "xctname"))));
+
+                    foreach (var ctrlElem in controls)
+                    {
+                        var control = TryExtractControl(ctrlElem);
+                        if (control != null)
+                        {
+                            ApplyControlContext(control);
+                            control.GridPosition = currentRow + GetColumnLetter(currentCol);
+                            control.DocIndex = ++docIndexCounter;
+
+                            // Footer controls are NOT in the repeating section
+                            control.IsInRepeatingSection = false;
+                            control.RepeatingSectionName = null;
+                            control.RepeatingSectionBinding = null;
+
+                            allControls.Add(control);
+                            Debug.WriteLine($"    Added footer control: {control.Name} ({control.Type}) - {control.Label}");
+                        }
+                    }
+
+                    currentCol++;
+                }
+                currentRow++;
+            }
+        }
+
 
         private void ProcessTableStructure(XElement tableElem)
         {
             Debug.WriteLine($"[TABLE STRUCTURE] Processing table for controls");
+
+            // First, look for and process table headers to get column labels
+            var headerLabels = ExtractTableHeaderLabels(tableElem);
+            Debug.WriteLine($"  Found {headerLabels.Count} header labels: {string.Join(", ", headerLabels)}");
+
+            // Store headers for use during cell processing
+            currentTableHeaders = headerLabels;
 
             // Look for tbody with xd:xctname="repeatingtable"
             var tbody = tableElem.Descendants()
@@ -2577,7 +2723,14 @@ namespace FormGenerator.Analyzers.Infopath
                     // Process tbody children directly
                     foreach (var child in tbody.Elements())
                     {
-                        ProcessElement(child);
+                        if (child.Name.LocalName == "tr")
+                        {
+                            ProcessTableRow(child);
+                        }
+                        else
+                        {
+                            ProcessElement(child);
+                        }
                     }
                 }
             }
@@ -2590,7 +2743,11 @@ namespace FormGenerator.Analyzers.Infopath
                     ProcessElement(child);
                 }
             }
+
+            // Clear the headers after processing the table
+            currentTableHeaders = null;
         }
+
 
         private void ProcessTableForEach(XElement forEachElem)
         {
@@ -2609,6 +2766,7 @@ namespace FormGenerator.Analyzers.Infopath
         {
             Debug.WriteLine($"[TABLE ROW] Processing row for controls");
             currentCol = 1; // Reset column for new row
+            currentTableColumn = 0; // Reset table column counter for header tracking
 
             // Process each cell in the row
             foreach (var td in rowElem.Elements().Where(e => e.Name.LocalName == "td"))
@@ -2623,14 +2781,23 @@ namespace FormGenerator.Analyzers.Infopath
                     // No controls found, but still increment column
                     currentCol++;
                 }
+
+                currentTableColumn++; // Move to next column for headers
             }
 
             currentRow++; // Move to next row after processing
         }
-
         private int ExtractControlsFromTableCell(XElement cellElem)
         {
             int controlsFound = 0;
+
+            // Get the header label for this column if available
+            string headerLabel = "";
+            if (currentTableHeaders != null && currentTableColumn < currentTableHeaders.Count)
+            {
+                headerLabel = currentTableHeaders[currentTableColumn];
+                Debug.WriteLine($"    Using header label: {headerLabel}");
+            }
 
             // Look for span elements with binding (most common in InfoPath tables)
             var spans = cellElem.Descendants()
@@ -2643,6 +2810,13 @@ namespace FormGenerator.Analyzers.Infopath
                 var control = TryExtractControl(span);
                 if (control != null)
                 {
+                    // Apply the header label if the control doesn't have one
+                    if (string.IsNullOrEmpty(control.Label) && !string.IsNullOrEmpty(headerLabel))
+                    {
+                        control.Label = headerLabel;
+                        Debug.WriteLine($"    Applied header label: {headerLabel}");
+                    }
+
                     ApplyControlContext(control);
                     control.GridPosition = currentRow + GetColumnLetter(currentCol);
                     control.DocIndex = ++docIndexCounter;
@@ -2660,6 +2834,7 @@ namespace FormGenerator.Analyzers.Infopath
                     controlsFound++;
 
                     Debug.WriteLine($"    Added table control: {control.Name} ({control.Type}) with binding {control.Binding}");
+                    Debug.WriteLine($"      Label: {control.Label}");
                     if (control.IsInRepeatingSection)
                     {
                         Debug.WriteLine($"      In repeating: {control.RepeatingSectionName}");
@@ -2682,6 +2857,13 @@ namespace FormGenerator.Analyzers.Infopath
                 var control = TryExtractControl(elem);
                 if (control != null)
                 {
+                    // Apply the header label if the control doesn't have one
+                    if (string.IsNullOrEmpty(control.Label) && !string.IsNullOrEmpty(headerLabel))
+                    {
+                        control.Label = headerLabel;
+                        Debug.WriteLine($"    Applied header label: {headerLabel}");
+                    }
+
                     ApplyControlContext(control);
                     control.GridPosition = currentRow + GetColumnLetter(currentCol);
                     control.DocIndex = ++docIndexCounter;
@@ -2699,6 +2881,7 @@ namespace FormGenerator.Analyzers.Infopath
                     controlsFound++;
 
                     Debug.WriteLine($"    Added table control: {control.Name} ({control.Type})");
+                    Debug.WriteLine($"      Label: {control.Label}");
                 }
             }
 
@@ -2711,7 +2894,92 @@ namespace FormGenerator.Analyzers.Infopath
             return controlsFound;
         }
 
+        private List<string> ExtractTableHeaderLabels(XElement tableElem)
+        {
+            var labels = new List<string>();
 
+            // Look for the header tbody (with class xdTableHeader)
+            var headerBody = tableElem.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "tbody" &&
+                                    e.Attribute("class")?.Value?.Contains("xdTableHeader") == true);
+
+            if (headerBody != null)
+            {
+                // Get the first row in the header
+                var headerRow = headerBody.Elements()
+                    .FirstOrDefault(e => e.Name.LocalName == "tr");
+
+                if (headerRow != null)
+                {
+                    // Get all td/th elements
+                    var headerCells = headerRow.Elements()
+                        .Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th");
+
+                    foreach (var cell in headerCells)
+                    {
+                        // Extract the text from the cell
+                        var labelText = ExtractCellText(cell).Trim();
+                        labels.Add(labelText);
+
+                        Debug.WriteLine($"    Header label: {labelText}");
+                    }
+                }
+            }
+            else
+            {
+                // Alternative: Look for thead element
+                var thead = tableElem.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "thead");
+
+                if (thead != null)
+                {
+                    var headerRow = thead.Elements()
+                        .FirstOrDefault(e => e.Name.LocalName == "tr");
+
+                    if (headerRow != null)
+                    {
+                        var headerCells = headerRow.Elements()
+                            .Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th");
+
+                        foreach (var cell in headerCells)
+                        {
+                            var labelText = ExtractCellText(cell).Trim();
+                            labels.Add(labelText);
+                        }
+                    }
+                }
+            }
+
+            return labels;
+        }
+
+
+        private string ExtractCellText(XElement cell)
+        {
+            var sb = new StringBuilder();
+
+            foreach (var node in cell.Nodes())
+            {
+                if (node is XText textNode)
+                {
+                    sb.Append(textNode.Value);
+                }
+                else if (node is XElement elem)
+                {
+                    // Skip font tags but get their content
+                    if (elem.Name.LocalName == "font" || elem.Name.LocalName == "span")
+                    {
+                        sb.Append(ExtractCellText(elem));
+                    }
+                    else
+                    {
+                        sb.Append(elem.Value);
+                    }
+                }
+            }
+
+            return sb.ToString().Trim();
+        }
 
 
         private string ExtractTableName(XElement elem, string ctrlId)
@@ -3076,17 +3344,26 @@ namespace FormGenerator.Analyzers.Infopath
                 return null;
             }
 
-            // Better duplicate check - only skip if we've already extracted this exact control
-            if (!string.IsNullOrEmpty(ctrlId) && controlsById.ContainsKey(ctrlId))
+            // Context-aware duplicate check
+            string controlKey = "";
+            if (!string.IsNullOrEmpty(ctrlId))
             {
-                var existing = controlsById[ctrlId];
-                // If we already have this control with the same type and binding, skip it
-                if (existing.Type != "Label" && !string.IsNullOrEmpty(existing.Binding))
+                // Build contextual key
+                if (repeatingContextStack.Count > 0)
                 {
-                    Debug.WriteLine($"[TRY EXTRACT] Control {ctrlId} already extracted as {existing.Name}, skipping");
+                    controlKey = $"{repeatingContextStack.Peek().Name}::{ctrlId}";
+                }
+                else
+                {
+                    controlKey = ctrlId;
+                }
+
+                // Check if this exact control in this exact context has been processed
+                if (processedControls.Contains(controlKey))
+                {
+                    Debug.WriteLine($"[TRY EXTRACT] Control {ctrlId} already processed in this context ({controlKey}), skipping");
                     return null;
                 }
-                Debug.WriteLine($"[TRY EXTRACT] Control {ctrlId} exists but as label or without binding, may re-process");
             }
 
             ControlDefinition control = null;
@@ -3106,7 +3383,7 @@ namespace FormGenerator.Analyzers.Infopath
                 Debug.WriteLine($"[TRY EXTRACT] Created span control: {control.Name} with binding {control.Binding}");
             }
 
-            // Priority 2: Labels (but not if we have a binding)
+            // Priority 2: Labels - ENHANCED EXTRACTION
             if (control == null && string.IsNullOrEmpty(bindingAttr) && IsLabelElement(elem))
             {
                 var labelText = ExtractLabelText(elem);
@@ -3120,7 +3397,37 @@ namespace FormGenerator.Analyzers.Infopath
                         Binding = "",
                         DocIndex = ++docIndexCounter
                     };
-                    Debug.WriteLine($"[TRY EXTRACT] Created label control: {control.Name}");
+                    Debug.WriteLine($"[TRY EXTRACT] Created label control: {control.Name} with text: {labelText}");
+                }
+            }
+            // ALSO check for font elements with text content (common in InfoPath labels)
+            else if (control == null && string.IsNullOrEmpty(bindingAttr) && elemName == "font")
+            {
+                var labelText = ExtractLabelText(elem);
+                if (!string.IsNullOrWhiteSpace(labelText) && labelText.Length > 1)
+                {
+                    control = new ControlDefinition
+                    {
+                        Name = GenerateControlName(elem, labelText, "", "Label"),
+                        Type = "Label",
+                        Label = labelText,
+                        Binding = "",
+                        DocIndex = ++docIndexCounter
+                    };
+
+                    // Copy font attributes
+                    var color = elem.Attribute("color")?.Value;
+                    var face = elem.Attribute("face")?.Value;
+                    var size = elem.Attribute("size")?.Value;
+
+                    if (!string.IsNullOrEmpty(color))
+                        control.Properties["color"] = color;
+                    if (!string.IsNullOrEmpty(face))
+                        control.Properties["face"] = face;
+                    if (!string.IsNullOrEmpty(size))
+                        control.Properties["size"] = size;
+
+                    Debug.WriteLine($"[TRY EXTRACT] Created font label control: {control.Name} with text: {labelText}");
                 }
             }
 
@@ -3129,9 +3436,9 @@ namespace FormGenerator.Analyzers.Infopath
             {
                 // Skip structural elements
                 string[] structuralElements = {
-                    "ExpressionBox", "Section", "RepeatingSection",
-                    "RepeatingTable", "repeatingtable", "OptionalSection"
-                };
+            "ExpressionBox", "Section", "RepeatingSection",
+            "RepeatingTable", "repeatingtable", "OptionalSection"
+        };
 
                 if (!structuralElements.Any(s => s.Equals(xctAttr, StringComparison.OrdinalIgnoreCase)))
                 {
@@ -3182,10 +3489,11 @@ namespace FormGenerator.Analyzers.Infopath
                 {
                     control.Properties["CtrlId"] = ctrlId;
 
-                    // Only update controlsById if this is a data control (not a label)
-                    if (control.Type != "Label" || !controlsById.ContainsKey(ctrlId))
+                    // Mark this control as processed in this context
+                    if (!string.IsNullOrEmpty(controlKey))
                     {
-                        controlsById[ctrlId] = control;
+                        processedControls.Add(controlKey);
+                        Debug.WriteLine($"[TRY EXTRACT] Marked as processed: {controlKey}");
                     }
                 }
 
@@ -3207,14 +3515,6 @@ namespace FormGenerator.Analyzers.Infopath
                 }
 
                 Debug.WriteLine($"[TRY EXTRACT] Final control: Name={control.Name}, Type={control.Type}, Binding={control.Binding}, Grid={control.GridPosition}");
-            }
-            else
-            {
-                // Log why we didn't create a control
-                if (!string.IsNullOrEmpty(bindingAttr) || !string.IsNullOrEmpty(xctAttr) || !string.IsNullOrEmpty(ctrlId))
-                {
-                    Debug.WriteLine($"[TRY EXTRACT] No control created for element with binding={bindingAttr}, xctname={xctAttr}, ctrlId={ctrlId}");
-                }
             }
 
             return control;
@@ -3953,15 +4253,22 @@ namespace FormGenerator.Analyzers.Infopath
         {
             var elemName = elem.Name.LocalName.ToLower();
 
-            if (elemName == "strong" || elemName == "font" || elemName == "label" || elemName == "em")
+            // Check for common label elements
+            if (elemName == "strong" || elemName == "font" || elemName == "label" ||
+                elemName == "em" || elemName == "b" || elemName == "i")
             {
+                // Make sure this element doesn't contain input controls
                 if (!elem.Descendants().Any(d =>
                     !string.IsNullOrEmpty(GetAttributeValue(d, "xctname")) ||
+                    !string.IsNullOrEmpty(GetAttributeValue(d, "binding")) ||
                     d.Name.LocalName.Equals("object", StringComparison.OrdinalIgnoreCase) ||
                     d.Name.LocalName.Equals("input", StringComparison.OrdinalIgnoreCase) ||
-                    d.Name.LocalName.Equals("select", StringComparison.OrdinalIgnoreCase)))
+                    d.Name.LocalName.Equals("select", StringComparison.OrdinalIgnoreCase) ||
+                    d.Name.LocalName.Equals("textarea", StringComparison.OrdinalIgnoreCase)))
                 {
-                    return true;
+                    // Check if it has meaningful text content
+                    var text = GetDirectTextContent(elem).Trim();
+                    return !string.IsNullOrWhiteSpace(text) && text.Length > 1;
                 }
             }
 
@@ -3971,7 +4278,13 @@ namespace FormGenerator.Analyzers.Infopath
         private string ExtractLabelText(XElement elem)
         {
             var text = GetDirectTextContent(elem).Trim();
+
+            // Clean up the text
             text = Regex.Replace(text, @"\s+", " ");
+
+            // Remove any trailing colons if they exist (they'll be re-added if needed)
+            // But keep the colon in the actual label text for display
+
             return text;
         }
 
@@ -3988,12 +4301,40 @@ namespace FormGenerator.Analyzers.Infopath
                 else if (node is XElement childElem)
                 {
                     var childName = childElem.Name.LocalName.ToLower();
-                    if (childName is "strong" or "em" or "font" or "span" or "b" or "i")
+
+                    // Include text from formatting elements
+                    if (childName == "strong" || childName == "em" || childName == "font" ||
+                        childName == "span" || childName == "b" || childName == "i" ||
+                        childName == "u")
+                    {
                         sb.Append(GetDirectTextContent(childElem));
+                    }
+                    // Skip control elements but not their labels
+                    else if (!IsControlElement(childElem))
+                    {
+                        sb.Append(GetDirectTextContent(childElem));
+                    }
                 }
             }
 
             return sb.ToString();
+        }
+
+        private bool IsControlElement(XElement elem)
+        {
+            var elemName = elem.Name.LocalName.ToLower();
+
+            // Check if it's an input control
+            if (elemName == "input" || elemName == "select" || elemName == "textarea" ||
+                elemName == "object" || elemName == "button")
+                return true;
+
+            // Check if it has control attributes
+            if (!string.IsNullOrEmpty(GetAttributeValue(elem, "xctname")) ||
+                !string.IsNullOrEmpty(GetAttributeValue(elem, "binding")))
+                return true;
+
+            return false;
         }
 
         private string MapControlType(string rawType)
