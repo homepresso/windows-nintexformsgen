@@ -766,11 +766,53 @@ namespace FormGenerator.Analyzers.Infopath
 
         public List<ControlDefinition> ParseViewFile(string viewFile)
         {
+            Debug.WriteLine($"\n========================================");
+            Debug.WriteLine($"STARTING PARSE OF VIEW: {viewFile}");
+            Debug.WriteLine($"========================================\n");
+
             ResetParserState();
             XDocument doc = XDocument.Load(viewFile);
             ProcessElement(doc.Root);
+
+            Debug.WriteLine($"\n========================================");
+            Debug.WriteLine($"PARSE COMPLETE - Total Controls Found: {allControls.Count}");
+            Debug.WriteLine($"Controls by Type:");
+            var byType = allControls.GroupBy(c => c.Type)
+                .Select(g => new { Type = g.Key, Count = g.Count() })
+                .OrderBy(x => x.Type);
+            foreach (var typeGroup in byType)
+            {
+                Debug.WriteLine($"  {typeGroup.Type}: {typeGroup.Count}");
+            }
+
+            Debug.WriteLine($"\nControls in Repeating Sections:");
+            var inRepeating = allControls.Where(c => c.IsInRepeatingSection).ToList();
+            Debug.WriteLine($"  Total: {inRepeating.Count}");
+            var bySection = inRepeating.GroupBy(c => c.RepeatingSectionName)
+                .Select(g => new { Section = g.Key, Count = g.Count() });
+            foreach (var sectionGroup in bySection)
+            {
+                Debug.WriteLine($"  {sectionGroup.Section}: {sectionGroup.Count} controls");
+            }
+
+            // Additional debug: List all controls with their context
+            Debug.WriteLine($"\nDETAILED CONTROL LIST:");
+            foreach (var ctrl in allControls)
+            {
+                Debug.WriteLine($"  [{ctrl.DocIndex}] {ctrl.Name} ({ctrl.Type})");
+                if (!string.IsNullOrEmpty(ctrl.Binding))
+                    Debug.WriteLine($"      Binding: {ctrl.Binding}");
+                if (ctrl.IsInRepeatingSection)
+                    Debug.WriteLine($"      In Repeating: {ctrl.RepeatingSectionName}");
+                if (!string.IsNullOrEmpty(ctrl.ParentSection))
+                    Debug.WriteLine($"      In Section: {ctrl.ParentSection}");
+            }
+
+            Debug.WriteLine($"========================================\n");
+
             return new List<ControlDefinition>(allControls);
         }
+
 
         private void ResetParserState()
         {
@@ -805,7 +847,19 @@ namespace FormGenerator.Analyzers.Infopath
             var binding = GetAttributeValue(elem, "binding");
             if (!string.IsNullOrEmpty(binding))
             {
-                Debug.WriteLine($"Found element with binding: {binding}, type: {elemName}");
+                Debug.WriteLine($"[PROCESS] Found element with binding: {binding}, type: {elemName}");
+
+                // Log current context
+                if (repeatingContextStack.Count > 0)
+                {
+                    var contexts = string.Join(" > ", repeatingContextStack.Select(r => r.Name));
+                    Debug.WriteLine($"  Context: Inside repeating sections: {contexts}");
+                }
+                if (sectionStack.Count > 0)
+                {
+                    var sections = string.Join(" > ", sectionStack.Select(s => s.Name));
+                    Debug.WriteLine($"  Context: Inside sections: {sections}");
+                }
             }
 
             // Check if this is a repeating section div
@@ -830,7 +884,7 @@ namespace FormGenerator.Analyzers.Infopath
 
                 if (!string.IsNullOrEmpty(mode))
                 {
-                    Debug.WriteLine($"Found apply-templates with mode: {mode}, select: {select}");
+                    Debug.WriteLine($"[PROCESS] Found apply-templates with mode: {mode}, select: {select}");
 
                     // Build context key for tracking
                     string contextKey = mode;
@@ -852,6 +906,10 @@ namespace FormGenerator.Analyzers.Infopath
                             ProcessRepeatingApplyTemplates(elem, mode, select);
                             processedTemplates.Remove($"repeat::{select}");
                         }
+                        else
+                        {
+                            Debug.WriteLine($"[PROCESS] Repeating pattern {select} already processed");
+                        }
                     }
                     else
                     {
@@ -863,6 +921,10 @@ namespace FormGenerator.Analyzers.Infopath
                             {
                                 ProcessXslTemplate(matchingTemplate);
                             }
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[PROCESS] Template {contextKey} already processed");
                         }
                     }
                     return;
@@ -909,36 +971,93 @@ namespace FormGenerator.Analyzers.Infopath
             var control = TryExtractControl(elem);
             if (control != null)
             {
-                // FIX: Check for duplicate controls by CtrlId
+                // UPDATED DUPLICATE CHECK - More selective
+                bool shouldSkip = false;
+
                 if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
                 {
                     var ctrlId = control.Properties["CtrlId"];
                     if (!string.IsNullOrEmpty(ctrlId) && controlsById.ContainsKey(ctrlId))
                     {
-                        Debug.WriteLine($"Control with CtrlId {ctrlId} already processed, skipping duplicate");
-                        return;
+                        var existing = controlsById[ctrlId];
+
+                        // Only skip if:
+                        // 1. We're in the same context (both in templates or both not in templates)
+                        // 2. AND the control has the same binding
+                        // 3. AND it's not a main form control being processed for the first time
+                        bool sameContext = (insideXslTemplate && existing.Properties.ContainsKey("FromTemplate")) ||
+                                          (!insideXslTemplate && !existing.Properties.ContainsKey("FromTemplate"));
+
+                        bool isMainControl = string.IsNullOrEmpty(control.RepeatingSectionName) &&
+                                            repeatingContextStack.Count == 0;
+
+                        if (sameContext && existing.Binding == control.Binding && !isMainControl)
+                        {
+                            Debug.WriteLine($"[DUPLICATE] Control with CtrlId {ctrlId} already processed in same context, skipping");
+                            shouldSkip = true;
+                        }
+                        else if (isMainControl && !existing.Properties.ContainsKey("IsMainControl"))
+                        {
+                            // This is a main control, and the existing one isn't marked as main
+                            // Replace the existing one with this main control
+                            Debug.WriteLine($"[REPLACE] Replacing template control {ctrlId} with main control");
+                            controlsById.Remove(ctrlId);
+                            allControls.Remove(existing);
+                            shouldSkip = false;
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"[DUPLICATE] Control {ctrlId} exists but in different context, may process");
+                            shouldSkip = false;
+                        }
                     }
                 }
 
-                // Apply context (section/repeating information)
-                ApplyControlContext(control);
-
-                // Set grid position
-                control.GridPosition = currentRow + GetColumnLetter(currentCol);
-                control.DocIndex = ++docIndexCounter;
-
-                // Track control by ID if it has one
-                if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
+                if (!shouldSkip)
                 {
-                    var ctrlId = control.Properties["CtrlId"];
-                    if (!string.IsNullOrEmpty(ctrlId))
-                    {
-                        controlsById[ctrlId] = control;
-                    }
-                }
+                    // Apply context (section/repeating information)
+                    ApplyControlContext(control);
 
-                currentCol++;
-                allControls.Add(control);
+                    // Set grid position
+                    control.GridPosition = currentRow + GetColumnLetter(currentCol);
+                    control.DocIndex = ++docIndexCounter;
+
+                    // Mark if this is from a template or main form
+                    if (insideXslTemplate)
+                    {
+                        control.Properties["FromTemplate"] = "true";
+                    }
+                    else if (repeatingContextStack.Count == 0)
+                    {
+                        control.Properties["IsMainControl"] = "true";
+                    }
+
+                    // Track control by ID if it has one
+                    if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
+                    {
+                        var ctrlId = control.Properties["CtrlId"];
+                        if (!string.IsNullOrEmpty(ctrlId))
+                        {
+                            controlsById[ctrlId] = control;
+                        }
+                    }
+
+                    currentCol++;
+                    allControls.Add(control);
+
+                    // LOG: Successfully detected control
+                    Debug.WriteLine($"[CONTROL DETECTED] Name: {control.Name}, Type: {control.Type}, Binding: {control.Binding}");
+                    Debug.WriteLine($"  Grid: {control.GridPosition}, DocIndex: {control.DocIndex}");
+                    if (control.IsInRepeatingSection)
+                    {
+                        Debug.WriteLine($"  In Repeating Section: {control.RepeatingSectionName}");
+                    }
+                    if (!string.IsNullOrEmpty(control.ParentSection))
+                    {
+                        Debug.WriteLine($"  In Section: {control.ParentSection}");
+                    }
+                    Debug.WriteLine($"  Total controls so far: {allControls.Count}");
+                }
 
                 // Don't process children if we've extracted a control
                 return;
@@ -956,6 +1075,7 @@ namespace FormGenerator.Analyzers.Infopath
                 inTableRow = false;
             }
         }
+
         private XElement FindTemplate(XDocument doc, string mode)
         {
             if (doc == null || string.IsNullOrEmpty(mode))
@@ -1348,7 +1468,7 @@ namespace FormGenerator.Analyzers.Infopath
 
         private void ProcessRepeatingApplyTemplates(XElement elem, string mode, string select)
         {
-            Debug.WriteLine($"Processing repeating apply-templates - mode: {mode}, select: {select}");
+            Debug.WriteLine($"\n[REPEATING APPLY-TEMPLATES] Processing - mode: {mode}, select: {select}");
 
             // Extract section name from the select pattern
             string sectionName = ExtractSectionNameFromSelect(select);
@@ -1361,10 +1481,14 @@ namespace FormGenerator.Analyzers.Infopath
                 // For nested sections, combine parent and child names
                 string combinedName = $"{parentContext.DisplayName}_{sectionName}";
 
-                Debug.WriteLine($"Creating nested repeating section: {combinedName} (parent: {parentContext.DisplayName})");
+                Debug.WriteLine($"  Creating nested repeating section: {combinedName} (parent: {parentContext.DisplayName})");
 
                 // Use the combined name
                 sectionName = combinedName;
+            }
+            else
+            {
+                Debug.WriteLine($"  Creating top-level repeating section: {sectionName}");
             }
 
             // Ensure unique name
@@ -1398,7 +1522,11 @@ namespace FormGenerator.Analyzers.Infopath
                 };
                 sections.Add(sectionInfo);
 
-                Debug.WriteLine($"Created repeating section: {sectionName} at depth {repeatingContext.Depth}");
+                Debug.WriteLine($"  Created repeating section: {sectionName} at depth {repeatingContext.Depth}");
+            }
+            else
+            {
+                Debug.WriteLine($"  Already in context for {sectionName}, not creating duplicate");
             }
 
             // Find and process the corresponding template
@@ -1411,10 +1539,20 @@ namespace FormGenerator.Analyzers.Infopath
 
                 if (matchingTemplate != null)
                 {
+                    Debug.WriteLine($"  Processing template for mode {mode}");
+                    int controlCountBefore = allControls.Count;
+
                     foreach (var child in matchingTemplate.Elements())
                     {
                         ProcessElement(child);
                     }
+
+                    int controlsAdded = allControls.Count - controlCountBefore;
+                    Debug.WriteLine($"  Added {controlsAdded} controls from template");
+                }
+                else
+                {
+                    Debug.WriteLine($"  No matching template found for mode {mode}");
                 }
             }
 
@@ -1424,8 +1562,11 @@ namespace FormGenerator.Analyzers.Infopath
                 var sectionInfo = sections.LastOrDefault(s => s.Name == sectionName);
                 if (sectionInfo != null)
                     sectionInfo.EndRow = currentRow;
+
+                Debug.WriteLine($"  Finished processing repeating section {sectionName}");
             }
         }
+
 
         private string ExtractSectionNameFromSelect(string select)
         {
@@ -1490,11 +1631,14 @@ namespace FormGenerator.Analyzers.Infopath
 
         private void ApplyControlContext(ControlDefinition control)
         {
+            Debug.WriteLine($"[APPLY CONTEXT] Applying context to control {control.Name}");
+
             // Apply cosmetic section context
             if (!string.IsNullOrEmpty(currentSectionName))
             {
                 control.ParentSection = currentSectionName;
                 control.SectionType = "section";
+                Debug.WriteLine($"  Set parent section: {currentSectionName}");
             }
 
             // Apply repeating context - use the LAST (most specific) repeating section
@@ -1506,19 +1650,30 @@ namespace FormGenerator.Analyzers.Infopath
                 control.RepeatingSectionName = currentRepeating.DisplayName; // This will now be the combined name
                 control.RepeatingSectionBinding = currentRepeating.Binding;
 
+                Debug.WriteLine($"  Set repeating section: {currentRepeating.DisplayName}");
+                Debug.WriteLine($"  Repeating binding: {currentRepeating.Binding}");
+
                 // For debugging, track the nesting depth
                 if (repeatingContextStack.Count > 1)
                 {
                     control.Properties["NestingDepth"] = repeatingContextStack.Count.ToString();
+                    Debug.WriteLine($"  Nesting depth: {repeatingContextStack.Count}");
                 }
             }
         }
+
         private void ProcessXslTemplate(XElement templateElem)
         {
             var mode = templateElem.Attribute("mode")?.Value;
             var match = templateElem.Attribute("match")?.Value;
 
-            Debug.WriteLine($"Processing XSL template - mode: {mode}, match: {match}");
+            Debug.WriteLine($"\n[XSL TEMPLATE] Processing template - mode: {mode}, match: {match}");
+
+            // Log current context
+            if (repeatingContextStack.Count > 0)
+            {
+                Debug.WriteLine($"  In repeating context: {string.Join(" > ", repeatingContextStack.Select(r => r.Name))}");
+            }
 
             // Check if this template has already created its sections
             var ns = templateElem.Name.Namespace;
@@ -1536,7 +1691,7 @@ namespace FormGenerator.Analyzers.Infopath
                     var existingSection = sections.FirstOrDefault(s => s.CtrlId == ctrlId);
                     if (existingSection != null)
                     {
-                        Debug.WriteLine($"Template {mode} contains section {ctrlId} which already exists, skipping entire template");
+                        Debug.WriteLine($"[XSL TEMPLATE] Template {mode} contains section {ctrlId} which already exists, skipping entire template");
                         return; // Skip this entire template
                     }
                 }
@@ -1562,10 +1717,11 @@ namespace FormGenerator.Analyzers.Infopath
             // Check if we've already processed this exact template in this exact context
             if (processedTemplates.Contains(templateKey))
             {
-                Debug.WriteLine($"Template {templateKey} already processed in this exact context, skipping");
+                Debug.WriteLine($"[XSL TEMPLATE] Template {templateKey} already processed in this exact context, skipping");
                 return;
             }
 
+            Debug.WriteLine($"[XSL TEMPLATE] Processing new template with key: {templateKey}");
             processedTemplates.Add(templateKey);
 
             var previousTemplateMode = currentTemplateMode;
@@ -1579,12 +1735,13 @@ namespace FormGenerator.Analyzers.Infopath
 
                 if (ifElements.Any())
                 {
+                    Debug.WriteLine($"[XSL TEMPLATE] Found {ifElements.Count} conditional(s) in template");
                     bool hasProcessedConditional = false;
 
                     foreach (var ifElement in ifElements)
                     {
                         var testCondition = ifElement.Attribute("test")?.Value;
-                        Debug.WriteLine($"Found conditional in template with test: {testCondition}");
+                        Debug.WriteLine($"  Found conditional with test: {testCondition}");
 
                         // Check if this conditional creates a section
                         var sectionDiv = ifElement.Descendants()
@@ -1599,7 +1756,7 @@ namespace FormGenerator.Analyzers.Infopath
                             // If we're NOT in a repeating section, skip conditional sections that belong to repeating sections
                             if (repeatingContextStack.Count == 0 && IsConditionalForRepeatingSection(testCondition, ctrlId))
                             {
-                                Debug.WriteLine($"Skipping conditional section {ctrlId} - belongs to repeating section but not in repeating context");
+                                Debug.WriteLine($"  Skipping conditional section {ctrlId} - belongs to repeating section but not in repeating context");
                                 continue;
                             }
 
@@ -1609,7 +1766,7 @@ namespace FormGenerator.Analyzers.Infopath
                                 var currentRepeating = repeatingContextStack.Peek();
                                 if (!IsConditionalForCurrentContext(testCondition, currentRepeating))
                                 {
-                                    Debug.WriteLine($"Skipping conditional section {ctrlId} - not for current repeating context");
+                                    Debug.WriteLine($"  Skipping conditional section {ctrlId} - not for current repeating context");
                                     continue;
                                 }
                             }
@@ -1617,7 +1774,7 @@ namespace FormGenerator.Analyzers.Infopath
                             // Check if already processed
                             if (IsSectionAlreadyProcessed(ctrlId, mode))
                             {
-                                Debug.WriteLine($"Section {ctrlId} already processed, skipping");
+                                Debug.WriteLine($"  Section {ctrlId} already processed, skipping");
                                 continue;
                             }
 
@@ -1630,6 +1787,7 @@ namespace FormGenerator.Analyzers.Infopath
                             // BUT only if we're in the right context
                             if (ShouldProcessContentInCurrentContext(ifElement))
                             {
+                                Debug.WriteLine($"  Processing conditional content (no section)");
                                 foreach (var child in ifElement.Elements())
                                 {
                                     ProcessElement(child);
@@ -1645,6 +1803,7 @@ namespace FormGenerator.Analyzers.Infopath
                         var nonConditionalElements = templateElem.Elements()
                             .Where(e => e.Name.LocalName != "if");
 
+                        Debug.WriteLine($"[XSL TEMPLATE] Processing non-conditional elements");
                         foreach (var child in nonConditionalElements)
                         {
                             ProcessElement(child);
@@ -1656,10 +1815,15 @@ namespace FormGenerator.Analyzers.Infopath
                     // No conditional logic - but still check if this would create duplicates
                     if (!WouldCreateDuplicates(templateElem))
                     {
+                        Debug.WriteLine($"[XSL TEMPLATE] Processing template without conditionals");
                         foreach (var child in templateElem.Elements())
                         {
                             ProcessElement(child);
                         }
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"[XSL TEMPLATE] Skipping template - would create duplicates");
                     }
                 }
             }
@@ -1668,8 +1832,10 @@ namespace FormGenerator.Analyzers.Infopath
                 insideXslTemplate = false;
                 currentTemplateMode = previousTemplateMode;
                 processedTemplates.Remove(templateKey);
+                Debug.WriteLine($"[XSL TEMPLATE] Finished processing template {mode}");
             }
         }
+
 
         private bool WouldCreateDuplicates(XElement templateElem)
         {
@@ -2079,11 +2245,19 @@ namespace FormGenerator.Analyzers.Infopath
 
         private void ProcessRepeatingSection(XElement elem)
         {
+            Debug.WriteLine($"\n[REPEATING SECTION] Starting to process repeating section");
+
             var className = elem.Attribute("class")?.Value ?? "";
             var ctrlId = GetAttributeValue(elem, "CtrlId");
             var binding = GetAttributeValue(elem, "binding");
             var caption = GetAttributeValue(elem, "caption");
             var title = GetAttributeValue(elem, "title");
+
+            Debug.WriteLine($"  CtrlId: {ctrlId}");
+            Debug.WriteLine($"  Binding: {binding}");
+            Debug.WriteLine($"  Caption: {caption}");
+            Debug.WriteLine($"  Title: {title}");
+            Debug.WriteLine($"  Current depth: {repeatingContextStack.Count}");
 
             // Look for apply-templates to determine the actual repeating structure
             var applyTemplates = elem.Descendants()
@@ -2094,6 +2268,7 @@ namespace FormGenerator.Analyzers.Infopath
             {
                 var selectValue = applyTemplates.Attribute("select")?.Value;
                 binding = selectValue;
+                Debug.WriteLine($"  Updated binding from apply-templates: {binding}");
             }
 
             // Extract section name
@@ -2118,23 +2293,35 @@ namespace FormGenerator.Analyzers.Infopath
             if (repeatingContextStack.Count > 0)
             {
                 var parentContext = repeatingContextStack.Peek();
+                var originalName = sectionName;
                 sectionName = $"{parentContext.DisplayName}_{sectionName}";
-                Debug.WriteLine($"Creating nested section: {sectionName}");
+                Debug.WriteLine($"[REPEATING SECTION] Creating nested section: {sectionName} (parent: {parentContext.DisplayName}, original: {originalName})");
+            }
+            else
+            {
+                Debug.WriteLine($"[REPEATING SECTION] Creating top-level section: {sectionName}");
             }
 
             // Create the repeating section with the (possibly combined) name
             CreateRepeatingSection(sectionName, binding, "section");
 
+            Debug.WriteLine($"[REPEATING SECTION] Processing children of {sectionName}");
+            int controlCountBefore = allControls.Count;
+
             // Process children
             foreach (var child in elem.Elements())
                 ProcessElement(child);
+
+            int controlsAdded = allControls.Count - controlCountBefore;
+            Debug.WriteLine($"[REPEATING SECTION] Added {controlsAdded} controls to {sectionName}");
 
             var context = repeatingContextStack.Pop();
             var sectionInfo = sections.LastOrDefault(s => s.Name == context.DisplayName);
             if (sectionInfo != null)
                 sectionInfo.EndRow = currentRow;
-        }
 
+            Debug.WriteLine($"[REPEATING SECTION] Finished processing {sectionName}");
+        }
 
         private bool IsRegularSection(XElement elem)
         {
@@ -2266,9 +2453,15 @@ namespace FormGenerator.Analyzers.Infopath
         {
             var ctrlId = GetAttributeValue(elem, "CtrlId");
 
+            Debug.WriteLine($"\n[REPEATING TABLE] Starting to process repeating table");
+            Debug.WriteLine($"  CtrlId: {ctrlId}");
+
             // Skip if already processed
             if (!string.IsNullOrEmpty(ctrlId) && processedControls.Contains(ctrlId))
+            {
+                Debug.WriteLine($"  Table {ctrlId} already processed, skipping");
                 return;
+            }
 
             // Extract table name from multiple sources
             string tableName = ExtractTableName(elem, ctrlId);
@@ -2280,7 +2473,10 @@ namespace FormGenerator.Analyzers.Infopath
                 tableName = $"Table_Repeating{repeatingSectionCounter}";
             }
 
+            Debug.WriteLine($"  Table name: {tableName}");
+
             var binding = GetTableBinding(elem);
+            Debug.WriteLine($"  Binding: {binding}");
 
             // Create the table control
             var tableControl = new ControlDefinition
@@ -2300,6 +2496,7 @@ namespace FormGenerator.Analyzers.Infopath
                 tableControl.IsInRepeatingSection = true;
                 tableControl.RepeatingSectionName = parentContext.DisplayName;
                 tableControl.RepeatingSectionBinding = parentContext.Binding;
+                Debug.WriteLine($"  Table is nested in repeating section: {parentContext.DisplayName}");
             }
 
             tableControl.Properties["TableType"] = "Repeating";
@@ -2313,6 +2510,7 @@ namespace FormGenerator.Analyzers.Infopath
             }
 
             allControls.Add(tableControl);
+            Debug.WriteLine($"  Added table control to collection");
 
             // Move to next row for table contents
             currentRow++;
@@ -2321,8 +2519,9 @@ namespace FormGenerator.Analyzers.Infopath
             // Create repeating context with guaranteed name
             CreateRepeatingSection(tableName, binding, "table");
 
-            // Process table structure...
-            // [Rest of the table processing code remains the same]
+            // CRITICAL: Process the table structure to extract controls within it
+            Debug.WriteLine($"  Processing table structure for controls...");
+            ProcessTableStructure(elem);
 
             // Pop the repeating context
             if (repeatingContextStack.Count > 0)
@@ -2333,8 +2532,187 @@ namespace FormGenerator.Analyzers.Infopath
                 {
                     sectionInfo.EndRow = currentRow;
                 }
+                Debug.WriteLine($"[REPEATING TABLE] Finished processing {tableName}");
             }
         }
+
+        private void ProcessTableStructure(XElement tableElem)
+        {
+            Debug.WriteLine($"[TABLE STRUCTURE] Processing table for controls");
+
+            // Look for tbody with xd:xctname="repeatingtable"
+            var tbody = tableElem.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "tbody" &&
+                                    (GetAttributeValue(e, "xctname") == "repeatingtable" ||
+                                     e.Attribute("class")?.Value?.Contains("repeatingtable") == true));
+
+            if (tbody == null)
+            {
+                // If not found, look for any tbody that's not a header/footer
+                tbody = tableElem.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "tbody" &&
+                                        e.Attribute("class")?.Value?.Contains("TableHeader") != true &&
+                                        e.Attribute("class")?.Value?.Contains("TableFooter") != true);
+            }
+
+            if (tbody != null)
+            {
+                Debug.WriteLine($"  Found table body, looking for xsl:for-each");
+
+                // Look for xsl:for-each which indicates the repeating pattern
+                var forEach = tbody.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "for-each");
+
+                if (forEach != null)
+                {
+                    var select = forEach.Attribute("select")?.Value;
+                    Debug.WriteLine($"  Found for-each with select: {select}");
+
+                    // Process the content inside for-each
+                    ProcessTableForEach(forEach);
+                }
+                else
+                {
+                    Debug.WriteLine($"  No for-each found, processing tbody children directly");
+                    // Process tbody children directly
+                    foreach (var child in tbody.Elements())
+                    {
+                        ProcessElement(child);
+                    }
+                }
+            }
+            else
+            {
+                Debug.WriteLine($"  No tbody found, processing table children");
+                // Process all children if no tbody found
+                foreach (var child in tableElem.Elements())
+                {
+                    ProcessElement(child);
+                }
+            }
+        }
+
+        private void ProcessTableForEach(XElement forEachElem)
+        {
+            Debug.WriteLine($"[TABLE FOR-EACH] Processing for-each content");
+            var select = forEachElem.Attribute("select")?.Value;
+
+            // Process the template row(s) inside for-each
+            foreach (var tr in forEachElem.Elements().Where(e => e.Name.LocalName == "tr"))
+            {
+                Debug.WriteLine($"  Processing table row");
+                ProcessTableRow(tr);
+            }
+        }
+
+        private void ProcessTableRow(XElement rowElem)
+        {
+            Debug.WriteLine($"[TABLE ROW] Processing row for controls");
+            currentCol = 1; // Reset column for new row
+
+            // Process each cell in the row
+            foreach (var td in rowElem.Elements().Where(e => e.Name.LocalName == "td"))
+            {
+                Debug.WriteLine($"  Processing table cell at column {currentCol}");
+
+                // Look for controls within the cell
+                var controlsFound = ExtractControlsFromTableCell(td);
+
+                if (controlsFound == 0)
+                {
+                    // No controls found, but still increment column
+                    currentCol++;
+                }
+            }
+
+            currentRow++; // Move to next row after processing
+        }
+
+        private int ExtractControlsFromTableCell(XElement cellElem)
+        {
+            int controlsFound = 0;
+
+            // Look for span elements with binding (most common in InfoPath tables)
+            var spans = cellElem.Descendants()
+                .Where(e => e.Name.LocalName == "span" &&
+                           !string.IsNullOrEmpty(GetAttributeValue(e, "binding")));
+
+            foreach (var span in spans)
+            {
+                Debug.WriteLine($"    Found span with binding in table cell");
+                var control = TryExtractControl(span);
+                if (control != null)
+                {
+                    ApplyControlContext(control);
+                    control.GridPosition = currentRow + GetColumnLetter(currentCol);
+                    control.DocIndex = ++docIndexCounter;
+
+                    if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
+                    {
+                        var ctrlId = control.Properties["CtrlId"];
+                        if (!string.IsNullOrEmpty(ctrlId))
+                        {
+                            controlsById[ctrlId] = control;
+                        }
+                    }
+
+                    allControls.Add(control);
+                    controlsFound++;
+
+                    Debug.WriteLine($"    Added table control: {control.Name} ({control.Type}) with binding {control.Binding}");
+                    if (control.IsInRepeatingSection)
+                    {
+                        Debug.WriteLine($"      In repeating: {control.RepeatingSectionName}");
+                    }
+                }
+            }
+
+            // Also check for other control types (select, input, etc.)
+            var otherControls = cellElem.Descendants()
+                .Where(e => (e.Name.LocalName == "select" ||
+                            e.Name.LocalName == "input" ||
+                            e.Name.LocalName == "textarea" ||
+                            !string.IsNullOrEmpty(GetAttributeValue(e, "xctname"))) &&
+                           !e.Ancestors().Any(a => a.Name.LocalName == "span" &&
+                                                  !string.IsNullOrEmpty(GetAttributeValue(a, "binding"))));
+
+            foreach (var elem in otherControls)
+            {
+                Debug.WriteLine($"    Found {elem.Name.LocalName} control in table cell");
+                var control = TryExtractControl(elem);
+                if (control != null)
+                {
+                    ApplyControlContext(control);
+                    control.GridPosition = currentRow + GetColumnLetter(currentCol);
+                    control.DocIndex = ++docIndexCounter;
+
+                    if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
+                    {
+                        var ctrlId = control.Properties["CtrlId"];
+                        if (!string.IsNullOrEmpty(ctrlId))
+                        {
+                            controlsById[ctrlId] = control;
+                        }
+                    }
+
+                    allControls.Add(control);
+                    controlsFound++;
+
+                    Debug.WriteLine($"    Added table control: {control.Name} ({control.Type})");
+                }
+            }
+
+            // Increment column if we found controls
+            if (controlsFound > 0)
+            {
+                currentCol++;
+            }
+
+            return controlsFound;
+        }
+
+
+
 
         private string ExtractTableName(XElement elem, string ctrlId)
         {
@@ -2594,7 +2972,7 @@ namespace FormGenerator.Analyzers.Infopath
             return false;
         }
 
-  
+
 
         // NEW METHOD: Extract span controls (common in InfoPath)
         private ControlDefinition TryExtractSpanControl(XElement elem)
@@ -2670,19 +3048,32 @@ namespace FormGenerator.Analyzers.Infopath
         {
             var elemName = elem.Name.LocalName.ToLower();
 
-            // Skip if this is a table (should be handled by ProcessRepeatingTable)
-            if (elemName == "table")
-                return null;
-
-            // Get control identifiers
+            // Debug logging at start
             var ctrlId = GetAttributeValue(elem, "CtrlId");
             var xctAttr = GetAttributeValue(elem, "xctname");
             var bindingAttr = GetAttributeValue(elem, "binding") ?? GetAttributeValue(elem, "xd:binding");
 
-            // Debug what we're looking at
-            if (!string.IsNullOrEmpty(bindingAttr) || !string.IsNullOrEmpty(xctAttr))
+            if (!string.IsNullOrEmpty(bindingAttr) || !string.IsNullOrEmpty(xctAttr) || !string.IsNullOrEmpty(ctrlId))
             {
-                Debug.WriteLine($"TryExtractControl: elem={elemName}, binding={bindingAttr}, xctname={xctAttr}, ctrlId={ctrlId}");
+                Debug.WriteLine($"\n[TRY EXTRACT] Examining element:");
+                Debug.WriteLine($"  Element: {elemName}");
+                Debug.WriteLine($"  CtrlId: {ctrlId}");
+                Debug.WriteLine($"  xctname: {xctAttr}");
+                Debug.WriteLine($"  binding: {bindingAttr}");
+                Debug.WriteLine($"  class: {elem.Attribute("class")?.Value}");
+
+                // Log context
+                if (repeatingContextStack.Count > 0)
+                {
+                    Debug.WriteLine($"  Repeating Context: {string.Join(" > ", repeatingContextStack.Select(r => r.Name))}");
+                }
+            }
+
+            // Skip if this is a table (should be handled by ProcessRepeatingTable)
+            if (elemName == "table")
+            {
+                Debug.WriteLine($"[TRY EXTRACT] Skipping table element");
+                return null;
             }
 
             // Better duplicate check - only skip if we've already extracted this exact control
@@ -2692,9 +3083,10 @@ namespace FormGenerator.Analyzers.Infopath
                 // If we already have this control with the same type and binding, skip it
                 if (existing.Type != "Label" && !string.IsNullOrEmpty(existing.Binding))
                 {
-                    Debug.WriteLine($"Control {ctrlId} already extracted as {existing.Name}, skipping");
+                    Debug.WriteLine($"[TRY EXTRACT] Control {ctrlId} already extracted as {existing.Name}, skipping");
                     return null;
                 }
+                Debug.WriteLine($"[TRY EXTRACT] Control {ctrlId} exists but as label or without binding, may re-process");
             }
 
             ControlDefinition control = null;
@@ -2711,7 +3103,7 @@ namespace FormGenerator.Analyzers.Infopath
                 };
 
                 control.Name = GenerateControlName(elem, control.Label, control.Binding, control.Type);
-                Debug.WriteLine($"Found span control: {control.Name} with binding {control.Binding}");
+                Debug.WriteLine($"[TRY EXTRACT] Created span control: {control.Name} with binding {control.Binding}");
             }
 
             // Priority 2: Labels (but not if we have a binding)
@@ -2728,6 +3120,7 @@ namespace FormGenerator.Analyzers.Infopath
                         Binding = "",
                         DocIndex = ++docIndexCounter
                     };
+                    Debug.WriteLine($"[TRY EXTRACT] Created label control: {control.Name}");
                 }
             }
 
@@ -2736,37 +3129,51 @@ namespace FormGenerator.Analyzers.Infopath
             {
                 // Skip structural elements
                 string[] structuralElements = {
-            "ExpressionBox", "Section", "RepeatingSection",
-            "RepeatingTable", "repeatingtable", "OptionalSection"
-        };
+                    "ExpressionBox", "Section", "RepeatingSection",
+                    "RepeatingTable", "repeatingtable", "OptionalSection"
+                };
 
                 if (!structuralElements.Any(s => s.Equals(xctAttr, StringComparison.OrdinalIgnoreCase)))
                 {
+                    Debug.WriteLine($"[TRY EXTRACT] Processing xctname control: {xctAttr}");
                     control = ParseXctControl(elem, xctAttr);
+                }
+                else
+                {
+                    Debug.WriteLine($"[TRY EXTRACT] Skipping structural element: {xctAttr}");
                 }
             }
 
             // Priority 4: HTML form controls
             if (control == null && (elemName == "input" || elemName == "select" || elemName == "textarea"))
             {
+                Debug.WriteLine($"[TRY EXTRACT] Processing HTML control: {elemName}");
                 control = ParseHtmlControl(elem);
             }
 
             // Priority 5: ActiveX/Object controls
             if (control == null && elemName == "object")
             {
+                Debug.WriteLine($"[TRY EXTRACT] Processing ActiveX control");
                 control = ParseActiveXControl(elem);
             }
 
             // Priority 6: Any other element with binding
             if (control == null && !string.IsNullOrEmpty(bindingAttr))
             {
+                Debug.WriteLine($"[TRY EXTRACT] Processing generic bound control");
                 control = ParseGenericBoundControl(elem);
             }
 
             // If we found a control, finalize it
             if (control != null)
             {
+                Debug.WriteLine($"[TRY EXTRACT] Successfully created control:");
+                Debug.WriteLine($"  Name: {control.Name}");
+                Debug.WriteLine($"  Type: {control.Type}");
+                Debug.WriteLine($"  Binding: {control.Binding}");
+                Debug.WriteLine($"  Label: {control.Label}");
+
                 // Assign grid position BEFORE storing
                 control.GridPosition = GetCurrentGridPosition();
 
@@ -2795,10 +3202,19 @@ namespace FormGenerator.Analyzers.Infopath
                 // Extract dropdown options if applicable
                 if (control.Type == "DropDown" || control.Type == "ComboBox" || control.Type == "ListBox")
                 {
+                    Debug.WriteLine($"[TRY EXTRACT] Extracting dropdown options for {control.Name}");
                     ExtractDropdownOptions(elem, control);
                 }
 
-                Debug.WriteLine($"Created control: Name={control.Name}, Type={control.Type}, Binding={control.Binding}, Grid={control.GridPosition}");
+                Debug.WriteLine($"[TRY EXTRACT] Final control: Name={control.Name}, Type={control.Type}, Binding={control.Binding}, Grid={control.GridPosition}");
+            }
+            else
+            {
+                // Log why we didn't create a control
+                if (!string.IsNullOrEmpty(bindingAttr) || !string.IsNullOrEmpty(xctAttr) || !string.IsNullOrEmpty(ctrlId))
+                {
+                    Debug.WriteLine($"[TRY EXTRACT] No control created for element with binding={bindingAttr}, xctname={xctAttr}, ctrlId={ctrlId}");
+                }
             }
 
             return control;
@@ -3873,6 +4289,6 @@ namespace FormGenerator.Analyzers.Infopath
             return controlElements;
         }
     }
+}
 
     #endregion
-}
