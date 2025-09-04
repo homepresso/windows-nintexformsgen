@@ -15,9 +15,8 @@ namespace FormGenerator.Analyzers.Infopath
 
     public class InfoPathFormDefinition
     {
-
-        public string FormName { get; set; }  // The name of the form (from filename or metadata)
-        public string FileName { get; set; }  // The original XSN filename
+        public string FormName { get; set; }
+        public string FileName { get; set; }
         public string Title { get; set; }
         public List<ViewDefinition> Views { get; set; } = new List<ViewDefinition>();
         public List<FormRule> Rules { get; set; } = new List<FormRule>();
@@ -25,6 +24,19 @@ namespace FormGenerator.Analyzers.Infopath
         public List<DynamicSection> DynamicSections { get; set; } = new List<DynamicSection>();
         public Dictionary<string, List<string>> ConditionalVisibility { get; set; } = new Dictionary<string, List<string>>();
         public FormMetadata Metadata { get; set; } = new FormMetadata();
+        public DebugInfo DebugInfo { get; set; } = new DebugInfo();
+    }
+
+    public class DebugInfo
+    {
+        public List<string> SkippedElements { get; set; } = new List<string>();
+        public List<string> ProcessedElements { get; set; } = new List<string>();
+        public Dictionary<string, int> ElementTypeCounts { get; set; } = new Dictionary<string, int>();
+        public List<string> ExpressionBoxContents { get; set; } = new List<string>();
+        public int TotalElementsExamined { get; set; }
+        public int ControlsExtracted { get; set; }
+        public List<string> DuplicatesSkipped { get; set; } = new List<string>();
+        public List<string> BindingPaths { get; set; } = new List<string>();
     }
 
     public class ViewDefinition
@@ -54,11 +66,11 @@ namespace FormGenerator.Analyzers.Infopath
         public bool IsInRepeatingSection { get; set; }
         public string RepeatingSectionName { get; set; }
         public string RepeatingSectionBinding { get; set; }
+        public bool WasInExpressionBox { get; set; }  // Track if control was inside ExpressionBox
         public Dictionary<string, string> Properties { get; set; }
         public List<ControlDefinition> Controls { get; set; }
-
         public List<DataOption> DataOptions { get; set; }
-        public string DataOptionsString { get; set; } // Comma-separated for simple display
+        public string DataOptionsString { get; set; }
         public bool HasStaticData => DataOptions != null && DataOptions.Any();
 
         public ControlDefinition()
@@ -102,15 +114,6 @@ namespace FormGenerator.Analyzers.Infopath
         public string Expression { get; set; }
     }
 
-    public class ValidValue
-    {
-        public string Value { get; set; }
-        public string DisplayText { get; set; }
-        public int Order { get; set; }
-        public bool IsDefault { get; set; }
-    }
-
-
     public class DataColumn
     {
         public string ColumnName { get; set; }
@@ -121,7 +124,6 @@ namespace FormGenerator.Analyzers.Infopath
         public bool IsConditional { get; set; }
         public string ConditionalOnField { get; set; }
         public string DisplayName { get; set; }
-
         public List<DataOption> ValidValues { get; set; }
         public string DefaultValue { get; set; }
         public bool HasConstraints => ValidValues != null && ValidValues.Any();
@@ -154,6 +156,8 @@ namespace FormGenerator.Analyzers.Infopath
 
     public class EnhancedInfoPathParser
     {
+        private DebugInfo debugInfo = new DebugInfo();
+
         public InfoPathFormDefinition ParseXsnFile(string xsnFilePath)
         {
             string tempDir = Path.Combine(
@@ -163,12 +167,14 @@ namespace FormGenerator.Analyzers.Infopath
 
             try
             {
-                Console.WriteLine("Extracting XSN to " + tempDir);
+                Console.WriteLine("========== ENHANCED DEBUG MODE ==========");
+                Console.WriteLine($"Extracting XSN to {tempDir}");
 
                 if (!ExtractXsn(xsnFilePath, tempDir))
                     throw new Exception("Failed to extract XSN file using all available methods.");
 
                 var formDef = new InfoPathFormDefinition();
+                formDef.DebugInfo = debugInfo;
 
                 var viewFiles = Directory.GetFiles(tempDir, "view*.xsl");
                 if (viewFiles.Length == 0)
@@ -180,7 +186,7 @@ namespace FormGenerator.Analyzers.Infopath
                     Console.WriteLine($"Found {viewFiles.Length} view files");
                     foreach (var vf in viewFiles)
                     {
-                        Console.WriteLine($"Parsing view: {Path.GetFileName(vf)}");
+                        Console.WriteLine($"\n===== PARSING VIEW: {Path.GetFileName(vf)} =====");
                         var singleView = ParseSingleView(vf);
 
                         var xslDoc = XDocument.Load(vf);
@@ -193,6 +199,7 @@ namespace FormGenerator.Analyzers.Infopath
                 }
 
                 PostProcessFormDefinition(formDef);
+                PrintDebugSummary();
                 return formDef;
             }
             finally
@@ -205,6 +212,48 @@ namespace FormGenerator.Analyzers.Infopath
                 catch (Exception ex)
                 {
                     Console.WriteLine("Warning: Cleanup failed: " + ex.Message);
+                }
+            }
+        }
+
+        private void PrintDebugSummary()
+        {
+            Console.WriteLine("\n========== DEBUG SUMMARY ==========");
+            Console.WriteLine($"Total elements examined: {debugInfo.TotalElementsExamined}");
+            Console.WriteLine($"Controls extracted: {debugInfo.ControlsExtracted}");
+            Console.WriteLine($"Duplicates skipped: {debugInfo.DuplicatesSkipped.Count}");
+            Console.WriteLine($"Expression boxes processed: {debugInfo.ExpressionBoxContents.Count}");
+
+            Console.WriteLine("\n--- Element Type Counts ---");
+            foreach (var kvp in debugInfo.ElementTypeCounts.OrderByDescending(x => x.Value))
+            {
+                Console.WriteLine($"  {kvp.Key}: {kvp.Value}");
+            }
+
+            if (debugInfo.SkippedElements.Any())
+            {
+                Console.WriteLine($"\n--- Skipped Elements (first 20) ---");
+                foreach (var elem in debugInfo.SkippedElements.Take(20))
+                {
+                    Console.WriteLine($"  {elem}");
+                }
+            }
+
+            if (debugInfo.ExpressionBoxContents.Any())
+            {
+                Console.WriteLine($"\n--- Expression Box Contents ---");
+                foreach (var content in debugInfo.ExpressionBoxContents)
+                {
+                    Console.WriteLine($"  {content}");
+                }
+            }
+
+            if (debugInfo.BindingPaths.Any())
+            {
+                Console.WriteLine($"\n--- Unique Binding Paths ---");
+                foreach (var binding in debugInfo.BindingPaths.Distinct().OrderBy(x => x))
+                {
+                    Console.WriteLine($"  {binding}");
                 }
             }
         }
@@ -254,7 +303,7 @@ namespace FormGenerator.Analyzers.Infopath
                 ViewName = Path.GetFileName(viewFile)
             };
 
-            var sectionParser = new SectionAwareParser();
+            var sectionParser = new SectionAwareParser(debugInfo);
             var labelAssociator = new LabelControlAssociator();
             var labelHandler = new ComplexLabelHandler();
 
@@ -347,7 +396,7 @@ namespace FormGenerator.Analyzers.Infopath
                     {
                         ColumnName = colName,
                         Type = ctrl.Type,
-                        RepeatingSection = repeating,  // This will now have the correct value
+                        RepeatingSection = repeating,
                         IsRepeating = ctrl.SectionType == "repeating" || ctrl.IsInRepeatingSection,
                         RepeatingSectionPath = ctrl.IsInRepeatingSection ? ctrl.RepeatingSectionBinding : repeating,
                         DisplayName = ctrl.Label
@@ -356,7 +405,6 @@ namespace FormGenerator.Analyzers.Infopath
                     if (ctrl.HasStaticData && ctrl.DataOptions != null && ctrl.DataOptions.Any())
                     {
                         dataCol.ValidValues = new List<DataOption>(ctrl.DataOptions);
-
                         var defaultOption = ctrl.DataOptions.FirstOrDefault(o => o.IsDefault);
                         if (defaultOption != null)
                         {
@@ -390,7 +438,6 @@ namespace FormGenerator.Analyzers.Infopath
                         ctrl.DataOptions.Any() && existingCol.ValidValues == null)
                     {
                         existingCol.ValidValues = new List<DataOption>(ctrl.DataOptions);
-
                         var defaultOption = ctrl.DataOptions.FirstOrDefault(o => o.IsDefault);
                         if (defaultOption != null && string.IsNullOrEmpty(existingCol.DefaultValue))
                         {
@@ -406,7 +453,6 @@ namespace FormGenerator.Analyzers.Infopath
         private void AddFormMetadata(InfoPathFormDefinition formDef)
         {
             var allControls = GetAllControlsFromAllViews(formDef);
-
             var repeatingSectionCount = 0;
 
             var repeatingSections = formDef.Views
@@ -436,6 +482,14 @@ namespace FormGenerator.Analyzers.Infopath
             Console.WriteLine($"Found {otherRepeating.Count} other repeating sections:");
             foreach (var other in otherRepeating)
                 Console.WriteLine($"  - {other.Name} (Label: {other.Label})");
+
+            // Log controls found in expression boxes
+            var expressionBoxControls = allControls.Where(c => c.WasInExpressionBox).ToList();
+            Console.WriteLine($"\nControls extracted from ExpressionBoxes: {expressionBoxControls.Count}");
+            foreach (var ctrl in expressionBoxControls)
+            {
+                Console.WriteLine($"  - {ctrl.Name} ({ctrl.Type}) - Binding: {ctrl.Binding}");
+            }
 
             Console.WriteLine($"Total repeating sections/tables: {repeatingSectionCount}");
 
@@ -505,10 +559,11 @@ namespace FormGenerator.Analyzers.Infopath
 
     #endregion
 
-    #region Section-Aware Parser
+    #region Section-Aware Parser with Enhanced Debugging
 
     public class SectionAwareParser
     {
+        private DebugInfo debugInfo;
         private Stack<SectionContext> sectionStack;
         private List<SectionInfo> sections;
         private int docIndexCounter;
@@ -521,18 +576,18 @@ namespace FormGenerator.Analyzers.Infopath
         private Stack<RepeatingContext> repeatingContextStack;
         private Queue<LabelInfo> recentLabels;
         private const int LABEL_LOOKBACK_COUNT = 5;
-
         private Dictionary<string, ControlDefinition> controlsById;
         private bool insideXslTemplate = false;
         private string currentTemplateMode = null;
         private HashSet<string> processedTemplates;
-        private int repeatingSectionCounter = 0;  // Add this counter
+        private int repeatingSectionCounter = 0;
         private Dictionary<string, int> sectionNameCounters = new Dictionary<string, int>();
         private HashSet<string> viewRepeatingSectionNames;
         private List<string> currentTableHeaders;
         private int currentTableColumn;
-
         private string currentSectionName = null;
+        private bool insideExpressionBox = false;
+        private int expressionBoxDepth = 0;
 
         public class LabelInfo
         {
@@ -557,13 +612,14 @@ namespace FormGenerator.Analyzers.Infopath
         {
             public string Name { get; set; }
             public string Binding { get; set; }
-            public string Type { get; set; } // "table" or "section"
+            public string Type { get; set; }
             public string DisplayName { get; set; }
             public int Depth { get; set; }
         }
 
-        public SectionAwareParser()
+        public SectionAwareParser(DebugInfo debug)
         {
+            debugInfo = debug ?? new DebugInfo();
             InitializeCollections();
         }
 
@@ -580,190 +636,7 @@ namespace FormGenerator.Analyzers.Infopath
             processedTemplates = new HashSet<string>();
             repeatingSectionCounter = 0;
             viewRepeatingSectionNames = new HashSet<string>();
-
             currentSectionName = null;
-        }
-
-        private void ExtractDropdownOptions(XElement elem, ControlDefinition control)
-        {
-            try
-            {
-                Debug.WriteLine($"Extracting dropdown options for control: {control.Name} (Type: {control.Type})");
-
-                var options = elem.Descendants()
-                    .Where(e => e.Name.LocalName.Equals("option", StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                Debug.WriteLine($"Found {options.Count} option elements");
-
-                if (options.Any())
-                {
-                    control.DataOptions = new List<DataOption>();
-                    int order = 0;
-
-                    foreach (var option in options)
-                    {
-                        var dataOption = new DataOption
-                        {
-                            Value = option.Attribute("value")?.Value ?? "",
-                            DisplayText = GetOptionDisplayText(option),
-                            Order = order++
-                        };
-
-                        var selectedAttr = option.Attribute("selected");
-                        if (selectedAttr != null)
-                            dataOption.IsDefault = true;
-
-                        control.DataOptions.Add(dataOption);
-                    }
-
-                    control.DataOptionsString = string.Join(", ",
-                        control.DataOptions.Select(o => o.DisplayText));
-
-                    Debug.WriteLine($"DataOptionsString: {control.DataOptionsString}");
-
-                    control.Properties["DataValues"] = control.DataOptionsString;
-                    if (control.DataOptions.Any(o => o.IsDefault))
-                    {
-                        var defaultOption = control.DataOptions.First(o => o.IsDefault);
-                        control.Properties["DefaultValue"] = defaultOption.Value;
-                    }
-                }
-                else
-                {
-                    Debug.WriteLine("No option elements found in dropdown");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error extracting dropdown options: {ex.Message}");
-                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-            }
-        }
-
-        private void ExtractRadioButtonOptions(XElement elem, ControlDefinition control)
-        {
-            try
-            {
-                var radioGroup = GetRadioButtonGroup(elem);
-                if (radioGroup != null && radioGroup.Any())
-                {
-                    control.DataOptions = new List<DataOption>();
-                    int order = 0;
-
-                    foreach (var radio in radioGroup)
-                    {
-                        var dataOption = new DataOption
-                        {
-                            Value = radio.Attribute("value")?.Value ?? "",
-                            DisplayText = GetRadioButtonLabel(radio),
-                            Order = order++
-                        };
-
-                        var checkedAttr = radio.Attribute("checked");
-                        if (checkedAttr != null)
-                            dataOption.IsDefault = true;
-
-                        control.DataOptions.Add(dataOption);
-                    }
-
-                    control.DataOptionsString = string.Join(", ",
-                        control.DataOptions.Select(o => o.DisplayText));
-                    control.Properties["DataValues"] = control.DataOptionsString;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error extracting radio options: {ex.Message}");
-            }
-        }
-
-        private List<XElement> GetRadioButtonGroup(XElement radioElement)
-        {
-            var name = radioElement.Attribute("name")?.Value;
-            if (string.IsNullOrEmpty(name))
-                return null;
-
-            var container = radioElement.Parent;
-            while (container != null &&
-                   !container.Name.LocalName.Equals("div", StringComparison.OrdinalIgnoreCase) &&
-                   !container.Name.LocalName.Equals("td", StringComparison.OrdinalIgnoreCase))
-            {
-                container = container.Parent;
-            }
-
-            if (container == null)
-                container = radioElement.Parent;
-
-            return container.Descendants()
-                .Where(e => e.Name.LocalName.Equals("input", StringComparison.OrdinalIgnoreCase) &&
-                           e.Attribute("type")?.Value?.Equals("radio", StringComparison.OrdinalIgnoreCase) == true &&
-                           e.Attribute("name")?.Value == name)
-                .ToList();
-        }
-
-        private string GetRadioButtonLabel(XElement radio)
-        {
-            var id = radio.Attribute("id")?.Value;
-            if (!string.IsNullOrEmpty(id))
-            {
-                var label = radio.Parent?.Descendants()
-                    .FirstOrDefault(e => e.Name.LocalName.Equals("label", StringComparison.OrdinalIgnoreCase) &&
-                                       e.Attribute("for")?.Value == id);
-                if (label != null)
-                    return label.Value?.Trim() ?? "";
-            }
-
-            var nextNode = radio.NextNode;
-            while (nextNode != null)
-            {
-                if (nextNode is XText textNode && !string.IsNullOrWhiteSpace(textNode.Value))
-                    return textNode.Value.Trim();
-
-                if (nextNode is XElement elem && elem.Name.LocalName.Equals("label", StringComparison.OrdinalIgnoreCase))
-                    return elem.Value?.Trim() ?? "";
-
-                nextNode = nextNode.NextNode;
-            }
-
-            return radio.Attribute("value")?.Value ?? "";
-        }
-
-
-
-        private string GetOptionDisplayText(XElement option)
-        {
-            var text = "";
-
-            foreach (var node in option.Nodes())
-            {
-                if (node is XText textNode)
-                {
-                    var nodeText = textNode.Value?.Trim();
-                    if (!string.IsNullOrEmpty(nodeText) && !nodeText.Equals("selected", StringComparison.OrdinalIgnoreCase))
-                    {
-                        text = nodeText;
-                        break;
-                    }
-                }
-                else if (node is XElement elem)
-                {
-                    if (!elem.Name.LocalName.Equals("if", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var childText = GetDirectTextContent(elem)?.Trim();
-                        if (!string.IsNullOrEmpty(childText) && !childText.Equals("selected", StringComparison.OrdinalIgnoreCase))
-                        {
-                            text = childText;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (string.IsNullOrEmpty(text))
-                text = option.Attribute("value")?.Value ?? "";
-
-            return text;
         }
 
         public List<ControlDefinition> ParseViewFile(string viewFile)
@@ -774,6 +647,8 @@ namespace FormGenerator.Analyzers.Infopath
 
             ResetParserState();
             XDocument doc = XDocument.Load(viewFile);
+
+            // Start the recursive processing
             ProcessElement(doc.Root);
 
             Debug.WriteLine($"\n========================================");
@@ -787,6 +662,8 @@ namespace FormGenerator.Analyzers.Infopath
                 Debug.WriteLine($"  {typeGroup.Type}: {typeGroup.Count}");
             }
 
+            Debug.WriteLine($"\nControls from ExpressionBoxes: {allControls.Count(c => c.WasInExpressionBox)}");
+
             Debug.WriteLine($"\nControls in Repeating Sections:");
             var inRepeating = allControls.Where(c => c.IsInRepeatingSection).ToList();
             Debug.WriteLine($"  Total: {inRepeating.Count}");
@@ -797,7 +674,6 @@ namespace FormGenerator.Analyzers.Infopath
                 Debug.WriteLine($"  {sectionGroup.Section}: {sectionGroup.Count} controls");
             }
 
-            // Additional debug: List all controls with their context
             Debug.WriteLine($"\nDETAILED CONTROL LIST:");
             foreach (var ctrl in allControls)
             {
@@ -808,13 +684,15 @@ namespace FormGenerator.Analyzers.Infopath
                     Debug.WriteLine($"      In Repeating: {ctrl.RepeatingSectionName}");
                 if (!string.IsNullOrEmpty(ctrl.ParentSection))
                     Debug.WriteLine($"      In Section: {ctrl.ParentSection}");
+                if (ctrl.WasInExpressionBox)
+                    Debug.WriteLine($"      Was in ExpressionBox");
             }
 
             Debug.WriteLine($"========================================\n");
 
+            debugInfo.ControlsExtracted = allControls.Count;
             return new List<ControlDefinition>(allControls);
         }
-
 
         private void ResetParserState()
         {
@@ -827,13 +705,14 @@ namespace FormGenerator.Analyzers.Infopath
             recentLabels = new Queue<LabelInfo>();
             controlsById = new Dictionary<string, ControlDefinition>();
             processedTemplates = new HashSet<string>();
-
             docIndexCounter = 0;
             currentRow = 1;
             currentCol = 1;
             inTableRow = false;
             insideXslTemplate = false;
             currentTemplateMode = null;
+            insideExpressionBox = false;
+            expressionBoxDepth = 0;
         }
 
         public List<SectionInfo> GetSections()
@@ -844,24 +723,40 @@ namespace FormGenerator.Analyzers.Infopath
 
         private void ProcessElement(XElement elem)
         {
+            if (elem == null) return;
+
+            debugInfo.TotalElementsExamined++;
             var elemName = elem.Name.LocalName.ToLower();
 
+            // Track element types
+            if (!debugInfo.ElementTypeCounts.ContainsKey(elemName))
+                debugInfo.ElementTypeCounts[elemName] = 0;
+            debugInfo.ElementTypeCounts[elemName]++;
+
+            // Enhanced debug logging
             var binding = GetAttributeValue(elem, "binding");
+            var xctname = GetAttributeValue(elem, "xctname");
+            var ctrlId = GetAttributeValue(elem, "CtrlId");
+
             if (!string.IsNullOrEmpty(binding))
             {
-                Debug.WriteLine($"[PROCESS] Found element with binding: {binding}, type: {elemName}");
+                debugInfo.BindingPaths.Add(binding);
+                Debug.WriteLine($"[PROCESS] Found element with binding: {binding}, type: {elemName}, xctname: {xctname}");
+            }
 
-                // Log current context
-                if (repeatingContextStack.Count > 0)
-                {
-                    var contexts = string.Join(" > ", repeatingContextStack.Select(r => r.Name));
-                    Debug.WriteLine($"  Context: Inside repeating sections: {contexts}");
-                }
-                if (sectionStack.Count > 0)
-                {
-                    var sections = string.Join(" > ", sectionStack.Select(s => s.Name));
-                    Debug.WriteLine($"  Context: Inside sections: {sections}");
-                }
+            // SPECIAL HANDLING FOR FONT ELEMENTS
+            // Font elements often wrap labels AND controls in InfoPath
+            if (elemName == "font")
+            {
+                ProcessFontElement(elem);
+                return;
+            }
+
+            // Check for ExpressionBox FIRST - handle specially
+            if (IsExpressionBox(elem))
+            {
+                ProcessExpressionBox(elem);
+                return; // Don't process children normally - we'll handle them specially
             }
 
             // Check if this is a repeating section div
@@ -878,7 +773,7 @@ namespace FormGenerator.Analyzers.Infopath
                 return;
             }
 
-            // Handle apply-templates with improved context handling
+            // Handle apply-templates
             if (elemName == "apply-templates")
             {
                 var mode = elem.Attribute("mode")?.Value;
@@ -887,21 +782,16 @@ namespace FormGenerator.Analyzers.Infopath
                 if (!string.IsNullOrEmpty(mode))
                 {
                     Debug.WriteLine($"[PROCESS] Found apply-templates with mode: {mode}, select: {select}");
-
-                    // Build context key for tracking
                     string contextKey = mode;
                     if (repeatingContextStack.Count > 0)
                     {
                         contextKey = $"{repeatingContextStack.Peek().Name}::{mode}";
                     }
 
-                    // Check if this is a repeating pattern
-                    bool isRepeatingPattern = !string.IsNullOrEmpty(select) &&
-                                             IsRepeatingSelectPattern(select);
+                    bool isRepeatingPattern = !string.IsNullOrEmpty(select) && IsRepeatingSelectPattern(select);
 
                     if (isRepeatingPattern)
                     {
-                        // Check if we've already processed this repeating pattern in this context
                         string repeatKey = $"repeat::{contextKey}::{select}";
                         if (!processedTemplates.Contains(repeatKey))
                         {
@@ -916,8 +806,6 @@ namespace FormGenerator.Analyzers.Infopath
                     }
                     else
                     {
-                        // For non-repeating templates, always process them
-                        // The template itself will handle duplicate prevention
                         var matchingTemplate = FindTemplate(elem.Document, mode);
                         if (matchingTemplate != null)
                         {
@@ -928,7 +816,7 @@ namespace FormGenerator.Analyzers.Infopath
                 }
             }
 
-            // Check for standalone labels that might be section headers
+            // Check for standalone labels (but not font elements, which are handled above)
             if (IsStandaloneLabelElement(elem) && !insideXslTemplate)
             {
                 TrackPotentialSectionLabel(elem);
@@ -950,7 +838,7 @@ namespace FormGenerator.Analyzers.Infopath
                 return;
             }
 
-            // Handle regular sections (non-repeating)
+            // Handle regular sections
             if (IsRegularSection(elem))
             {
                 ProcessRegularSection(elem);
@@ -968,61 +856,58 @@ namespace FormGenerator.Analyzers.Infopath
             var control = TryExtractControl(elem);
             if (control != null)
             {
-                // Context-aware duplicate check
                 bool shouldSkip = false;
 
                 if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
                 {
-                    var ctrlId = control.Properties["CtrlId"];
-                    if (!string.IsNullOrEmpty(ctrlId) && controlsById.ContainsKey(ctrlId))
+                    var controlCtrlId = control.Properties["CtrlId"];
+                    if (!string.IsNullOrEmpty(controlCtrlId) && controlsById.ContainsKey(controlCtrlId))
                     {
-                        var existing = controlsById[ctrlId];
-
-                        // Only skip if we're in the exact same context
+                        var existing = controlsById[controlCtrlId];
                         bool sameRepeatingContext = (existing.IsInRepeatingSection == (repeatingContextStack.Count > 0));
 
                         if (sameRepeatingContext && existing.IsInRepeatingSection)
                         {
-                            // Both in repeating sections - check if same section
                             var currentRepeatingSectionName = repeatingContextStack.Count > 0 ?
                                 repeatingContextStack.Peek().Name : "";
 
                             if (existing.RepeatingSectionName == currentRepeatingSectionName)
                             {
-                                Debug.WriteLine($"[DUPLICATE] Control {ctrlId} already exists in same repeating context, skipping");
+                                Debug.WriteLine($"[DUPLICATE] Control {controlCtrlId} already exists in same repeating context, skipping");
+                                debugInfo.DuplicatesSkipped.Add($"{controlCtrlId} in {currentRepeatingSectionName}");
                                 shouldSkip = true;
                             }
                         }
                         else if (sameRepeatingContext && !existing.IsInRepeatingSection)
                         {
-                            // Both NOT in repeating sections
-                            Debug.WriteLine($"[DUPLICATE] Control {ctrlId} already exists in main form, skipping");
+                            Debug.WriteLine($"[DUPLICATE] Control {controlCtrlId} already exists in main form, skipping");
+                            debugInfo.DuplicatesSkipped.Add($"{controlCtrlId} in main form");
                             shouldSkip = true;
                         }
-                        // If different contexts, don't skip - it's a valid control for the new context
                     }
                 }
 
                 if (!shouldSkip)
                 {
-                    // Apply context (section/repeating information)
                     ApplyControlContext(control);
-
-                    // Set grid position
                     control.GridPosition = currentRow + GetColumnLetter(currentCol);
                     control.DocIndex = ++docIndexCounter;
 
-                    // Track control by ID if it has one
+                    // Mark if from ExpressionBox
+                    if (insideExpressionBox)
+                    {
+                        control.WasInExpressionBox = true;
+                    }
+
                     if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
                     {
-                        var ctrlId = control.Properties["CtrlId"];
-                        if (!string.IsNullOrEmpty(ctrlId))
+                        var controlCtrlId = control.Properties["CtrlId"];
+                        if (!string.IsNullOrEmpty(controlCtrlId))
                         {
-                            // Store with context information
-                            string contextualKey = ctrlId;
+                            string contextualKey = controlCtrlId;
                             if (repeatingContextStack.Count > 0)
                             {
-                                contextualKey = $"{repeatingContextStack.Peek().Name}::{ctrlId}";
+                                contextualKey = $"{repeatingContextStack.Peek().Name}::{controlCtrlId}";
                             }
                             controlsById[contextualKey] = control;
                         }
@@ -1030,8 +915,8 @@ namespace FormGenerator.Analyzers.Infopath
 
                     currentCol++;
                     allControls.Add(control);
+                    debugInfo.ProcessedElements.Add($"{control.Name} ({control.Type}) at {control.GridPosition}");
 
-                    // LOG: Successfully detected control
                     Debug.WriteLine($"[CONTROL DETECTED] Name: {control.Name}, Type: {control.Type}, Binding: {control.Binding}");
                     Debug.WriteLine($"  Grid: {control.GridPosition}, DocIndex: {control.DocIndex}");
                     if (control.IsInRepeatingSection)
@@ -1042,11 +927,23 @@ namespace FormGenerator.Analyzers.Infopath
                     {
                         Debug.WriteLine($"  In Section: {control.ParentSection}");
                     }
+                    if (control.WasInExpressionBox)
+                    {
+                        Debug.WriteLine($"  Was in ExpressionBox");
+                    }
                     Debug.WriteLine($"  Total controls so far: {allControls.Count}");
                 }
 
-                // Don't process children if we've extracted a control
-                return;
+                return; // Don't process children if we've extracted a control
+            }
+            else
+            {
+                // Log why we didn't extract a control from this element
+                if (!string.IsNullOrEmpty(binding) || !string.IsNullOrEmpty(xctname) || !string.IsNullOrEmpty(ctrlId))
+                {
+                    debugInfo.SkippedElements.Add($"{elemName} - binding:{binding}, xctname:{xctname}, ctrlId:{ctrlId}");
+                    Debug.WriteLine($"[SKIPPED] Element {elemName} with binding:{binding}, xctname:{xctname}, ctrlId:{ctrlId}");
+                }
             }
 
             // Process child elements recursively
@@ -1061,6 +958,133 @@ namespace FormGenerator.Analyzers.Infopath
                 inTableRow = false;
             }
         }
+
+        private bool IsExpressionBox(XElement elem)
+        {
+            var xctname = GetAttributeValue(elem, "xctname");
+            if (xctname?.Equals("ExpressionBox", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+
+            var className = elem.Attribute("class")?.Value ?? "";
+            if (className.Contains("xdExpressionBox"))
+                return true;
+
+            // Also check xd:xctname
+            var xdXctname = GetAttributeValue(elem, "xd:xctname");
+            if (xdXctname?.Equals("ExpressionBox", StringComparison.OrdinalIgnoreCase) == true)
+                return true;
+
+            return false;
+        }
+
+        private void ProcessExpressionBox(XElement elem)
+        {
+            expressionBoxDepth++;
+            insideExpressionBox = true;
+
+            var ctrlId = GetAttributeValue(elem, "CtrlId");
+            var binding = GetAttributeValue(elem, "binding");
+
+            Debug.WriteLine($"\n[EXPRESSION BOX] Processing ExpressionBox - CtrlId: {ctrlId}, binding: {binding}, depth: {expressionBoxDepth}");
+            debugInfo.ExpressionBoxContents.Add($"ExpressionBox {ctrlId} with binding {binding}");
+
+            // Look for controls INSIDE the expression box
+            var innerControls = ExtractControlsFromExpressionBox(elem);
+
+            Debug.WriteLine($"[EXPRESSION BOX] Found {innerControls.Count} controls inside ExpressionBox");
+
+            foreach (var control in innerControls)
+            {
+                control.WasInExpressionBox = true;
+                ApplyControlContext(control);
+                control.GridPosition = currentRow + GetColumnLetter(currentCol);
+                control.DocIndex = ++docIndexCounter;
+
+                currentCol++;
+                allControls.Add(control);
+
+                Debug.WriteLine($"  Extracted from ExpressionBox: {control.Name} ({control.Type}) - {control.Binding}");
+                debugInfo.ExpressionBoxContents.Add($"  -> {control.Name} ({control.Type})");
+            }
+
+            // If no controls found inside, process children normally
+            if (innerControls.Count == 0)
+            {
+                Debug.WriteLine($"[EXPRESSION BOX] No direct controls found, processing children recursively");
+                foreach (var child in elem.Elements())
+                {
+                    ProcessElement(child);
+                }
+            }
+
+            expressionBoxDepth--;
+            if (expressionBoxDepth == 0)
+            {
+                insideExpressionBox = false;
+            }
+
+            Debug.WriteLine($"[EXPRESSION BOX] Finished processing ExpressionBox {ctrlId}");
+        }
+
+        private List<ControlDefinition> ExtractControlsFromExpressionBox(XElement expressionBox)
+        {
+            var controls = new List<ControlDefinition>();
+
+            // Look deeper into the ExpressionBox structure
+            // ExpressionBoxes often contain xsl:value-of or text content
+
+            // Check for xsl:value-of elements that reference data
+            var valueOfElements = expressionBox.Descendants()
+                .Where(e => e.Name.LocalName == "value-of" &&
+                           e.Attribute("select") != null)
+                .ToList();
+
+            foreach (var valueOfElem in valueOfElements)
+            {
+                var select = valueOfElem.Attribute("select")?.Value;
+                if (!string.IsNullOrEmpty(select) && select.StartsWith("my:"))
+                {
+                    // This is a data-bound expression box showing a field value
+                    var control = new ControlDefinition
+                    {
+                        Type = "ExpressionBox",
+                        Binding = select,
+                        Name = GenerateControlName(expressionBox, "", select, "ExpressionBox"),
+                        Label = expressionBox.Attribute("title")?.Value ?? "",
+                        DocIndex = ++docIndexCounter,
+                        WasInExpressionBox = true
+                    };
+
+                    controls.Add(control);
+                    Debug.WriteLine($"    Extracted ExpressionBox field reference: {control.Name} with binding: {control.Binding}");
+                }
+            }
+
+            // If no value-of elements, check if the ExpressionBox itself has a meaningful binding
+            if (controls.Count == 0)
+            {
+                var binding = GetAttributeValue(expressionBox, "binding");
+                if (!string.IsNullOrEmpty(binding) && !binding.StartsWith("string("))
+                {
+                    var control = new ControlDefinition
+                    {
+                        Type = "ExpressionBox",
+                        Binding = binding,
+                        Name = GenerateControlName(expressionBox, "", binding, "ExpressionBox"),
+                        Label = expressionBox.Attribute("title")?.Value ?? "",
+                        DocIndex = ++docIndexCounter,
+                        WasInExpressionBox = true
+                    };
+
+                    controls.Add(control);
+                }
+            }
+
+            return controls;
+        }
+        // [Include all the other methods from the original code - they remain the same]
+        // I'm including key ones that were modified or are essential:
+
         private XElement FindTemplate(XDocument doc, string mode)
         {
             if (doc == null || string.IsNullOrEmpty(mode))
@@ -1068,14 +1092,11 @@ namespace FormGenerator.Analyzers.Infopath
 
             try
             {
-                // Get the namespace from the root element
                 var root = doc.Root;
                 if (root == null)
                     return null;
 
                 var ns = root.Name.Namespace;
-
-                // Find template with matching mode attribute
                 var template = doc.Descendants(ns + "template")
                     .FirstOrDefault(t => t.Attribute("mode")?.Value == mode);
 
@@ -1102,18 +1123,14 @@ namespace FormGenerator.Analyzers.Infopath
             if (string.IsNullOrEmpty(select))
                 return false;
 
-            // Check for path patterns that indicate repetition
-            // Pattern: namespace:parent/namespace:child (e.g., my:trips/my:trip)
             if (select.Contains("/"))
             {
                 var parts = select.Split('/');
                 if (parts.Length >= 2)
                 {
-                    // Extract the element names without namespace
                     var parent = GetElementName(parts[parts.Length - 2]);
                     var child = GetElementName(parts[parts.Length - 1]);
 
-                    // Check if this looks like a collection pattern
                     if (IsCollectionChildPattern(parent, child))
                     {
                         Debug.WriteLine($"Detected repeating pattern: {parent}/{child}");
@@ -1127,7 +1144,6 @@ namespace FormGenerator.Analyzers.Infopath
 
         private string GetElementName(string qualifiedName)
         {
-            // Remove namespace prefix (e.g., "my:trips" -> "trips")
             if (qualifiedName.Contains(":"))
                 return qualifiedName.Split(':').Last();
             return qualifiedName;
@@ -1141,19 +1157,15 @@ namespace FormGenerator.Analyzers.Infopath
             parent = parent.ToLower();
             child = child.ToLower();
 
-            // Pattern 1: Plural parent with singular child (trips/trip, items/item)
             if (parent.EndsWith("s") && parent.Substring(0, parent.Length - 1) == child)
                 return true;
 
-            // Pattern 2: Parent ends with "es" and child is singular (addresses/address)
             if (parent.EndsWith("es") && parent.Substring(0, parent.Length - 2) == child)
                 return true;
 
-            // Pattern 3: Parent ends with "ies" and child ends with "y" (categories/category)
             if (parent.EndsWith("ies") && child + "ies" == parent.Replace(parent.Substring(0, parent.Length - 3), child))
                 return true;
 
-            // Pattern 4: Collection suffixes (itemList/item, itemCollection/item)
             string[] collectionSuffixes = { "list", "collection", "array", "set", "items", "entries" };
             foreach (var suffix in collectionSuffixes)
             {
@@ -1161,7 +1173,6 @@ namespace FormGenerator.Analyzers.Infopath
                     return true;
             }
 
-            // Pattern 5: Same name (sometimes used for collections)
             if (parent == child)
                 return true;
 
@@ -2244,12 +2255,6 @@ namespace FormGenerator.Analyzers.Infopath
             var caption = GetAttributeValue(elem, "caption");
             var title = GetAttributeValue(elem, "title");
 
-            Debug.WriteLine($"  CtrlId: {ctrlId}");
-            Debug.WriteLine($"  Binding: {binding}");
-            Debug.WriteLine($"  Caption: {caption}");
-            Debug.WriteLine($"  Title: {title}");
-            Debug.WriteLine($"  Current depth: {repeatingContextStack.Count}");
-
             // Look for apply-templates to determine the actual repeating structure
             var applyTemplates = elem.Descendants()
                 .FirstOrDefault(e => e.Name.LocalName == "apply-templates" &&
@@ -2259,13 +2264,10 @@ namespace FormGenerator.Analyzers.Infopath
             {
                 var selectValue = applyTemplates.Attribute("select")?.Value;
                 binding = selectValue;
-                Debug.WriteLine($"  Updated binding from apply-templates: {binding}");
             }
 
-            // Extract section name
+            // Extract section name dynamically
             string sectionName = null;
-
-            // Try various sources
             if (!string.IsNullOrWhiteSpace(caption) && !caption.StartsWith("CTRL"))
                 sectionName = caption;
             else if (!string.IsNullOrWhiteSpace(title) && !title.StartsWith("CTRL"))
@@ -2280,32 +2282,58 @@ namespace FormGenerator.Analyzers.Infopath
                 sectionName = $"Section_Repeating{repeatingSectionCounter}";
             }
 
-            // If nested, combine with parent name
+            // Handle nesting dynamically
             if (repeatingContextStack.Count > 0)
             {
                 var parentContext = repeatingContextStack.Peek();
                 var originalName = sectionName;
                 sectionName = $"{parentContext.DisplayName}_{sectionName}";
-                Debug.WriteLine($"[REPEATING SECTION] Creating nested section: {sectionName} (parent: {parentContext.DisplayName}, original: {originalName})");
-            }
-            else
-            {
-                Debug.WriteLine($"[REPEATING SECTION] Creating top-level section: {sectionName}");
+                Debug.WriteLine($"[REPEATING SECTION] Creating nested section: {sectionName} (parent: {parentContext.DisplayName})");
             }
 
-            // Create the repeating section with the (possibly combined) name
+            // Create the repeating section context
             CreateRepeatingSection(sectionName, binding, "section");
 
             Debug.WriteLine($"[REPEATING SECTION] Processing children of {sectionName}");
             int controlCountBefore = allControls.Count;
 
-            // Process children
+            // Process ONLY direct children, not nested apply-templates
             foreach (var child in elem.Elements())
-                ProcessElement(child);
+            {
+                // Skip nested apply-templates - they'll be handled separately
+                if (child.Name.LocalName == "apply-templates" &&
+                    child.Attribute("mode") != null &&
+                    child.Attribute("select")?.Value?.Contains("/") == true)
+                {
+                    // This is a nested repeating section - process it separately
+                    var mode = child.Attribute("mode")?.Value;
+                    var select = child.Attribute("select")?.Value;
+
+                    if (IsRepeatingSelectPattern(select))
+                    {
+                        // Process as nested repeating section
+                        ProcessRepeatingApplyTemplates(child, mode, select);
+                    }
+                    else
+                    {
+                        // Process as regular template
+                        var matchingTemplate = FindTemplate(elem.Document, mode);
+                        if (matchingTemplate != null)
+                        {
+                            ProcessXslTemplate(matchingTemplate);
+                        }
+                    }
+                }
+                else
+                {
+                    ProcessElement(child);
+                }
+            }
 
             int controlsAdded = allControls.Count - controlCountBefore;
             Debug.WriteLine($"[REPEATING SECTION] Added {controlsAdded} controls to {sectionName}");
 
+            // Pop the context
             var context = repeatingContextStack.Pop();
             var sectionInfo = sections.LastOrDefault(s => s.Name == context.DisplayName);
             if (sectionInfo != null)
@@ -3148,6 +3176,7 @@ namespace FormGenerator.Analyzers.Infopath
             return string.IsNullOrEmpty(relevantPart) ? "RepeatingSection" : relevantPart;
         }
 
+
         private void HandleNewRow(XElement elem)
         {
             if (!inTableRow || elem.Name.LocalName.Equals("tr", StringComparison.OrdinalIgnoreCase))
@@ -3315,12 +3344,11 @@ namespace FormGenerator.Analyzers.Infopath
         private ControlDefinition TryExtractControl(XElement elem)
         {
             var elemName = elem.Name.LocalName.ToLower();
-
-            // Debug logging at start
             var ctrlId = GetAttributeValue(elem, "CtrlId");
             var xctAttr = GetAttributeValue(elem, "xctname");
             var bindingAttr = GetAttributeValue(elem, "binding") ?? GetAttributeValue(elem, "xd:binding");
 
+            // Debug logging at start
             if (!string.IsNullOrEmpty(bindingAttr) || !string.IsNullOrEmpty(xctAttr) || !string.IsNullOrEmpty(ctrlId))
             {
                 Debug.WriteLine($"\n[TRY EXTRACT] Examining element:");
@@ -3330,11 +3358,23 @@ namespace FormGenerator.Analyzers.Infopath
                 Debug.WriteLine($"  binding: {bindingAttr}");
                 Debug.WriteLine($"  class: {elem.Attribute("class")?.Value}");
 
-                // Log context
                 if (repeatingContextStack.Count > 0)
                 {
                     Debug.WriteLine($"  Repeating Context: {string.Join(" > ", repeatingContextStack.Select(r => r.Name))}");
                 }
+
+                if (insideExpressionBox)
+                {
+                    Debug.WriteLine($"  Inside ExpressionBox (depth: {expressionBoxDepth})");
+                }
+            }
+
+            // Skip ExpressionBox itself (we handle it specially)
+            if (IsExpressionBox(elem))
+            {
+                Debug.WriteLine($"[TRY EXTRACT] Skipping ExpressionBox element itself");
+                debugInfo.SkippedElements.Add($"ExpressionBox {ctrlId}");
+                return null;
             }
 
             // Skip if this is a table (should be handled by ProcessRepeatingTable)
@@ -3344,24 +3384,44 @@ namespace FormGenerator.Analyzers.Infopath
                 return null;
             }
 
-            // Context-aware duplicate check
+            // IMPROVED: Context-aware duplicate check
             string controlKey = "";
             if (!string.IsNullOrEmpty(ctrlId))
             {
-                // Build contextual key
+                // Build a unique key that includes:
+                // 1. The control ID
+                // 2. The current repeating context (if any)
+                // 3. The current template mode (if any)
+
+                var keyParts = new List<string> { ctrlId };
+
+                // Add repeating context to the key
                 if (repeatingContextStack.Count > 0)
                 {
-                    controlKey = $"{repeatingContextStack.Peek().Name}::{ctrlId}";
+                    var contextPath = string.Join(">", repeatingContextStack.Select(r => r.Name));
+                    keyParts.Add($"R:{contextPath}");
                 }
-                else
+
+                // Add template mode to the key
+                if (!string.IsNullOrEmpty(currentTemplateMode))
                 {
-                    controlKey = ctrlId;
+                    keyParts.Add($"T:{currentTemplateMode}");
                 }
+
+                // Add section context if present
+                if (sectionStack.Count > 0)
+                {
+                    var sectionPath = string.Join(">", sectionStack.Select(s => s.Name));
+                    keyParts.Add($"S:{sectionPath}");
+                }
+
+                controlKey = string.Join("::", keyParts);
 
                 // Check if this exact control in this exact context has been processed
                 if (processedControls.Contains(controlKey))
                 {
-                    Debug.WriteLine($"[TRY EXTRACT] Control {ctrlId} already processed in this context ({controlKey}), skipping");
+                    Debug.WriteLine($"[TRY EXTRACT] Control already processed with key: {controlKey}, skipping");
+                    debugInfo.DuplicatesSkipped.Add(controlKey);
                     return null;
                 }
             }
@@ -3400,7 +3460,7 @@ namespace FormGenerator.Analyzers.Infopath
                     Debug.WriteLine($"[TRY EXTRACT] Created label control: {control.Name} with text: {labelText}");
                 }
             }
-            // ALSO check for font elements with text content (common in InfoPath labels)
+            // Also check for font elements with text content (common in InfoPath labels)
             else if (control == null && string.IsNullOrEmpty(bindingAttr) && elemName == "font")
             {
                 var labelText = ExtractLabelText(elem);
@@ -3448,6 +3508,7 @@ namespace FormGenerator.Analyzers.Infopath
                 else
                 {
                     Debug.WriteLine($"[TRY EXTRACT] Skipping structural element: {xctAttr}");
+                    debugInfo.SkippedElements.Add($"Structural: {xctAttr}");
                 }
             }
 
@@ -3488,13 +3549,13 @@ namespace FormGenerator.Analyzers.Infopath
                 if (!string.IsNullOrEmpty(ctrlId))
                 {
                     control.Properties["CtrlId"] = ctrlId;
+                }
 
-                    // Mark this control as processed in this context
-                    if (!string.IsNullOrEmpty(controlKey))
-                    {
-                        processedControls.Add(controlKey);
-                        Debug.WriteLine($"[TRY EXTRACT] Marked as processed: {controlKey}");
-                    }
+                // Mark this control as processed in this context
+                if (!string.IsNullOrEmpty(controlKey))
+                {
+                    processedControls.Add(controlKey);
+                    Debug.WriteLine($"[TRY EXTRACT] Marked as processed with key: {controlKey}");
                 }
 
                 // Copy relevant attributes
@@ -3514,11 +3575,124 @@ namespace FormGenerator.Analyzers.Infopath
                     ExtractDropdownOptions(elem, control);
                 }
 
+                // Extract radio button options if applicable
+                if (control.Type == "RadioButton" && elemName == "input")
+                {
+                    var inputType = elem.Attribute("type")?.Value;
+                    if (inputType?.Equals("radio", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        Debug.WriteLine($"[TRY EXTRACT] Extracting radio button options for {control.Name}");
+                        ExtractRadioButtonOptions(elem, control);
+                    }
+                }
+
                 Debug.WriteLine($"[TRY EXTRACT] Final control: Name={control.Name}, Type={control.Type}, Binding={control.Binding}, Grid={control.GridPosition}");
+            }
+            else
+            {
+                // Log why we didn't extract a control from this element
+                if (!string.IsNullOrEmpty(bindingAttr) || !string.IsNullOrEmpty(xctAttr) || !string.IsNullOrEmpty(ctrlId))
+                {
+                    debugInfo.SkippedElements.Add($"{elemName} - binding:{bindingAttr}, xctname:{xctAttr}, ctrlId:{ctrlId}");
+                    Debug.WriteLine($"[SKIPPED] Element {elemName} with binding:{bindingAttr}, xctname:{xctAttr}, ctrlId:{ctrlId}");
+                }
             }
 
             return control;
         }
+        private void ExtractDropdownOptions(XElement elem, ControlDefinition control)
+        {
+            try
+            {
+                Debug.WriteLine($"Extracting dropdown options for control: {control.Name} (Type: {control.Type})");
+
+                var options = elem.Descendants()
+                    .Where(e => e.Name.LocalName.Equals("option", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                Debug.WriteLine($"Found {options.Count} option elements");
+
+                if (options.Any())
+                {
+                    control.DataOptions = new List<DataOption>();
+                    int order = 0;
+
+                    foreach (var option in options)
+                    {
+                        var dataOption = new DataOption
+                        {
+                            Value = option.Attribute("value")?.Value ?? "",
+                            DisplayText = GetOptionDisplayText(option),
+                            Order = order++
+                        };
+
+                        var selectedAttr = option.Attribute("selected");
+                        if (selectedAttr != null)
+                            dataOption.IsDefault = true;
+
+                        control.DataOptions.Add(dataOption);
+                    }
+
+                    control.DataOptionsString = string.Join(", ",
+                        control.DataOptions.Select(o => o.DisplayText));
+
+                    Debug.WriteLine($"DataOptionsString: {control.DataOptionsString}");
+
+                    control.Properties["DataValues"] = control.DataOptionsString;
+                    if (control.DataOptions.Any(o => o.IsDefault))
+                    {
+                        var defaultOption = control.DataOptions.First(o => o.IsDefault);
+                        control.Properties["DefaultValue"] = defaultOption.Value;
+                    }
+                }
+                else
+                {
+                    Debug.WriteLine("No option elements found in dropdown");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error extracting dropdown options: {ex.Message}");
+                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+            }
+        }
+
+        private string GetOptionDisplayText(XElement option)
+        {
+            var text = "";
+
+            foreach (var node in option.Nodes())
+            {
+                if (node is XText textNode)
+                {
+                    var nodeText = textNode.Value?.Trim();
+                    if (!string.IsNullOrEmpty(nodeText) && !nodeText.Equals("selected", StringComparison.OrdinalIgnoreCase))
+                    {
+                        text = nodeText;
+                        break;
+                    }
+                }
+                else if (node is XElement elem)
+                {
+                    if (!elem.Name.LocalName.Equals("if", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var childText = GetDirectTextContent(elem)?.Trim();
+                        if (!string.IsNullOrEmpty(childText) && !childText.Equals("selected", StringComparison.OrdinalIgnoreCase))
+                        {
+                            text = childText;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(text))
+                text = option.Attribute("value")?.Value ?? "";
+
+            return text;
+        }
+
+
 
         private string GetCurrentGridPosition()
         {
@@ -3548,12 +3722,10 @@ namespace FormGenerator.Analyzers.Infopath
             if (className.Contains("xdListBox"))
                 return "ListBox";
 
-            // Check for specific attributes that indicate control type
             var datafmt = GetAttributeValue(elem, "datafmt");
             if (datafmt?.Contains("date") == true)
                 return "DatePicker";
 
-            // Default for bound spans
             return "TextField";
         }
 
@@ -3968,8 +4140,6 @@ namespace FormGenerator.Analyzers.Infopath
 
 
 
-
-
         private ControlDefinition ParseXctControl(XElement elem, string xctType)
         {
             var mappedType = xctType;
@@ -3999,14 +4169,13 @@ namespace FormGenerator.Analyzers.Infopath
                 control.Name = lastPart.Contains(':') ? lastPart.Split(':').Last() : lastPart;
             }
 
-            var ctrlId = GetAttributeValue(elem, "CtrlId");
-            if (!string.IsNullOrEmpty(ctrlId))
+            // Generate a proper name if still empty
+            if (string.IsNullOrEmpty(control.Name))
             {
-                if (processedControls.Contains(ctrlId)) return null;
-                processedControls.Add(ctrlId);
-                control.Properties["CtrlId"] = ctrlId;
+                control.Name = GenerateControlName(elem, control.Label, control.Binding, control.Type);
             }
 
+            // Extract dropdown options for dropdown/combobox types
             if (mappedType.Equals("DropDown", StringComparison.OrdinalIgnoreCase) ||
                 mappedType.Equals("ComboBox", StringComparison.OrdinalIgnoreCase) ||
                 xctType.Equals("dropdown", StringComparison.OrdinalIgnoreCase) ||
@@ -4076,8 +4245,12 @@ namespace FormGenerator.Analyzers.Infopath
                 }
             }
 
-            if (elem.Name.LocalName.ToLower() == "select" && (control.DataOptions == null || control.DataOptions.Count == 0))
+            // Extract dropdown options if we haven't already
+            if (elem.Name.LocalName.ToLower() == "select" &&
+                (control.DataOptions == null || control.DataOptions.Count == 0))
+            {
                 ExtractDropdownOptions(elem, control);
+            }
 
             control.Name = elem.Attribute("name")?.Value ?? "";
             control.Label = elem.Attribute("title")?.Value ?? "";
@@ -4094,12 +4267,10 @@ namespace FormGenerator.Analyzers.Infopath
                 control.Name = lastPart.Contains(':') ? lastPart.Split(':').Last() : lastPart;
             }
 
-            var ctrlId = GetAttributeValue(elem, "CtrlId");
-            if (!string.IsNullOrEmpty(ctrlId))
+            // Generate a proper name if still empty
+            if (string.IsNullOrEmpty(control.Name))
             {
-                if (processedControls.Contains(ctrlId)) return null;
-                processedControls.Add(ctrlId);
-                control.Properties["CtrlId"] = ctrlId;
+                control.Name = GenerateControlName(elem, control.Label, control.Binding, control.Type);
             }
 
             foreach (var attr in elem.Attributes())
@@ -4109,6 +4280,106 @@ namespace FormGenerator.Analyzers.Infopath
             }
 
             return control;
+        }
+
+        private void ExtractRadioButtonOptions(XElement elem, ControlDefinition control)
+        {
+            try
+            {
+                var radioGroup = GetRadioButtonGroup(elem);
+                if (radioGroup != null && radioGroup.Any())
+                {
+                    control.DataOptions = new List<DataOption>();
+                    int order = 0;
+
+                    foreach (var radio in radioGroup)
+                    {
+                        var dataOption = new DataOption
+                        {
+                            Value = radio.Attribute("value")?.Value ?? "",
+                            DisplayText = GetRadioButtonLabel(radio),
+                            Order = order++
+                        };
+
+                        var checkedAttr = radio.Attribute("checked");
+                        if (checkedAttr != null)
+                            dataOption.IsDefault = true;
+
+                        control.DataOptions.Add(dataOption);
+                    }
+
+                    control.DataOptionsString = string.Join(", ",
+                        control.DataOptions.Select(o => o.DisplayText));
+                    control.Properties["DataValues"] = control.DataOptionsString;
+
+                    // Set default value if one is selected
+                    if (control.DataOptions.Any(o => o.IsDefault))
+                    {
+                        var defaultOption = control.DataOptions.First(o => o.IsDefault);
+                        control.Properties["DefaultValue"] = defaultOption.Value;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error extracting radio options: {ex.Message}");
+            }
+        }
+
+        private List<XElement> GetRadioButtonGroup(XElement radioElement)
+        {
+            var name = radioElement.Attribute("name")?.Value;
+            if (string.IsNullOrEmpty(name))
+                return null;
+
+            // Find the container element (div or td) that holds all radio buttons in this group
+            var container = radioElement.Parent;
+            while (container != null &&
+                   !container.Name.LocalName.Equals("div", StringComparison.OrdinalIgnoreCase) &&
+                   !container.Name.LocalName.Equals("td", StringComparison.OrdinalIgnoreCase))
+            {
+                container = container.Parent;
+            }
+
+            if (container == null)
+                container = radioElement.Parent;
+
+            // Find all radio buttons with the same name within the container
+            return container.Descendants()
+                .Where(e => e.Name.LocalName.Equals("input", StringComparison.OrdinalIgnoreCase) &&
+                           e.Attribute("type")?.Value?.Equals("radio", StringComparison.OrdinalIgnoreCase) == true &&
+                           e.Attribute("name")?.Value == name)
+                .ToList();
+        }
+
+        private string GetRadioButtonLabel(XElement radio)
+        {
+            // Method 1: Check for associated label element with "for" attribute
+            var id = radio.Attribute("id")?.Value;
+            if (!string.IsNullOrEmpty(id))
+            {
+                var label = radio.Parent?.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName.Equals("label", StringComparison.OrdinalIgnoreCase) &&
+                                       e.Attribute("for")?.Value == id);
+                if (label != null)
+                    return label.Value?.Trim() ?? "";
+            }
+
+            // Method 2: Check for text immediately following the radio button
+            var nextNode = radio.NextNode;
+            while (nextNode != null)
+            {
+                if (nextNode is XText textNode && !string.IsNullOrWhiteSpace(textNode.Value))
+                    return textNode.Value.Trim();
+
+                if (nextNode is XElement elem && elem.Name.LocalName.Equals("label", StringComparison.OrdinalIgnoreCase))
+                    return elem.Value?.Trim() ?? "";
+
+                nextNode = nextNode.NextNode;
+            }
+
+            // Method 3: If no label found, use the value attribute
+            return radio.Attribute("value")?.Value ?? "";
         }
 
         private ControlDefinition ParseActiveXControl(XElement elem)
@@ -4188,6 +4459,55 @@ namespace FormGenerator.Analyzers.Infopath
             return control;
         }
 
+        private void ProcessFontElement(XElement fontElem)
+        {
+            Debug.WriteLine($"[FONT ELEMENT] Processing font element");
+
+            // Process in order: text nodes and element nodes
+            foreach (var node in fontElem.Nodes())
+            {
+                if (node is XText textNode)
+                {
+                    var text = textNode.Value.Trim();
+                    if (!string.IsNullOrWhiteSpace(text) && text.Length > 1)
+                    {
+                        // This is a label text directly in the font element
+                        var labelControl = new ControlDefinition
+                        {
+                            Name = GenerateControlName(fontElem, text, "", "Label"),
+                            Type = "Label",
+                            Label = text,
+                            Binding = "",
+                            DocIndex = ++docIndexCounter,
+                            GridPosition = currentRow + GetColumnLetter(currentCol)
+                        };
+
+                        // Copy font attributes
+                        var color = fontElem.Attribute("color")?.Value;
+                        var face = fontElem.Attribute("face")?.Value;
+                        var size = fontElem.Attribute("size")?.Value;
+
+                        if (!string.IsNullOrEmpty(color))
+                            labelControl.Properties["color"] = color;
+                        if (!string.IsNullOrEmpty(face))
+                            labelControl.Properties["face"] = face;
+                        if (!string.IsNullOrEmpty(size))
+                            labelControl.Properties["size"] = size;
+
+                        ApplyControlContext(labelControl);
+                        allControls.Add(labelControl);
+                        currentCol++;
+
+                        Debug.WriteLine($"[FONT ELEMENT] Created label from text node: {labelControl.Name} - {labelControl.Label}");
+                    }
+                }
+                else if (node is XElement childElem)
+                {
+                    // Process child element (which may be a control or another font)
+                    ProcessElement(childElem);
+                }
+            }
+        }
         private ControlDefinition ParseGenericBoundControl(XElement elem)
         {
             var control = new ControlDefinition { DocIndex = ++docIndexCounter };
@@ -4217,6 +4537,11 @@ namespace FormGenerator.Analyzers.Infopath
                 control.Type = "DropDown";
                 ExtractDropdownOptions(elem, control);
             }
+            else if (elemName == "input")
+            {
+                var inputType = elem.Attribute("type")?.Value ?? "text";
+                control.Type = MapInputType(inputType);
+            }
             else
             {
                 control.Type = elemName;
@@ -4232,12 +4557,10 @@ namespace FormGenerator.Analyzers.Infopath
                 control.Name = lastPart.Contains(':') ? lastPart.Split(':').Last() : lastPart;
             }
 
-            var ctrlId = GetAttributeValue(elem, "CtrlId");
-            if (!string.IsNullOrEmpty(ctrlId))
+            // Generate a proper name
+            if (string.IsNullOrEmpty(control.Name))
             {
-                if (processedControls.Contains(ctrlId)) return null;
-                processedControls.Add(ctrlId);
-                control.Properties["CtrlId"] = ctrlId;
+                control.Name = GenerateControlName(elem, control.Label, control.Binding, control.Type);
             }
 
             foreach (var attr in elem.Attributes())
@@ -4274,16 +4597,24 @@ namespace FormGenerator.Analyzers.Infopath
 
             return false;
         }
-
         private string ExtractLabelText(XElement elem)
         {
-            var text = GetDirectTextContent(elem).Trim();
+            var sb = new StringBuilder();
+
+            // Only get direct text nodes, not text from child elements
+            foreach (var node in elem.Nodes())
+            {
+                if (node is XText textNode)
+                {
+                    sb.Append(textNode.Value);
+                }
+                // Don't recurse into child elements
+            }
+
+            var text = sb.ToString().Trim();
 
             // Clean up the text
             text = Regex.Replace(text, @"\s+", " ");
-
-            // Remove any trailing colons if they exist (they'll be re-added if needed)
-            // But keep the colon in the actual label text for display
 
             return text;
         }
@@ -4292,29 +4623,14 @@ namespace FormGenerator.Analyzers.Infopath
         {
             var sb = new StringBuilder();
 
+            // Only get direct text nodes
             foreach (var node in elem.Nodes())
             {
                 if (node is XText textNode)
                 {
                     sb.Append(textNode.Value);
                 }
-                else if (node is XElement childElem)
-                {
-                    var childName = childElem.Name.LocalName.ToLower();
-
-                    // Include text from formatting elements
-                    if (childName == "strong" || childName == "em" || childName == "font" ||
-                        childName == "span" || childName == "b" || childName == "i" ||
-                        childName == "u")
-                    {
-                        sb.Append(GetDirectTextContent(childElem));
-                    }
-                    // Skip control elements but not their labels
-                    else if (!IsControlElement(childElem))
-                    {
-                        sb.Append(GetDirectTextContent(childElem));
-                    }
-                }
+                // Don't include text from child elements
             }
 
             return sb.ToString();
