@@ -934,6 +934,13 @@ namespace FormGenerator.Analyzers.Infopath
                     Debug.WriteLine($"  Total controls so far: {allControls.Count}");
                 }
 
+                // Don't process children if this is a DatePicker (composite control)
+                if (control.Type == "DatePicker")
+                {
+                    Debug.WriteLine($"[CONTROL DETECTED] DatePicker - skipping child processing");
+                    return;
+                }
+
                 return; // Don't process children if we've extracted a control
             }
             else
@@ -3347,6 +3354,33 @@ namespace FormGenerator.Analyzers.Infopath
             var ctrlId = GetAttributeValue(elem, "CtrlId");
             var xctAttr = GetAttributeValue(elem, "xctname");
             var bindingAttr = GetAttributeValue(elem, "binding") ?? GetAttributeValue(elem, "xd:binding");
+            var className = elem.Attribute("class")?.Value ?? "";
+
+            // Skip DatePicker sub-components - only process the main container
+            if (className.Contains("xdDTText") || className.Contains("xdDTButton"))
+            {
+                Debug.WriteLine($"[TRY EXTRACT] Skipping DatePicker sub-component: {className}");
+                return null;
+            }
+
+            // Also skip if this is a nested element with innerCtrl attribute (part of DatePicker)
+            var innerCtrl = GetAttributeValue(elem, "innerCtrl") ?? GetAttributeValue(elem, "xd:innerCtrl");
+            if (!string.IsNullOrEmpty(innerCtrl))
+            {
+                Debug.WriteLine($"[TRY EXTRACT] Skipping DatePicker inner control: {innerCtrl}");
+                return null;
+            }
+
+            // Also skip button elements that are part of DatePickers
+            if (elemName == "button" && elem.Parent != null)
+            {
+                var parentClass = elem.Parent.Attribute("class")?.Value ?? "";
+                if (parentClass.Contains("xdDTPicker"))
+                {
+                    Debug.WriteLine($"[TRY EXTRACT] Skipping DatePicker button");
+                    return null;
+                }
+            }
 
             // Debug logging at start
             if (!string.IsNullOrEmpty(bindingAttr) || !string.IsNullOrEmpty(xctAttr) || !string.IsNullOrEmpty(ctrlId))
@@ -3356,7 +3390,7 @@ namespace FormGenerator.Analyzers.Infopath
                 Debug.WriteLine($"  CtrlId: {ctrlId}");
                 Debug.WriteLine($"  xctname: {xctAttr}");
                 Debug.WriteLine($"  binding: {bindingAttr}");
-                Debug.WriteLine($"  class: {elem.Attribute("class")?.Value}");
+                Debug.WriteLine($"  class: {className}");
 
                 if (repeatingContextStack.Count > 0)
                 {
@@ -3384,15 +3418,24 @@ namespace FormGenerator.Analyzers.Infopath
                 return null;
             }
 
-            // IMPROVED: Context-aware duplicate check
+            // Skip font elements that contain controls - handled by ProcessFontElement
+            if (elemName == "font")
+            {
+                var hasControls = elem.Descendants().Any(d =>
+                    !string.IsNullOrEmpty(GetAttributeValue(d, "xctname")) ||
+                    !string.IsNullOrEmpty(GetAttributeValue(d, "binding")));
+
+                if (hasControls)
+                {
+                    Debug.WriteLine($"[TRY EXTRACT] Skipping font element with child controls");
+                    return null;
+                }
+            }
+
+            // CONTEXT-AWARE DUPLICATE CHECK
             string controlKey = "";
             if (!string.IsNullOrEmpty(ctrlId))
             {
-                // Build a unique key that includes:
-                // 1. The control ID
-                // 2. The current repeating context (if any)
-                // 3. The current template mode (if any)
-
                 var keyParts = new List<string> { ctrlId };
 
                 // Add repeating context to the key
@@ -3428,8 +3471,36 @@ namespace FormGenerator.Analyzers.Infopath
 
             ControlDefinition control = null;
 
+            // Handle DatePicker container (div with class xdDTPicker)
+            if (className.Contains("xdDTPicker") || xctAttr == "DTPicker")
+            {
+                control = new ControlDefinition
+                {
+                    Type = "DatePicker",
+                    DocIndex = ++docIndexCounter
+                };
+
+                // Try to get binding from child span element if not on the div
+                if (string.IsNullOrEmpty(bindingAttr))
+                {
+                    var dtText = elem.Descendants()
+                        .FirstOrDefault(e => e.Attribute("class")?.Value?.Contains("xdDTText") == true);
+                    if (dtText != null)
+                    {
+                        bindingAttr = GetAttributeValue(dtText, "binding") ?? GetAttributeValue(dtText, "xd:binding");
+                    }
+                }
+
+                control.Binding = bindingAttr;
+                control.Label = elem.Attribute("title")?.Value ?? "";
+                control.Name = GenerateControlName(elem, control.Label, control.Binding, control.Type);
+
+                Debug.WriteLine($"[TRY EXTRACT] Created DatePicker control: {control.Name}");
+
+                // Don't need to continue processing - we've handled the DatePicker
+            }
             // Priority 1: Check for span controls with binding (MOST IMPORTANT FOR INFOPATH)
-            if (elemName == "span" && !string.IsNullOrEmpty(bindingAttr))
+            else if (elemName == "span" && !string.IsNullOrEmpty(bindingAttr))
             {
                 control = new ControlDefinition
                 {
@@ -3442,9 +3513,8 @@ namespace FormGenerator.Analyzers.Infopath
                 control.Name = GenerateControlName(elem, control.Label, control.Binding, control.Type);
                 Debug.WriteLine($"[TRY EXTRACT] Created span control: {control.Name} with binding {control.Binding}");
             }
-
-            // Priority 2: Labels - ENHANCED EXTRACTION
-            if (control == null && string.IsNullOrEmpty(bindingAttr) && IsLabelElement(elem))
+            // Priority 2: Labels
+            else if (control == null && string.IsNullOrEmpty(bindingAttr) && IsLabelElement(elem))
             {
                 var labelText = ExtractLabelText(elem);
                 if (!string.IsNullOrWhiteSpace(labelText) && labelText.Length > 1)
@@ -3460,39 +3530,8 @@ namespace FormGenerator.Analyzers.Infopath
                     Debug.WriteLine($"[TRY EXTRACT] Created label control: {control.Name} with text: {labelText}");
                 }
             }
-            // Also check for font elements with text content (common in InfoPath labels)
-            else if (control == null && string.IsNullOrEmpty(bindingAttr) && elemName == "font")
-            {
-                var labelText = ExtractLabelText(elem);
-                if (!string.IsNullOrWhiteSpace(labelText) && labelText.Length > 1)
-                {
-                    control = new ControlDefinition
-                    {
-                        Name = GenerateControlName(elem, labelText, "", "Label"),
-                        Type = "Label",
-                        Label = labelText,
-                        Binding = "",
-                        DocIndex = ++docIndexCounter
-                    };
-
-                    // Copy font attributes
-                    var color = elem.Attribute("color")?.Value;
-                    var face = elem.Attribute("face")?.Value;
-                    var size = elem.Attribute("size")?.Value;
-
-                    if (!string.IsNullOrEmpty(color))
-                        control.Properties["color"] = color;
-                    if (!string.IsNullOrEmpty(face))
-                        control.Properties["face"] = face;
-                    if (!string.IsNullOrEmpty(size))
-                        control.Properties["size"] = size;
-
-                    Debug.WriteLine($"[TRY EXTRACT] Created font label control: {control.Name} with text: {labelText}");
-                }
-            }
-
             // Priority 3: Check for xctname controls (but not structural elements)
-            if (control == null && !string.IsNullOrEmpty(xctAttr))
+            else if (control == null && !string.IsNullOrEmpty(xctAttr))
             {
                 // Skip structural elements
                 string[] structuralElements = {
@@ -3511,23 +3550,20 @@ namespace FormGenerator.Analyzers.Infopath
                     debugInfo.SkippedElements.Add($"Structural: {xctAttr}");
                 }
             }
-
             // Priority 4: HTML form controls
-            if (control == null && (elemName == "input" || elemName == "select" || elemName == "textarea"))
+            else if (control == null && (elemName == "input" || elemName == "select" || elemName == "textarea"))
             {
                 Debug.WriteLine($"[TRY EXTRACT] Processing HTML control: {elemName}");
                 control = ParseHtmlControl(elem);
             }
-
             // Priority 5: ActiveX/Object controls
-            if (control == null && elemName == "object")
+            else if (control == null && elemName == "object")
             {
                 Debug.WriteLine($"[TRY EXTRACT] Processing ActiveX control");
                 control = ParseActiveXControl(elem);
             }
-
             // Priority 6: Any other element with binding
-            if (control == null && !string.IsNullOrEmpty(bindingAttr))
+            else if (control == null && !string.IsNullOrEmpty(bindingAttr))
             {
                 Debug.WriteLine($"[TRY EXTRACT] Processing generic bound control");
                 control = ParseGenericBoundControl(elem);
@@ -3587,15 +3623,6 @@ namespace FormGenerator.Analyzers.Infopath
                 }
 
                 Debug.WriteLine($"[TRY EXTRACT] Final control: Name={control.Name}, Type={control.Type}, Binding={control.Binding}, Grid={control.GridPosition}");
-            }
-            else
-            {
-                // Log why we didn't extract a control from this element
-                if (!string.IsNullOrEmpty(bindingAttr) || !string.IsNullOrEmpty(xctAttr) || !string.IsNullOrEmpty(ctrlId))
-                {
-                    debugInfo.SkippedElements.Add($"{elemName} - binding:{bindingAttr}, xctname:{xctAttr}, ctrlId:{ctrlId}");
-                    Debug.WriteLine($"[SKIPPED] Element {elemName} with binding:{bindingAttr}, xctname:{xctAttr}, ctrlId:{ctrlId}");
-                }
             }
 
             return control;
