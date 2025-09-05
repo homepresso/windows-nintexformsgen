@@ -2489,10 +2489,8 @@ namespace FormGenerator.Analyzers.Infopath
                 return;
             }
 
-            // Extract table name from multiple sources
+            // Extract table name
             string tableName = ExtractTableName(elem, ctrlId);
-
-            // Ensure table always has a name
             if (string.IsNullOrWhiteSpace(tableName))
             {
                 repeatingSectionCounter++;
@@ -2504,7 +2502,7 @@ namespace FormGenerator.Analyzers.Infopath
             var binding = GetTableBinding(elem);
             Debug.WriteLine($"  Binding: {binding}");
 
-            // Create the table control
+            // Create the table control itself
             var tableControl = new ControlDefinition
             {
                 Name = RemoveSpaces(tableName),
@@ -2515,14 +2513,13 @@ namespace FormGenerator.Analyzers.Infopath
                 GridPosition = currentRow + GetColumnLetter(currentCol)
             };
 
-            // Check if this table is nested in another repeating section
+            // Check if nested
             if (repeatingContextStack.Count > 0)
             {
                 var parentContext = repeatingContextStack.Peek();
                 tableControl.IsInRepeatingSection = true;
                 tableControl.RepeatingSectionName = parentContext.DisplayName;
                 tableControl.RepeatingSectionBinding = parentContext.Binding;
-                Debug.WriteLine($"  Table is nested in repeating section: {parentContext.DisplayName}");
             }
 
             tableControl.Properties["TableType"] = "Repeating";
@@ -2536,20 +2533,16 @@ namespace FormGenerator.Analyzers.Infopath
             }
 
             allControls.Add(tableControl);
-            Debug.WriteLine($"  Added table control to collection");
-
-            // Move to next row for table contents
             currentRow++;
             currentCol = 1;
 
-            // Process table header (non-repeating controls)
+            // Process table header (creates label controls)
             ProcessTableHeader(elem);
 
-            // Create repeating context with guaranteed name
+            // Create repeating context
             CreateRepeatingSection(tableName, binding, "table");
 
-            // Process the table structure to extract controls within repeating section
-            Debug.WriteLine($"  Processing table structure for repeating controls...");
+            // Process the repeating rows
             ProcessTableStructure(elem);
 
             // Pop the repeating context
@@ -2561,18 +2554,17 @@ namespace FormGenerator.Analyzers.Infopath
                 {
                     sectionInfo.EndRow = currentRow;
                 }
-                Debug.WriteLine($"[REPEATING TABLE] Finished processing repeating section {tableName}");
             }
 
-            // Process table footer (non-repeating controls like totals)
+            // Process table footer (for totals, etc.)
             ProcessTableFooter(elem);
 
-            Debug.WriteLine($"[REPEATING TABLE] Finished processing entire table {tableName}");
+            Debug.WriteLine($"[REPEATING TABLE] Finished processing table {tableName}");
         }
 
         private void ProcessTableHeader(XElement tableElem)
         {
-            Debug.WriteLine($"[TABLE HEADER] Processing table header for non-repeating controls");
+            Debug.WriteLine($"[TABLE HEADER] Processing table header for labels and controls");
 
             // Look for thead or tbody with xdTableHeader class
             var headerSection = tableElem.Descendants()
@@ -2586,38 +2578,76 @@ namespace FormGenerator.Analyzers.Infopath
                 return;
             }
 
-            // Process any controls in the header (usually just labels, but check for others)
+            // Store the starting row for the table
+            int tableStartRow = currentRow;
+
+            // Process header rows
             foreach (var row in headerSection.Elements().Where(e => e.Name.LocalName == "tr"))
             {
                 currentCol = 1;
-                foreach (var cell in row.Elements().Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th"))
+                var cells = row.Elements().Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th").ToList();
+
+                // Extract header labels and store them
+                var headerLabels = new List<string>();
+
+                foreach (var cell in cells)
                 {
-                    // Try to extract any controls in header cells
-                    var control = TryExtractControl(cell);
-                    if (control == null)
+                    var labelText = ExtractCellText(cell).Trim();
+                    if (!string.IsNullOrWhiteSpace(labelText))
                     {
-                        // Check for label text directly in the cell
-                        var labelText = ExtractCellText(cell).Trim();
-                        if (!string.IsNullOrWhiteSpace(labelText) && labelText.Length > 1)
+                        headerLabels.Add(labelText);
+
+                        // Create a label control for this header
+                        var headerLabel = new ControlDefinition
                         {
-                            // This is a header label
-                            Debug.WriteLine($"    Found header label: {labelText}");
+                            Name = GenerateControlName(cell, labelText, "", "Label"),
+                            Type = "Label",
+                            Label = labelText,
+                            Binding = "",
+                            DocIndex = ++docIndexCounter,
+                            GridPosition = currentRow + GetColumnLetter(currentCol)
+                        };
+
+                        // Extract style attributes from the font element if present
+                        var fontElem = cell.Descendants()
+                            .FirstOrDefault(e => e.Name.LocalName == "font");
+
+                        if (fontElem != null)
+                        {
+                            var color = fontElem.Attribute("color")?.Value;
+                            var size = fontElem.Attribute("size")?.Value;
+                            var face = fontElem.Attribute("face")?.Value;
+
+                            if (!string.IsNullOrEmpty(color))
+                                headerLabel.Properties["color"] = color;
+                            if (!string.IsNullOrEmpty(size))
+                                headerLabel.Properties["size"] = size;
+                            if (!string.IsNullOrEmpty(face))
+                                headerLabel.Properties["face"] = face;
                         }
+
+                        headerLabel.Properties["IsTableHeader"] = "true";
+                        headerLabel.Properties["TableColumn"] = currentCol.ToString();
+
+                        ApplyControlContext(headerLabel);
+                        allControls.Add(headerLabel);
+
+                        Debug.WriteLine($"    Created header label: {headerLabel.Label} at {headerLabel.GridPosition}");
                     }
                     else
                     {
-                        // Found a control in the header
-                        ApplyControlContext(control);
-                        control.GridPosition = currentRow + GetColumnLetter(currentCol);
-                        control.DocIndex = ++docIndexCounter;
-                        allControls.Add(control);
-                        Debug.WriteLine($"    Added header control: {control.Name} ({control.Type})");
+                        headerLabels.Add(""); // Empty placeholder for alignment
                     }
+
                     currentCol++;
                 }
+
+                // Store headers for use when processing data rows
+                currentTableHeaders = headerLabels;
                 currentRow++;
             }
         }
+
 
         private void ProcessTableFooter(XElement tableElem)
         {
@@ -2800,28 +2830,105 @@ namespace FormGenerator.Analyzers.Infopath
         private void ProcessTableRow(XElement rowElem)
         {
             Debug.WriteLine($"[TABLE ROW] Processing row for controls");
-            currentCol = 1; // Reset column for new row
-            currentTableColumn = 0; // Reset table column counter for header tracking
 
-            // Process each cell in the row
-            foreach (var td in rowElem.Elements().Where(e => e.Name.LocalName == "td"))
+            // Store current column position for proper grid alignment
+            currentCol = 1;
+            currentTableColumn = 0;
+
+            var cells = rowElem.Elements().Where(e => e.Name.LocalName == "td").ToList();
+
+            foreach (var cell in cells)
             {
                 Debug.WriteLine($"  Processing table cell at column {currentCol}");
 
-                // Look for controls within the cell
-                var controlsFound = ExtractControlsFromTableCell(td);
-
-                if (controlsFound == 0)
+                // Get the header label for this column if available
+                string headerLabel = "";
+                if (currentTableHeaders != null && currentTableColumn < currentTableHeaders.Count)
                 {
-                    // No controls found, but still increment column
-                    currentCol++;
+                    headerLabel = currentTableHeaders[currentTableColumn];
                 }
 
-                currentTableColumn++; // Move to next column for headers
+                // Process controls in this cell
+                var controlsInCell = ExtractControlsFromCell(cell, headerLabel);
+
+                if (controlsInCell.Count > 0)
+                {
+                    // For multiple controls in same cell, use sub-columns (1A, 1B, etc.)
+                    int subCol = 0;
+                    foreach (var control in controlsInCell)
+                    {
+                        control.GridPosition = currentRow + GetColumnLetter(currentCol + subCol);
+                        control.DocIndex = ++docIndexCounter;
+
+                        // Apply header label if control doesn't have one
+                        if (string.IsNullOrEmpty(control.Label) && !string.IsNullOrEmpty(headerLabel))
+                        {
+                            control.Label = headerLabel;
+                        }
+
+                        ApplyControlContext(control);
+
+                        if (control.Properties != null && control.Properties.ContainsKey("CtrlId"))
+                        {
+                            var ctrlId = control.Properties["CtrlId"];
+                            if (!string.IsNullOrEmpty(ctrlId))
+                            {
+                                controlsById[ctrlId] = control;
+                            }
+                        }
+
+                        allControls.Add(control);
+                        Debug.WriteLine($"    Added control: {control.Name} ({control.Type}) at {control.GridPosition}");
+
+                        subCol++;
+                    }
+                }
+
+                currentCol++;
+                currentTableColumn++;
             }
 
-            currentRow++; // Move to next row after processing
+            currentRow++;
         }
+
+        private List<ControlDefinition> ExtractControlsFromCell(XElement cellElem, string headerLabel)
+        {
+            var controls = new List<ControlDefinition>();
+
+            // Look for all controls in the cell
+            var controlElements = cellElem.Descendants()
+                .Where(e =>
+                    (e.Name.LocalName == "span" && !string.IsNullOrEmpty(GetAttributeValue(e, "binding"))) ||
+                    e.Name.LocalName == "select" ||
+                    e.Name.LocalName == "input" ||
+                    e.Name.LocalName == "textarea" ||
+                    (e.Name.LocalName == "div" && GetAttributeValue(e, "xctname") == "DTPicker") ||
+                    !string.IsNullOrEmpty(GetAttributeValue(e, "xctname")))
+                .Where(e => !IsDatePickerSubComponent(e)) // Skip DatePicker sub-components
+                .ToList();
+
+            foreach (var elem in controlElements)
+            {
+                var control = TryExtractControl(elem);
+                if (control != null)
+                {
+                    controls.Add(control);
+                }
+            }
+
+            return controls;
+        }
+
+        private bool IsDatePickerSubComponent(XElement elem)
+        {
+            var className = elem.Attribute("class")?.Value ?? "";
+            return className.Contains("xdDTText") ||
+                   className.Contains("xdDTButton") ||
+                   !string.IsNullOrEmpty(GetAttributeValue(elem, "innerCtrl"));
+        }
+
+
+
         private int ExtractControlsFromTableCell(XElement cellElem)
         {
             int controlsFound = 0;
