@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Xml.Linq;
+using FormGenerator.Analyzers.Infopath;
 
 namespace FormGenerator.Analyzers.Infopath
 {
@@ -25,7 +26,14 @@ namespace FormGenerator.Analyzers.Infopath
         public Dictionary<string, List<string>> ConditionalVisibility { get; set; } = new Dictionary<string, List<string>>();
         public FormMetadata Metadata { get; set; } = new FormMetadata();
         public DebugInfo DebugInfo { get; set; } = new DebugInfo();
+
+        public string Description { get; set; }
+        public string Version { get; set; }
+        public List<ValidationRule> Validations { get; set; } = new List<ValidationRule>();
+        public List<ConditionalRule> ConditionalRules { get; set; } = new List<ConditionalRule>();
     }
+
+
 
     public class DebugInfo
     {
@@ -102,17 +110,53 @@ namespace FormGenerator.Analyzers.Infopath
     public class FormRule
     {
         public string Name { get; set; }
+        public string RuleType { get; set; } // Validation, Action, Formatting, etc.
         public string Condition { get; set; }
+        public string ConditionExpression { get; set; }
         public bool IsEnabled { get; set; }
         public List<FormRuleAction> Actions { get; set; } = new List<FormRuleAction>();
+        public string AppliesTo { get; set; } // Control ID or binding path
+        public string ErrorMessage { get; set; } // For validation rules
+        public int Priority { get; set; }
+    }
+
+    public class ValidationRule
+    {
+        public string ControlId { get; set; }
+        public string ControlName { get; set; }
+        public string Binding { get; set; }
+        public string ValidationType { get; set; } // Required, Pattern, DataType, Custom
+        public string Pattern { get; set; }
+        public string ErrorMessage { get; set; }
+        public string Expression { get; set; }
+        public bool IsRequired { get; set; }
+        public string DataType { get; set; }
+        public string MinValue { get; set; }
+        public string MaxValue { get; set; }
+        public int? MinLength { get; set; }
+        public int? MaxLength { get; set; }
+    }
+
+    public class ConditionalRule
+    {
+        public string Name { get; set; }
+        public string Type { get; set; } // Visibility, Formatting, Calculation
+        public string Condition { get; set; }
+        public string SourceField { get; set; }
+        public string TargetField { get; set; }
+        public string Action { get; set; }
+        public string Value { get; set; }
+        public List<string> AffectedControls { get; set; } = new List<string>();
     }
 
     public class FormRuleAction
     {
-        public string Type { get; set; }
+        public string Type { get; set; } // SetValue, Hide, Show, Submit, etc.
         public string Target { get; set; }
         public string Expression { get; set; }
+        public Dictionary<string, string> Parameters { get; set; } = new Dictionary<string, string>();
     }
+
 
     public class DataColumn
     {
@@ -127,6 +171,14 @@ namespace FormGenerator.Analyzers.Infopath
         public List<DataOption> ValidValues { get; set; }
         public string DefaultValue { get; set; }
         public bool HasConstraints => ValidValues != null && ValidValues.Any();
+
+        public bool IsRequired { get; set; }
+        public string ValidationPattern { get; set; }
+        public int? MinLength { get; set; }
+        public int? MaxLength { get; set; }
+        public string DataType { get; set; }
+        public string MinValue { get; set; }
+        public string MaxValue { get; set; }
     }
 
     public class DynamicSection
@@ -139,6 +191,11 @@ namespace FormGenerator.Analyzers.Infopath
         public string ConditionValue { get; set; }
         public List<string> Controls { get; set; } = new List<string>();
         public bool IsVisible { get; set; }
+
+        public List<string> AssociatedRules { get; set; } = new List<string>();
+        public List<string> ValidationRules { get; set; } = new List<string>();
+
+        public List<object> ActionRules { get; set; } = new List<object>();
     }
 
     public class FormMetadata
@@ -167,15 +224,20 @@ namespace FormGenerator.Analyzers.Infopath
 
             try
             {
-                Console.WriteLine("========== ENHANCED DEBUG MODE ==========");
-                Console.WriteLine($"Extracting XSN to {tempDir}");
+                Console.WriteLine("========================================");
+                Console.WriteLine($"Starting analysis of {xsnFilePath}");
+                Console.WriteLine("========================================\n");
 
+                // Extract XSN file
                 if (!ExtractXsn(xsnFilePath, tempDir))
                     throw new Exception("Failed to extract XSN file using all available methods.");
 
                 var formDef = new InfoPathFormDefinition();
                 formDef.DebugInfo = debugInfo;
+                formDef.FormName = Path.GetFileNameWithoutExtension(xsnFilePath);
+                formDef.FileName = Path.GetFileName(xsnFilePath);
 
+                // Extract views
                 var viewFiles = Directory.GetFiles(tempDir, "view*.xsl");
                 if (viewFiles.Length == 0)
                 {
@@ -184,12 +246,14 @@ namespace FormGenerator.Analyzers.Infopath
                 else
                 {
                     Console.WriteLine($"Found {viewFiles.Length} view files");
-                    foreach (var vf in viewFiles)
-                    {
-                        Console.WriteLine($"\n===== PARSING VIEW: {Path.GetFileName(vf)} =====");
-                        var singleView = ParseSingleView(vf);
 
-                        var xslDoc = XDocument.Load(vf);
+                    foreach (var viewFile in viewFiles)
+                    {
+                        Console.WriteLine($"\n===== PARSING VIEW: {Path.GetFileName(viewFile)} =====");
+                        var singleView = ParseSingleView(viewFile);
+
+                        // Extract dynamic sections from view
+                        var xslDoc = XDocument.Load(viewFile);
                         var dynamicHandler = new DynamicSectionHandler();
                         var dynamicSections = dynamicHandler.ExtractDynamicSections(xslDoc);
                         formDef.DynamicSections.AddRange(dynamicSections);
@@ -198,20 +262,207 @@ namespace FormGenerator.Analyzers.Infopath
                     }
                 }
 
+                // Extract rules and validation
+                Console.WriteLine("\n===== EXTRACTING RULES AND VALIDATION =====");
+                var rulesExtractor = new RulesExtractor();
+                rulesExtractor.ExtractRules(tempDir, formDef);
+                Console.WriteLine($"Extracted {formDef.Rules.Count} rules");
+                Console.WriteLine($"Extracted {formDef.Validations.Count} validation rules");
+                Console.WriteLine($"Extracted {formDef.ConditionalRules.Count} conditional rules");
+
+                // Extract title from manifest if available
+                var manifestPath = Path.Combine(tempDir, "manifest.xsf");
+                if (File.Exists(manifestPath))
+                {
+                    var manifestDoc = XDocument.Load(manifestPath);
+                    ExtractFormMetadataFromManifest(manifestDoc, formDef);
+                }
+
+                // Post-process form definition
                 PostProcessFormDefinition(formDef);
+
+                // Update dynamic sections with rules
+                UpdateDynamicSectionsWithRules(formDef);
+
+                // Ensure title is set
+                if (string.IsNullOrEmpty(formDef.Title))
+                {
+                    formDef.Title = formDef.FormName;
+                }
+
                 PrintDebugSummary();
+                PrintRulesSummary(formDef);
+
                 return formDef;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error parsing XSN: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                throw;
             }
             finally
             {
                 try
                 {
                     Directory.Delete(tempDir, true);
-                    Console.WriteLine("Cleanup completed successfully.");
+                    Console.WriteLine("\nCleanup completed successfully.");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Warning: Cleanup failed: " + ex.Message);
+                    Console.WriteLine($"Warning: Cleanup failed: {ex.Message}");
+                }
+            }
+        }
+
+        private void ExtractFormMetadataFromManifest(XDocument manifest, InfoPathFormDefinition formDef)
+        {
+            try
+            {
+                var xsf = XNamespace.Get("http://schemas.microsoft.com/office/infopath/2003/solutionDefinition");
+
+                // Extract form title
+                var documentSchemas = manifest.Descendants(xsf + "documentSchema").FirstOrDefault();
+                if (documentSchemas != null)
+                {
+                    var shortTitleElement = documentSchemas.Element(xsf + "property")
+                        ?.Elements(xsf + "property")
+                        ?.FirstOrDefault(e => e.Attribute("name")?.Value == "title");
+
+                    if (shortTitleElement != null)
+                    {
+                        formDef.Title = shortTitleElement.Attribute("value")?.Value;
+                    }
+                }
+
+                // Extract form description
+                var solutionProperties = manifest.Descendants(xsf + "solutionProperties").FirstOrDefault();
+                if (solutionProperties != null)
+                {
+                    formDef.Description = solutionProperties.Attribute("description")?.Value;
+                    formDef.Version = solutionProperties.Attribute("version")?.Value;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Error extracting metadata from manifest: {ex.Message}");
+            }
+        }
+
+        private void PrintRulesSummary(InfoPathFormDefinition formDef)
+        {
+            Console.WriteLine("\n========== RULES SUMMARY ==========");
+
+            if (formDef.Rules.Any())
+            {
+                Console.WriteLine($"\nForm Rules ({formDef.Rules.Count}):");
+                foreach (var rule in formDef.Rules.Take(5))
+                {
+                    Console.WriteLine($"  - {rule.Name} ({rule.RuleType}): {rule.Condition?.Substring(0, Math.Min(50, rule.Condition?.Length ?? 0))}...");
+                    if (rule.Actions.Any())
+                    {
+                        Console.WriteLine($"    Actions: {string.Join(", ", rule.Actions.Select(a => a.Type))}");
+                    }
+                }
+                if (formDef.Rules.Count > 5)
+                    Console.WriteLine($"  ... and {formDef.Rules.Count - 5} more");
+            }
+
+            if (formDef.Validations.Any())
+            {
+                Console.WriteLine($"\nValidation Rules ({formDef.Validations.Count}):");
+                var byType = formDef.Validations.GroupBy(v => v.ValidationType);
+                foreach (var group in byType)
+                {
+                    Console.WriteLine($"  - {group.Key}: {group.Count()} rules");
+                    foreach (var validation in group.Take(3))
+                    {
+                        Console.WriteLine($"    • {validation.ControlName}: {validation.ErrorMessage ?? validation.Pattern ?? "Required"}");
+                    }
+                }
+            }
+
+            if (formDef.ConditionalRules.Any())
+            {
+                Console.WriteLine($"\nConditional Rules ({formDef.ConditionalRules.Count}):");
+                var byType = formDef.ConditionalRules.GroupBy(r => r.Type);
+                foreach (var group in byType)
+                {
+                    Console.WriteLine($"  - {group.Key}: {group.Count()} rules");
+                    foreach (var rule in group.Take(3))
+                    {
+                        Console.WriteLine($"    • Affects: {string.Join(", ", rule.AffectedControls.Take(3))}");
+                    }
+                }
+            }
+
+            if (formDef.DynamicSections.Any())
+            {
+                Console.WriteLine($"\nDynamic Sections with Rules ({formDef.DynamicSections.Count}):");
+                foreach (var section in formDef.DynamicSections.Where(s => s.AssociatedRules.Any() || s.ValidationRules.Any()))
+                {
+       //             Console.WriteLine($"  - {section.Name}:");
+                    if (section.AssociatedRules.Any())
+                        Console.WriteLine($"    Rules: {string.Join(", ", section.AssociatedRules)}");
+                    if (section.ValidationRules.Any())
+                        Console.WriteLine($"    Validations: {section.ValidationRules.Count} rule(s)");
+                }
+            }
+
+            Console.WriteLine("========================================\n");
+        }
+
+
+        private void UpdateDynamicSectionsWithRules(InfoPathFormDefinition formDef)
+        {
+            foreach (var dynSection in formDef.DynamicSections)
+            {
+                // Find matching conditional rules
+                var matchingRules = formDef.ConditionalRules
+                    .Where(r => r.AffectedControls.Any(c => dynSection.Controls.Contains(c)))
+                    .ToList();
+
+                if (matchingRules.Any())
+                {
+                    dynSection.AssociatedRules = matchingRules.Select(r => r.Name).ToList();
+
+                    // Update condition details from rules
+                    var primaryRule = matchingRules.FirstOrDefault();
+                    if (primaryRule != null && string.IsNullOrEmpty(dynSection.Condition))
+                    {
+                        dynSection.Condition = primaryRule.Condition;
+                        dynSection.ConditionField = primaryRule.SourceField;
+                    }
+                }
+
+                // Find validation rules for controls in this section
+                var validations = formDef.Validations
+                    .Where(v => dynSection.Controls.Any(c => c == v.ControlId || c == v.ControlName))
+                    .ToList();
+
+                if (validations.Any())
+                {
+                    dynSection.ValidationRules = validations
+                        .Select(v => v.ErrorMessage ?? $"{v.ValidationType} validation on {v.ControlName}")
+                        .ToList();
+                }
+
+                // Find action rules that affect this section
+                var actionRules = formDef.Rules
+                    .Where(r => r.Actions.Any(a =>
+                        a.Type == "setValue" && dynSection.Controls.Contains(a.Target) ||
+                        a.Type == "hideControl" && dynSection.Controls.Contains(a.Target) ||
+                        a.Type == "showControl" && dynSection.Controls.Contains(a.Target)))
+                    .ToList();
+
+                if (actionRules.Any())
+                {
+                    dynSection.ActionRules = actionRules.Select(r => new
+                    {
+                        Name = r.Name,
+                        Type = r.RuleType,
+                        Condition = r.Condition
+                    }).ToList<object>();
                 }
             }
         }
