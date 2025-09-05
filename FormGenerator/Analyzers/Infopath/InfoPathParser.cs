@@ -2536,11 +2536,14 @@ namespace FormGenerator.Analyzers.Infopath
             currentRow++;
             currentCol = 1;
 
-            // Process table header (creates label controls)
-            ProcessTableHeader(elem);
+            // Extract and store header labels for later use
+            var headerLabels = ExtractTableHeaderLabels(elem);
 
-            // Create repeating context
+            // Create repeating context FIRST
             CreateRepeatingSection(tableName, binding, "table");
+
+            // NOW process table header labels within the repeating context
+            ProcessTableHeaderLabels(elem, headerLabels);
 
             // Process the repeating rows
             ProcessTableStructure(elem);
@@ -2556,10 +2559,98 @@ namespace FormGenerator.Analyzers.Infopath
                 }
             }
 
-            // Process table footer (for totals, etc.)
+            // Process table footer (for totals, etc.) - outside repeating context
             ProcessTableFooter(elem);
 
             Debug.WriteLine($"[REPEATING TABLE] Finished processing table {tableName}");
+        }
+
+        private void ProcessTableHeaderLabels(XElement tableElem, List<string> headerLabels)
+        {
+            Debug.WriteLine($"[TABLE HEADER LABELS] Creating label controls for headers");
+
+            if (headerLabels == null || headerLabels.Count == 0)
+                return;
+
+            // Look for the header section to get style information
+            var headerSection = tableElem.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "thead" ||
+                                    (e.Name.LocalName == "tbody" &&
+                                     e.Attribute("class")?.Value?.Contains("xdTableHeader") == true));
+
+            if (headerSection != null)
+            {
+                var headerRow = headerSection.Elements()
+                    .FirstOrDefault(e => e.Name.LocalName == "tr");
+
+                if (headerRow != null)
+                {
+                    var cells = headerRow.Elements()
+                        .Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th")
+                        .ToList();
+
+                    currentCol = 1;
+                    for (int i = 0; i < headerLabels.Count; i++)
+                    {
+                        if (!string.IsNullOrWhiteSpace(headerLabels[i]))
+                        {
+                            // Get the cell element for this header (if available) to pass to GenerateControlName
+                            XElement cellElem = i < cells.Count ? cells[i] : null;
+
+                            // Create label control for this header
+                            var headerLabel = new ControlDefinition
+                            {
+                                Name = GenerateControlName(cellElem, headerLabels[i], "", "Label"),
+                                Type = "Label",
+                                Label = headerLabels[i],
+                                Binding = "",
+                                DocIndex = ++docIndexCounter,
+                                GridPosition = currentRow + GetColumnLetter(currentCol)
+                            };
+
+                            // Get style from corresponding cell if available
+                            if (cellElem != null)
+                            {
+                                var fontElem = cellElem.Descendants()
+                                    .FirstOrDefault(e => e.Name.LocalName == "font");
+
+                                if (fontElem != null)
+                                {
+                                    var color = fontElem.Attribute("color")?.Value;
+                                    var size = fontElem.Attribute("size")?.Value;
+                                    var face = fontElem.Attribute("face")?.Value;
+
+                                    if (!string.IsNullOrEmpty(color))
+                                        headerLabel.Properties["color"] = color;
+                                    if (!string.IsNullOrEmpty(size))
+                                        headerLabel.Properties["size"] = size;
+                                    if (!string.IsNullOrEmpty(face))
+                                        headerLabel.Properties["face"] = face;
+                                }
+                            }
+
+                            headerLabel.Properties["IsTableHeader"] = "true";
+                            headerLabel.Properties["TableColumn"] = (i + 1).ToString();
+
+                            // Apply the current repeating context so these labels are IN the repeating section
+                            ApplyControlContext(headerLabel);
+
+                            allControls.Add(headerLabel);
+
+                            Debug.WriteLine($"    Created header label: {headerLabel.Label} at {headerLabel.GridPosition}");
+                            if (headerLabel.IsInRepeatingSection)
+                            {
+                                Debug.WriteLine($"      In repeating section: {headerLabel.RepeatingSectionName}");
+                            }
+                        }
+                        currentCol++;
+                    }
+
+                    // Store headers for use when processing data rows
+                    currentTableHeaders = headerLabels;
+                    currentRow++;
+                }
+            }
         }
 
         private void ProcessTableHeader(XElement tableElem)
@@ -2739,19 +2830,11 @@ namespace FormGenerator.Analyzers.Infopath
             }
         }
 
-
         private void ProcessTableStructure(XElement tableElem)
         {
             Debug.WriteLine($"[TABLE STRUCTURE] Processing table for controls");
 
-            // First, look for and process table headers to get column labels
-            var headerLabels = ExtractTableHeaderLabels(tableElem);
-            Debug.WriteLine($"  Found {headerLabels.Count} header labels: {string.Join(", ", headerLabels)}");
-
-            // Store headers for use during cell processing
-            currentTableHeaders = headerLabels;
-
-            // Look for tbody with xd:xctname="repeatingtable"
+            // Look for tbody with xd:xctname="repeatingtable" or the main tbody (not header/footer)
             var tbody = tableElem.Descendants()
                 .FirstOrDefault(e => e.Name.LocalName == "tbody" &&
                                     (GetAttributeValue(e, "xctname") == "repeatingtable" ||
@@ -2759,7 +2842,6 @@ namespace FormGenerator.Analyzers.Infopath
 
             if (tbody == null)
             {
-                // If not found, look for any tbody that's not a header/footer
                 tbody = tableElem.Descendants()
                     .FirstOrDefault(e => e.Name.LocalName == "tbody" &&
                                         e.Attribute("class")?.Value?.Contains("TableHeader") != true &&
@@ -2770,7 +2852,6 @@ namespace FormGenerator.Analyzers.Infopath
             {
                 Debug.WriteLine($"  Found table body, looking for xsl:for-each");
 
-                // Look for xsl:for-each which indicates the repeating pattern
                 var forEach = tbody.Descendants()
                     .FirstOrDefault(e => e.Name.LocalName == "for-each");
 
@@ -2785,7 +2866,6 @@ namespace FormGenerator.Analyzers.Infopath
                 else
                 {
                     Debug.WriteLine($"  No for-each found, processing tbody children directly");
-                    // Process tbody children directly
                     foreach (var child in tbody.Elements())
                     {
                         if (child.Name.LocalName == "tr")
@@ -2797,15 +2877,6 @@ namespace FormGenerator.Analyzers.Infopath
                             ProcessElement(child);
                         }
                     }
-                }
-            }
-            else
-            {
-                Debug.WriteLine($"  No tbody found, processing table children");
-                // Process all children if no tbody found
-                foreach (var child in tableElem.Elements())
-                {
-                    ProcessElement(child);
                 }
             }
 
@@ -4177,11 +4248,15 @@ namespace FormGenerator.Analyzers.Infopath
 
         private string GenerateControlName(XElement elem, string label, string binding, string controlType)
         {
-            // Priority 1: Use explicit name attribute
-            var nameAttr = elem.Attribute("name")?.Value;
-            if (!string.IsNullOrWhiteSpace(nameAttr))
+            // Handle null element case
+            if (elem != null)
             {
-                return RemoveSpaces(nameAttr).ToUpper();
+                // Priority 1: Use explicit name attribute
+                var nameAttr = elem.Attribute("name")?.Value;
+                if (!string.IsNullOrWhiteSpace(nameAttr))
+                {
+                    return RemoveSpaces(nameAttr).ToUpper();
+                }
             }
 
             // Priority 2: Try to extract from binding FIRST (more reliable than label)
@@ -4197,7 +4272,6 @@ namespace FormGenerator.Analyzers.Infopath
 
                 if (!string.IsNullOrWhiteSpace(lastPart))
                 {
-                    // Check if this might be "FIRM" or similar
                     var cleanName = RemoveSpaces(lastPart).ToUpper();
                     if (!string.IsNullOrEmpty(cleanName))
                     {
@@ -4217,11 +4291,14 @@ namespace FormGenerator.Analyzers.Infopath
                 }
             }
 
-            // Priority 4: Use control ID if available
-            var ctrlId = GetAttributeValue(elem, "CtrlId");
-            if (!string.IsNullOrWhiteSpace(ctrlId))
+            // Priority 4: Use control ID if available (only if elem is not null)
+            if (elem != null)
             {
-                return ctrlId.ToUpper();
+                var ctrlId = GetAttributeValue(elem, "CtrlId");
+                if (!string.IsNullOrWhiteSpace(ctrlId))
+                {
+                    return ctrlId.ToUpper();
+                }
             }
 
             // Priority 5: Generate based on control type and position
