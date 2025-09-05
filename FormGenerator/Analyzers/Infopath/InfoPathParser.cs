@@ -2845,11 +2845,11 @@ namespace FormGenerator.Analyzers.Infopath
                 var control = TryExtractControl(span);
                 if (control != null)
                 {
-                    // Apply the header label if the control doesn't have one
-                    if (string.IsNullOrEmpty(control.Label) && !string.IsNullOrEmpty(headerLabel))
+                    // For table controls, ALWAYS prefer the header label over title attribute
+                    if (!string.IsNullOrEmpty(headerLabel))
                     {
                         control.Label = headerLabel;
-                        Debug.WriteLine($"    Applied header label: {headerLabel}");
+                        Debug.WriteLine($"    Set label from header: {headerLabel}");
                     }
 
                     ApplyControlContext(control);
@@ -2869,7 +2869,7 @@ namespace FormGenerator.Analyzers.Infopath
                     controlsFound++;
 
                     Debug.WriteLine($"    Added table control: {control.Name} ({control.Type}) with binding {control.Binding}");
-                    Debug.WriteLine($"      Label: {control.Label}");
+                    Debug.WriteLine($"      Final Label: {control.Label}");
                     if (control.IsInRepeatingSection)
                     {
                         Debug.WriteLine($"      In repeating: {control.RepeatingSectionName}");
@@ -2892,11 +2892,11 @@ namespace FormGenerator.Analyzers.Infopath
                 var control = TryExtractControl(elem);
                 if (control != null)
                 {
-                    // Apply the header label if the control doesn't have one
-                    if (string.IsNullOrEmpty(control.Label) && !string.IsNullOrEmpty(headerLabel))
+                    // For table controls, ALWAYS prefer the header label over title attribute
+                    if (!string.IsNullOrEmpty(headerLabel))
                     {
                         control.Label = headerLabel;
-                        Debug.WriteLine($"    Applied header label: {headerLabel}");
+                        Debug.WriteLine($"    Set label from header: {headerLabel}");
                     }
 
                     ApplyControlContext(control);
@@ -2916,7 +2916,7 @@ namespace FormGenerator.Analyzers.Infopath
                     controlsFound++;
 
                     Debug.WriteLine($"    Added table control: {control.Name} ({control.Type})");
-                    Debug.WriteLine($"      Label: {control.Label}");
+                    Debug.WriteLine($"      Final Label: {control.Label}");
                 }
             }
 
@@ -4847,21 +4847,9 @@ namespace FormGenerator.Analyzers.Infopath
     {
         public void ProcessMultiLineLabels(List<ControlDefinition> controls)
         {
-            for (int i = 0; i < controls.Count - 1; i++)
-            {
-                var current = controls[i];
-                var next = controls[i + 1];
-
-                if (current.Type == "Label" && next.Type == "Label")
-                {
-                    if (AreLabelsRelated(current, next))
-                    {
-                        current.Label = current.Label + " " + next.Label;
-                        current.IsMultiLineLabel = true;
-                        next.IsMergedIntoParent = true;
-                    }
-                }
-            }
+            // Don't process labels at all - keep them separate
+            // This is the simplest and most reliable approach
+            return;
         }
 
         private bool AreLabelsRelated(ControlDefinition label1, ControlDefinition label2)
