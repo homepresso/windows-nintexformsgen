@@ -945,6 +945,8 @@ namespace FormGenerator.Analyzers.Infopath
             public string Type { get; set; }
             public string DisplayName { get; set; }
             public int Depth { get; set; }
+
+            public string ParentName { get; set; }
         }
 
         public SectionAwareParser(DebugInfo debug)
@@ -1805,15 +1807,22 @@ namespace FormGenerator.Analyzers.Infopath
 
             // Extract section name from the select pattern
             string sectionName = ExtractSectionNameFromSelect(select);
+            Debug.WriteLine($"  Original extracted section name: {sectionName}");
+
+            string parentSectionName = null;
+            bool isNested = false;
 
             // If we're already in a repeating context, this is nested
             if (repeatingContextStack.Count > 0)
             {
                 var parentContext = repeatingContextStack.Peek();
+                parentSectionName = parentContext.DisplayName;
+                isNested = true;
+
+                Debug.WriteLine($"  Parent context found: {parentContext.DisplayName} (Binding: {parentContext.Binding})");
 
                 // For nested sections, combine parent and child names
                 string combinedName = $"{parentContext.DisplayName}_{sectionName}";
-
                 Debug.WriteLine($"  Creating nested repeating section: {combinedName} (parent: {parentContext.DisplayName})");
 
                 // Use the combined name
@@ -1833,14 +1842,15 @@ namespace FormGenerator.Analyzers.Infopath
 
             if (!alreadyInContext)
             {
-                // Create repeating context with combined name for nested sections
+                // Create repeating context with the appropriate parent
                 var repeatingContext = new RepeatingContext
                 {
                     Name = sectionName,
                     Binding = select,
                     Type = "section",
                     DisplayName = sectionName,
-                    Depth = repeatingContextStack.Count
+                    Depth = repeatingContextStack.Count,
+                    ParentName = isNested ? parentSectionName : null  // Track the parent name
                 };
 
                 repeatingContextStack.Push(repeatingContext);
@@ -1882,6 +1892,12 @@ namespace FormGenerator.Analyzers.Infopath
 
                     int controlsAdded = allControls.Count - controlCountBefore;
                     Debug.WriteLine($"  Added {controlsAdded} controls from template");
+
+                    // If no controls were added and this is nested, mark for cleanup
+                    if (controlsAdded == 0 && isNested)
+                    {
+                        Debug.WriteLine($"  Warning: Nested section {sectionName} has no direct controls");
+                    }
                 }
                 else
                 {
@@ -1889,9 +1905,9 @@ namespace FormGenerator.Analyzers.Infopath
                 }
             }
 
-            if (!alreadyInContext)
+            if (!alreadyInContext && repeatingContextStack.Count > 0)
             {
-                repeatingContextStack.Pop();
+                var poppedContext = repeatingContextStack.Pop();
                 var sectionInfo = sections.LastOrDefault(s => s.Name == sectionName);
                 if (sectionInfo != null)
                     sectionInfo.EndRow = currentRow;
@@ -1974,7 +1990,7 @@ namespace FormGenerator.Analyzers.Infopath
                 Debug.WriteLine($"  Set parent section: {currentSectionName}");
             }
 
-            // Apply repeating context - use the LAST (most specific) repeating section
+            // Apply repeating context
             if (repeatingContextStack != null && repeatingContextStack.Count > 0)
             {
                 var currentRepeating = repeatingContextStack.Peek();
@@ -1986,16 +2002,48 @@ namespace FormGenerator.Analyzers.Infopath
                 Debug.WriteLine($"  Set repeating section: {currentRepeating.DisplayName}");
                 Debug.WriteLine($"  Repeating binding: {currentRepeating.Binding}");
 
-                // ADD THIS: Set parent repeating section if nested
+                // For nested sections, find the first parent with actual controls
                 if (repeatingContextStack.Count > 1)
                 {
-                    // Get the parent (second from top) repeating section
-                    var parentRepeating = repeatingContextStack.ElementAt(1);
-                    control.ParentRepeatingSectionName = parentRepeating.DisplayName;
-                    Debug.WriteLine($"  Parent repeating section: {parentRepeating.DisplayName}");
+                    // Look through the stack to find a parent section with controls
+                    string effectiveParent = null;
+
+                    // Convert stack to array to iterate (skip the first one which is current)
+                    var stackArray = repeatingContextStack.ToArray();
+                    for (int i = 1; i < stackArray.Length; i++)
+                    {
+                        var potentialParent = stackArray[i];
+
+                        // Check if this parent section has any direct controls
+                        bool hasDirectControls = allControls.Any(c =>
+                            c.RepeatingSectionName == potentialParent.DisplayName &&
+                            (c.ParentRepeatingSectionName == null ||
+                             c.ParentRepeatingSectionName == effectiveParent));
+
+                        if (hasDirectControls)
+                        {
+                            effectiveParent = potentialParent.DisplayName;
+                            break; // Found the first parent with controls
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"  Skipping empty parent section: {potentialParent.DisplayName}");
+                        }
+                    }
+
+                    control.ParentRepeatingSectionName = effectiveParent;
+
+                    if (!string.IsNullOrEmpty(effectiveParent))
+                    {
+                        Debug.WriteLine($"  Parent repeating section: {effectiveParent}");
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"  No parent with controls found - treating as top-level");
+                    }
                 }
 
-                // For debugging, track the nesting depth
+                // Track nesting depth for debugging
                 if (repeatingContextStack.Count > 1)
                 {
                     control.Properties["NestingDepth"] = repeatingContextStack.Count.ToString();
