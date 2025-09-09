@@ -74,6 +74,8 @@ namespace FormGenerator.Analyzers.Infopath
         public bool IsInRepeatingSection { get; set; }
         public string RepeatingSectionName { get; set; }
         public string RepeatingSectionBinding { get; set; }
+
+        public string ParentRepeatingSectionName { get; set; }
         public bool WasInExpressionBox { get; set; }  // Track if control was inside ExpressionBox
         public Dictionary<string, string> Properties { get; set; }
         public List<ControlDefinition> Controls { get; set; }
@@ -165,6 +167,8 @@ namespace FormGenerator.Analyzers.Infopath
         public string RepeatingSection { get; set; }
         public bool IsRepeating { get; set; }
         public string RepeatingSectionPath { get; set; }
+
+        public string ParentRepeatingSectionName { get; set; }
         public bool IsConditional { get; set; }
         public string ConditionalOnField { get; set; }
         public string DisplayName { get; set; }
@@ -629,7 +633,7 @@ namespace FormGenerator.Analyzers.Infopath
 
         private List<DataColumn> BuildEnhancedColumns(List<ControlDefinition> allCtrls, InfoPathFormDefinition formDef)
         {
-            var dict = new Dictionary<(string colName, string rep), DataColumn>();
+            var dict = new Dictionary<(string colName, string rep, string parentRep), DataColumn>();
 
             foreach (var ctrl in allCtrls)
             {
@@ -639,7 +643,10 @@ namespace FormGenerator.Analyzers.Infopath
                 if (string.IsNullOrWhiteSpace(colName)) continue;
 
                 string repeating = ctrl.IsInRepeatingSection ? ctrl.RepeatingSectionName : ctrl.ParentSection;
-                var key = (colName, repeating);
+                string parentRepeating = ctrl.ParentRepeatingSectionName;
+
+                // Include parent repeating section in the key for truly unique identification
+                var key = (colName, repeating, parentRepeating);
 
                 if (!dict.ContainsKey(key))
                 {
@@ -650,9 +657,12 @@ namespace FormGenerator.Analyzers.Infopath
                         RepeatingSection = repeating,
                         IsRepeating = ctrl.SectionType == "repeating" || ctrl.IsInRepeatingSection,
                         RepeatingSectionPath = ctrl.IsInRepeatingSection ? ctrl.RepeatingSectionBinding : repeating,
-                        DisplayName = ctrl.Label
+                        ParentRepeatingSectionName = ctrl.ParentRepeatingSectionName,  // ADD THIS
+                        DisplayName = ctrl.Label,
+                        IsConditional = false  // Will be set below if applicable
                     };
 
+                    // Handle dropdown/select options
                     if (ctrl.HasStaticData && ctrl.DataOptions != null && ctrl.DataOptions.Any())
                     {
                         dataCol.ValidValues = new List<DataOption>(ctrl.DataOptions);
@@ -666,7 +676,12 @@ namespace FormGenerator.Analyzers.Infopath
                             dataCol.DefaultValue = ctrl.Properties["DefaultValue"];
                         }
                     }
+                    else if (ctrl.Properties != null && ctrl.Properties.ContainsKey("DefaultValue"))
+                    {
+                        dataCol.DefaultValue = ctrl.Properties["DefaultValue"];
+                    }
 
+                    // Check if this control is conditional
                     if (ctrl.Properties != null && ctrl.Properties.ContainsKey("CtrlId"))
                     {
                         var ctrlId = ctrl.Properties["CtrlId"];
@@ -680,11 +695,56 @@ namespace FormGenerator.Analyzers.Infopath
                         }
                     }
 
+                    // Extract validation properties if present
+                    if (ctrl.Properties != null)
+                    {
+                        if (ctrl.Properties.ContainsKey("required") &&
+                            bool.TryParse(ctrl.Properties["required"], out bool isRequired))
+                        {
+                            dataCol.IsRequired = isRequired;
+                        }
+
+                        if (ctrl.Properties.ContainsKey("pattern"))
+                        {
+                            dataCol.ValidationPattern = ctrl.Properties["pattern"];
+                        }
+
+                        if (ctrl.Properties.ContainsKey("minlength") &&
+                            int.TryParse(ctrl.Properties["minlength"], out int minLen))
+                        {
+                            dataCol.MinLength = minLen;
+                        }
+
+                        if (ctrl.Properties.ContainsKey("maxlength") &&
+                            int.TryParse(ctrl.Properties["maxlength"], out int maxLen))
+                        {
+                            dataCol.MaxLength = maxLen;
+                        }
+
+                        if (ctrl.Properties.ContainsKey("min"))
+                        {
+                            dataCol.MinValue = ctrl.Properties["min"];
+                        }
+
+                        if (ctrl.Properties.ContainsKey("max"))
+                        {
+                            dataCol.MaxValue = ctrl.Properties["max"];
+                        }
+
+                        if (ctrl.Properties.ContainsKey("datafmt"))
+                        {
+                            dataCol.DataType = ctrl.Properties["datafmt"];
+                        }
+                    }
+
                     dict[key] = dataCol;
                 }
                 else
                 {
+                    // Update existing column with additional information if needed
                     var existingCol = dict[key];
+
+                    // Merge valid values if this control has them and existing doesn't
                     if (ctrl.HasStaticData && ctrl.DataOptions != null &&
                         ctrl.DataOptions.Any() && existingCol.ValidValues == null)
                     {
@@ -694,6 +754,25 @@ namespace FormGenerator.Analyzers.Infopath
                         {
                             existingCol.DefaultValue = defaultOption.Value;
                         }
+                    }
+
+                    // Update display name if the existing one is empty
+                    if (string.IsNullOrEmpty(existingCol.DisplayName) && !string.IsNullOrEmpty(ctrl.Label))
+                    {
+                        existingCol.DisplayName = ctrl.Label;
+                    }
+
+                    // Update type if the existing one is generic
+                    if (string.IsNullOrEmpty(existingCol.Type) && !string.IsNullOrEmpty(ctrl.Type))
+                    {
+                        existingCol.Type = ctrl.Type;
+                    }
+
+                    // Ensure parent repeating section is set if it wasn't before
+                    if (string.IsNullOrEmpty(existingCol.ParentRepeatingSectionName) &&
+                        !string.IsNullOrEmpty(ctrl.ParentRepeatingSectionName))
+                    {
+                        existingCol.ParentRepeatingSectionName = ctrl.ParentRepeatingSectionName;
                     }
                 }
             }
@@ -1901,11 +1980,20 @@ namespace FormGenerator.Analyzers.Infopath
                 var currentRepeating = repeatingContextStack.Peek();
 
                 control.IsInRepeatingSection = true;
-                control.RepeatingSectionName = currentRepeating.DisplayName; // This will now be the combined name
+                control.RepeatingSectionName = currentRepeating.DisplayName;
                 control.RepeatingSectionBinding = currentRepeating.Binding;
 
                 Debug.WriteLine($"  Set repeating section: {currentRepeating.DisplayName}");
                 Debug.WriteLine($"  Repeating binding: {currentRepeating.Binding}");
+
+                // ADD THIS: Set parent repeating section if nested
+                if (repeatingContextStack.Count > 1)
+                {
+                    // Get the parent (second from top) repeating section
+                    var parentRepeating = repeatingContextStack.ElementAt(1);
+                    control.ParentRepeatingSectionName = parentRepeating.DisplayName;
+                    Debug.WriteLine($"  Parent repeating section: {parentRepeating.DisplayName}");
+                }
 
                 // For debugging, track the nesting depth
                 if (repeatingContextStack.Count > 1)

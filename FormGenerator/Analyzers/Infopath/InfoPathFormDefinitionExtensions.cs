@@ -51,7 +51,9 @@ namespace FormGenerator.Analyzers.InfoPath
                         {
                             SectionName = control.RepeatingSectionName,
                             Binding = control.RepeatingSectionBinding,
-                            IsRepeating = true
+                            IsRepeating = true,
+                            // ADD THIS: Include parent repeating section name for nested scenarios
+                            ParentRepeatingSectionName = control.ParentRepeatingSectionName
                         } : null,
 
                         // Data options for dropdowns
@@ -87,6 +89,9 @@ namespace FormGenerator.Analyzers.InfoPath
                 // Summary of repeating structures (these affect data model)
                 RepeatingStructures = GetRepeatingStructures(formDef),
 
+                // ADD THIS: Nested repeating structures summary
+                NestedRepeatingStructures = GetNestedRepeatingStructures(formDef),
+
                 // Data columns for SQL generation
                 DataColumns = formDef.Data.Select(d => new
                 {
@@ -95,6 +100,7 @@ namespace FormGenerator.Analyzers.InfoPath
                     DisplayName = d.DisplayName,
                     IsRepeating = d.IsRepeating,
                     RepeatingSectionName = d.RepeatingSection,
+                    ParentRepeatingSectionName = d.ParentRepeatingSectionName,  // ADD THIS
                     ValidValues = d.ValidValues?.Select(v => new
                     {
                         v.Value,
@@ -110,9 +116,54 @@ namespace FormGenerator.Analyzers.InfoPath
                     TotalViews = formDef.Views.Count,
                     RepeatingSectionCount = formDef.Metadata.RepeatingSectionCount,
                     DynamicSectionCount = formDef.Metadata.DynamicSectionCount,
-                    ControlTypes = GetControlTypeSummary(allControls)
+                    ControlTypes = GetControlTypeSummary(allControls),
+                    NestedSectionCount = GetNestedSectionCount(formDef)  // ADD THIS
                 }
             };
+        }
+
+        // Helper method to get nested repeating structures
+        private static List<object> GetNestedRepeatingStructures(InfoPathFormDefinition formDef)
+        {
+            var nestedStructures = new List<object>();
+
+            // Group controls by their repeating section and parent
+            var nestedGroups = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => !string.IsNullOrEmpty(c.ParentRepeatingSectionName))
+                .GroupBy(c => new { c.RepeatingSectionName, c.ParentRepeatingSectionName })
+                .ToList();
+
+            foreach (var group in nestedGroups)
+            {
+                var controls = group.ToList();
+
+                nestedStructures.Add(new
+                {
+                    Name = group.Key.RepeatingSectionName,
+                    ParentName = group.Key.ParentRepeatingSectionName,
+                    Type = "NestedRepeatingSection",
+                    NestingLevel = 2, // Could be calculated more dynamically if needed
+                    ControlCount = controls.Count,
+                    ControlTypes = controls.GroupBy(c => c.Type)
+                        .Select(g => new { Type = g.Key, Count = g.Count() })
+                        .OrderByDescending(x => x.Count)
+                        .ToList()
+                });
+            }
+
+            return nestedStructures;
+        }
+
+        // Helper method to count nested sections
+        private static int GetNestedSectionCount(InfoPathFormDefinition formDef)
+        {
+            return formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => !string.IsNullOrEmpty(c.ParentRepeatingSectionName))
+                .Select(c => c.RepeatingSectionName)
+                .Distinct()
+                .Count();
         }
 
         /// <summary>
@@ -157,11 +208,15 @@ namespace FormGenerator.Analyzers.InfoPath
                         RepeatingSectionInfo = c.IsInRepeatingSection ? new
                         {
                             c.IsInRepeatingSection,
-                            RepeatingSectionName = c.RepeatingSectionName,  // THIS IS THE KEY ADDITION
-                            c.RepeatingSectionBinding
+                            RepeatingSectionName = c.RepeatingSectionName,
+                            c.RepeatingSectionBinding,
+                            // ADD THIS: Include parent repeating section for nested scenarios
+                            ParentRepeatingSectionName = c.ParentRepeatingSectionName
                         } : null,
                         // ADD THIS NEW PROPERTY - Simple repeating section name at top level for easier access
                         RepeatingSectionName = c.IsInRepeatingSection ? c.RepeatingSectionName : null,
+                        // ADD THIS NEW PROPERTY - Parent repeating section at top level
+                        ParentRepeatingSectionName = c.ParentRepeatingSectionName,
                         // Include data options if present
                         DataOptions = c.HasStaticData ? c.DataOptions : null,
                         DataValues = c.HasStaticData ? c.DataOptionsString : null,
@@ -199,6 +254,7 @@ namespace FormGenerator.Analyzers.InfoPath
                     // Section context - INCLUDING REPEATING SECTION NAME
                     Section = !string.IsNullOrEmpty(d.RepeatingSection) ? d.RepeatingSection : null,
                     RepeatingSectionName = d.IsRepeating ? d.RepeatingSection : null,  // ADD THIS FOR CLARITY
+                    ParentRepeatingSectionName = d.ParentRepeatingSectionName,  // ADD THIS for nested sections
                     d.IsRepeating,
                     // Include valid values for columns
                     ValidValues = d.HasConstraints
@@ -234,7 +290,9 @@ namespace FormGenerator.Analyzers.InfoPath
                     // Add summary of controls with CtrlIds
                     ControlsWithIds = GetControlsWithIds(formDef),
                     // ADD THIS: Summary of which controls are in which repeating sections
-                    RepeatingSectionMembership = GetRepeatingSectionMembership(formDef)
+                    RepeatingSectionMembership = GetRepeatingSectionMembership(formDef),
+                    // ADD THIS: Nested repeating sections summary
+                    NestedRepeatingSections = GetNestedRepeatingSections(formDef)
                 },
                 // ADD SQL DEPLOYMENT INFO WHEN AVAILABLE
                 SqlDeploymentInfo = CurrentSqlDeploymentInfo != null && formMapping != null ? new
@@ -262,6 +320,30 @@ namespace FormGenerator.Analyzers.InfoPath
                     StoredProcedures = formMapping.StoredProcedures,
                     Views = formMapping.Views
                 } : null
+            };
+        }
+
+        // Add this new helper method to identify nested repeating sections
+        private static object GetNestedRepeatingSections(InfoPathFormDefinition formDef)
+        {
+            var nestedSections = formDef.Views
+                .SelectMany(v => v.Controls)
+                .Where(c => !string.IsNullOrEmpty(c.ParentRepeatingSectionName))
+                .GroupBy(c => new { c.RepeatingSectionName, c.ParentRepeatingSectionName })
+                .Select(g => new
+                {
+                    SectionName = g.Key.RepeatingSectionName,
+                    ParentSectionName = g.Key.ParentRepeatingSectionName,
+                    ControlCount = g.Count()
+                })
+                .OrderBy(s => s.ParentSectionName)
+                .ThenBy(s => s.SectionName)
+                .ToList();
+
+            return new
+            {
+                TotalNestedSections = nestedSections.Count,
+                NestedSections = nestedSections
             };
         }
 
