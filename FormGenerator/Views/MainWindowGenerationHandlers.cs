@@ -493,7 +493,7 @@ namespace FormGenerator.Views
 
                         var formMapping = new FormSqlMapping
                         {
-                            FormName = formDef.FormName,
+                            FormName = FormatFormNameForDisplay(formDef.FormName),
                             MainTableName = formName
                         };
 
@@ -1147,5 +1147,16 @@ namespace FormGenerator.Views
         }
 
         #endregion
+        /// <summary>
+        /// Formats a form name for display by replacing underscores with spaces
+        /// </summary>
+        private string FormatFormNameForDisplay(string formName)
+        {
+            if (string.IsNullOrEmpty(formName))
+                return formName;
+
+            // Replace underscores with spaces for better readability in K2 categories
+            return formName.Replace("_", " ");
+        }
     }
 }

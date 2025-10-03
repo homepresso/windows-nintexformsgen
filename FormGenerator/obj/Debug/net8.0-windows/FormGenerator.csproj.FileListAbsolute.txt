@@ -165,3 +165,4 @@ C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\ob
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator.pdb
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator.genruntimeconfig.cache
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\ref\FormGenerator.dll
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\Resources\MainWindowStyles.baml

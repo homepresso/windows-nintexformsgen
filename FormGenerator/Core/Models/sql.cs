@@ -39,6 +39,12 @@ namespace FormGenerator.Core.Models
         public string TableName { get; set; }
         public string ForeignKeyColumn { get; set; }
         public List<ColumnMapping> Columns { get; set; } = new List<ColumnMapping>();
+
+        // Enhanced properties for nested section support
+        public bool IsNested { get; set; }
+        public string ParentSectionName { get; set; }
+        public string ParentTableName { get; set; }
+        public string ParentForeignKeyColumn { get; set; }
     }
 
     public class LookupTableMapping

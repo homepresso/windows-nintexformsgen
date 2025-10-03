@@ -1293,6 +1293,9 @@ namespace FormGenerator.Services
                 }
             }
 
+            // ENHANCED: Detect nested parent relationships based on section names
+            DetectNestedSectionRelationships(analysis);
+
             return analysis;
         }
 
@@ -1514,7 +1517,18 @@ namespace FormGenerator.Services
                     sb.AppendLine($"CREATE TABLE [dbo].[{fullTableName}] (");
                     sb.AppendLine("    -- Primary Key");
                     sb.AppendLine("    [Id] INT IDENTITY(1,1) NOT NULL,");
-                    sb.AppendLine("    [ParentFormId] UNIQUEIDENTIFIER NOT NULL,");
+
+                    // Determine parent reference based on nesting
+                    if (section.IsNested && !string.IsNullOrEmpty(section.ParentSectionName))
+                    {
+                        sb.AppendLine("    [ParentSectionId] INT NOT NULL,");
+                        sb.AppendLine("    [ParentFormId] UNIQUEIDENTIFIER NULL, -- Inherited from parent section");
+                    }
+                    else
+                    {
+                        sb.AppendLine("    [ParentFormId] UNIQUEIDENTIFIER NOT NULL,");
+                    }
+
                     sb.AppendLine("    [ItemOrder] INT NOT NULL DEFAULT 0,");
                     sb.AppendLine();
                     sb.AppendLine("    -- Audit Fields");
@@ -1554,16 +1568,39 @@ namespace FormGenerator.Services
                     sb.AppendLine();
                     sb.AppendLine("    -- Constraints");
                     sb.AppendLine($"    CONSTRAINT [PK_{fullTableName}] PRIMARY KEY CLUSTERED ([Id] ASC),");
-                    sb.AppendLine($"    CONSTRAINT [FK_{fullTableName}_Parent] FOREIGN KEY ([ParentFormId])");
-                    sb.AppendLine($"        REFERENCES [dbo].[{mainTableName}] ([FormId])");
-                    sb.AppendLine($"        ON DELETE CASCADE");
+
+                    // Generate appropriate foreign key constraint based on nesting
+                    if (section.IsNested && !string.IsNullOrEmpty(section.ParentSectionName))
+                    {
+                        var parentSectionTableName = SanitizeTableName(section.ParentSectionName);
+                        var parentFullTableName = $"{mainTableName}_{parentSectionTableName}";
+
+                        sb.AppendLine($"    CONSTRAINT [FK_{fullTableName}_ParentSection] FOREIGN KEY ([ParentSectionId])");
+                        sb.AppendLine($"        REFERENCES [dbo].[{parentFullTableName}] ([Id])");
+                        sb.AppendLine($"        ON DELETE CASCADE");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"    CONSTRAINT [FK_{fullTableName}_Parent] FOREIGN KEY ([ParentFormId])");
+                        sb.AppendLine($"        REFERENCES [dbo].[{mainTableName}] ([FormId])");
+                        sb.AppendLine($"        ON DELETE CASCADE");
+                    }
+
                     sb.AppendLine(");");
                     sb.AppendLine();
 
                     // Add indexes
                     sb.AppendLine("-- Indexes for performance");
-                    sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{fullTableName}_ParentFormId]");
-                    sb.AppendLine($"ON [dbo].[{fullTableName}] ([ParentFormId], [ItemOrder]);");
+                    if (section.IsNested && !string.IsNullOrEmpty(section.ParentSectionName))
+                    {
+                        sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{fullTableName}_ParentSectionId]");
+                        sb.AppendLine($"ON [dbo].[{fullTableName}] ([ParentSectionId], [ItemOrder]);");
+                    }
+                    else
+                    {
+                        sb.AppendLine($"CREATE NONCLUSTERED INDEX [IX_{fullTableName}_ParentFormId]");
+                        sb.AppendLine($"ON [dbo].[{fullTableName}] ([ParentFormId], [ItemOrder]);");
+                    }
                     sb.AppendLine();
 
                     // Add table description (check if exists first)
@@ -3135,6 +3172,68 @@ namespace FormGenerator.Services
 
             return string.IsNullOrEmpty(sanitized) ? "Column" : sanitized;
         }
+
+        /// <summary>
+        /// Detect and configure nested parent relationships for repeating sections
+        /// </summary>
+        private void DetectNestedSectionRelationships(RepeatingSectionAnalysis analysis)
+        {
+            foreach (var sectionKvp in analysis.RepeatingSections)
+            {
+                var sectionName = sectionKvp.Key;
+                var sectionInfo = sectionKvp.Value;
+
+                // Check if this section name contains an underscore indicating nesting
+                // Pattern: ParentSection_ChildSection
+                if (sectionName.Contains("_"))
+                {
+                    var parts = sectionName.Split('_');
+                    if (parts.Length >= 2)
+                    {
+                        // Find potential parent section name
+                        // For nested sections like "Orders_OrderItems_Details", the parent could be "Orders_OrderItems"
+                        var potentialParentName = string.Join("_", parts.Take(parts.Length - 1));
+
+                        // Check if this potential parent exists in our sections
+                        if (analysis.RepeatingSections.ContainsKey(potentialParentName))
+                        {
+                            sectionInfo.IsNested = true;
+                            sectionInfo.ParentSectionName = potentialParentName;
+                            sectionInfo.NestingLevel = parts.Length - 1;
+
+                            // Add this as a child section to the parent
+                            if (!analysis.RepeatingSections[potentialParentName].ChildSections.Contains(sectionName))
+                            {
+                                analysis.RepeatingSections[potentialParentName].ChildSections.Add(sectionName);
+                            }
+                        }
+                        else
+                        {
+                            // Try to find the immediate parent (just one level up)
+                            var immediatePotentialParent = parts[0];
+                            for (int i = 1; i < parts.Length - 1; i++)
+                            {
+                                immediatePotentialParent += "_" + parts[i];
+
+                                if (analysis.RepeatingSections.ContainsKey(immediatePotentialParent))
+                                {
+                                    sectionInfo.IsNested = true;
+                                    sectionInfo.ParentSectionName = immediatePotentialParent;
+                                    sectionInfo.NestingLevel = i + 1;
+
+                                    // Add this as a child section to the parent
+                                    if (!analysis.RepeatingSections[immediatePotentialParent].ChildSections.Contains(sectionName))
+                                    {
+                                        analysis.RepeatingSections[immediatePotentialParent].ChildSections.Add(sectionName);
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -3157,5 +3256,10 @@ namespace FormGenerator.Services
         public int EndRow { get; set; }
         public List<ControlDefinition> Controls { get; set; } = new List<ControlDefinition>();
         public List<string> ChildSections { get; set; } = new List<string>();
+
+        // Enhanced properties for nested section support
+        public bool IsNested { get; set; }
+        public string ParentSectionName { get; set; }
+        public int NestingLevel { get; set; } = 0;
     }
 }

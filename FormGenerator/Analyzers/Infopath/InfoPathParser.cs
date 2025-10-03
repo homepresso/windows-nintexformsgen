@@ -291,7 +291,7 @@ namespace FormGenerator.Analyzers.Infopath
                 // Ensure title is set
                 if (string.IsNullOrEmpty(formDef.Title))
                 {
-                    formDef.Title = formDef.FormName;
+                    formDef.Title = FormatDisplayName(formDef.FormName);
                 }
 
                 PrintDebugSummary();
@@ -335,7 +335,8 @@ namespace FormGenerator.Analyzers.Infopath
 
                     if (shortTitleElement != null)
                     {
-                        formDef.Title = shortTitleElement.Attribute("value")?.Value;
+                        var titleValue = shortTitleElement.Attribute("value")?.Value;
+                        formDef.Title = FormatDisplayName(titleValue);
                     }
                 }
 
@@ -351,6 +352,14 @@ namespace FormGenerator.Analyzers.Infopath
             {
                 Console.WriteLine($"Warning: Error extracting metadata from manifest: {ex.Message}");
             }
+        }
+
+        private string FormatDisplayName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                return name;
+
+            return name.Replace("_", " ");
         }
 
         private void PrintRulesSummary(InfoPathFormDefinition formDef)
@@ -1553,7 +1562,7 @@ namespace FormGenerator.Analyzers.Infopath
             var repeatingContext = new RepeatingContext
             {
                 Name = sectionName,
-                DisplayName = sectionName,
+                DisplayName = FormatDisplayName(sectionName),
                 Binding = binding,
                 Type = type,
                 Depth = repeatingContextStack.Count
@@ -1729,6 +1738,18 @@ namespace FormGenerator.Analyzers.Infopath
 
 
 
+        /// <summary>
+        /// Formats a section name for display by replacing underscores with spaces
+        /// </summary>
+        private string FormatDisplayName(string sectionName)
+        {
+            if (string.IsNullOrEmpty(sectionName))
+                return sectionName;
+
+            // Replace underscores with spaces for better readability
+            return sectionName.Replace("_", " ");
+        }
+
         private string GetOrGenerateRepeatingSectionName(string rawName, string binding, string type)
         {
             string baseName = null;
@@ -1811,8 +1832,8 @@ namespace FormGenerator.Analyzers.Infopath
             {
                 var parentContext = repeatingContextStack.Peek();
 
-                // For nested sections, combine parent and child names
-                string combinedName = $"{parentContext.DisplayName}_{sectionName}";
+                // For nested sections, combine parent and child names (use Name, not DisplayName for internal structure)
+                string combinedName = $"{parentContext.Name}_{sectionName}";
 
                 Debug.WriteLine($"  Creating nested repeating section: {combinedName} (parent: {parentContext.DisplayName})");
 
@@ -1839,7 +1860,7 @@ namespace FormGenerator.Analyzers.Infopath
                     Name = sectionName,
                     Binding = select,
                     Type = "section",
-                    DisplayName = sectionName,
+                    DisplayName = FormatDisplayName(sectionName),
                     Depth = repeatingContextStack.Count
                 };
 
@@ -2338,7 +2359,7 @@ namespace FormGenerator.Analyzers.Infopath
                     Type = sectionType,
                     StartRow = currentRow,
                     CtrlId = ctrlId,
-                    DisplayName = sectionName
+                    DisplayName = FormatDisplayName(sectionName)
                 };
 
                 sectionStack.Push(conditionalSection);
@@ -2633,7 +2654,7 @@ namespace FormGenerator.Analyzers.Infopath
             {
                 var parentContext = repeatingContextStack.Peek();
                 var originalName = sectionName;
-                sectionName = $"{parentContext.DisplayName}_{sectionName}";
+                sectionName = $"{parentContext.Name}_{sectionName}";
                 Debug.WriteLine($"[REPEATING SECTION] Creating nested section: {sectionName} (parent: {parentContext.DisplayName})");
             }
 
@@ -2755,7 +2776,7 @@ namespace FormGenerator.Analyzers.Infopath
                 Type = sectionType,
                 StartRow = currentRow,
                 CtrlId = ctrlId,
-                DisplayName = sectionName
+                DisplayName = FormatDisplayName(sectionName)
             };
 
             sectionStack.Push(section);
@@ -2862,7 +2883,7 @@ namespace FormGenerator.Analyzers.Infopath
             }
 
             tableControl.Properties["TableType"] = "Repeating";
-            tableControl.Properties["DisplayName"] = tableName;
+            tableControl.Properties["DisplayName"] = FormatDisplayName(tableName);
 
             if (!string.IsNullOrEmpty(ctrlId))
             {
@@ -3518,14 +3539,24 @@ namespace FormGenerator.Analyzers.Infopath
                 }
                 else if (node is XElement elem)
                 {
-                    // Skip font tags but get their content
-                    if (elem.Name.LocalName == "font" || elem.Name.LocalName == "span")
+                    var elemName = elem.Name.LocalName.ToLower();
+
+                    // Skip control elements (dropdowns, inputs, etc.) that might contain option text
+                    if (elemName == "select" || elemName == "input" || elemName == "textarea" ||
+                        elemName == "option" || elemName == "object" || elemName == "button")
+                    {
+                        continue; // Skip these elements entirely
+                    }
+
+                    // Recurse into font and span tags to get their content
+                    if (elemName == "font" || elemName == "span")
                     {
                         sb.Append(ExtractCellText(elem));
                     }
                     else
                     {
-                        sb.Append(elem.Value);
+                        // For other elements, only get direct text content, not all descendants
+                        sb.Append(GetDirectTextContent(elem));
                     }
                 }
             }
@@ -5482,6 +5513,18 @@ namespace FormGenerator.Analyzers.Infopath
                 .ToList();
 
             return controlElements;
+        }
+
+        /// <summary>
+        /// Formats a form title by replacing underscores with spaces
+        /// </summary>
+        private string FormatDisplayName(string title)
+        {
+            if (string.IsNullOrEmpty(title))
+                return title;
+
+            // Replace underscores with spaces for better readability
+            return title.Replace("_", " ");
         }
     }
 }

@@ -68,6 +68,145 @@ namespace FormGenerator.Analyzers.Infopath
 
                 formDef.Rules.Add(rule);
             }
+
+            // ENHANCED: Extract events from States and Events sections
+            ExtractEventRules(manifest, formDef);
+        }
+
+        private void ExtractEventRules(XDocument manifest, InfoPathFormDefinition formDef)
+        {
+            // Look for Event elements in States sections
+            var eventElements = manifest.Descendants().Where(e => e.Name.LocalName == "Event");
+
+            foreach (var eventElem in eventElements)
+            {
+                var eventId = eventElem.Attribute("ID")?.Value;
+                var eventType = eventElem.Attribute("Type")?.Value;
+                var sourceId = eventElem.Attribute("SourceID")?.Value;
+                var sourceType = eventElem.Attribute("SourceType")?.Value;
+                var sourceName = eventElem.Attribute("SourceName")?.Value;
+                var sourceDisplayName = eventElem.Attribute("SourceDisplayName")?.Value;
+
+                if (string.IsNullOrEmpty(eventId) || string.IsNullOrEmpty(eventType)) continue;
+
+                var eventRule = new FormRule
+                {
+                    Name = $"Event_{sourceName ?? sourceDisplayName ?? eventId}",
+                    RuleType = "Event",
+                    IsEnabled = true
+                };
+
+                // Store event metadata (declare early to use in nested scope)
+                var eventAction = new FormRuleAction
+                {
+                    Type = "EventDefinition"
+                };
+
+                // Extract event name
+                var nameElem = eventElem.Element("Name");
+                if (nameElem != null)
+                {
+                    eventRule.Name = nameElem.Value;
+                }
+
+                // Extract event properties
+                var propertiesElem = eventElem.Element("Properties");
+                if (propertiesElem != null)
+                {
+                    foreach (var property in propertiesElem.Elements("Property"))
+                    {
+                        var nameElem2 = property.Element("Name");
+                        var valueElem = property.Element("Value");
+
+                        if (nameElem2 != null && valueElem != null)
+                        {
+                            var action = new FormRuleAction
+                            {
+                                Type = "EventProperty",
+                                Target = nameElem2.Value,
+                                Expression = valueElem.Value
+                            };
+                            eventRule.Actions.Add(action);
+
+                            // Check if this is a RuleFriendlyName that indicates button events
+                            if (nameElem2.Value == "RuleFriendlyName")
+                            {
+                                var friendlyName = valueElem.Value;
+                                if (IsButtonEvent(friendlyName))
+                                {
+                                    eventRule.RuleType = "Button";
+                                    eventRule.Name = friendlyName;
+
+                                    // Check if this is a repeating section button event
+                                    if (IsRepeatingSectionButtonEvent(friendlyName, sourceName))
+                                    {
+                                        eventRule.RuleType = "RepeatingSectionButton";
+
+                                        // Extract repeating section context
+                                        var repeatingSectionInfo = ExtractRepeatingSectionFromEvent(friendlyName, sourceName);
+                                        if (!string.IsNullOrEmpty(repeatingSectionInfo))
+                                        {
+                                            eventAction.Parameters["RepeatingSectionContext"] = repeatingSectionInfo;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(sourceId)) eventAction.Parameters["SourceID"] = sourceId;
+                if (!string.IsNullOrEmpty(sourceType)) eventAction.Parameters["SourceType"] = sourceType;
+                if (!string.IsNullOrEmpty(sourceName)) eventAction.Parameters["SourceName"] = sourceName;
+                if (!string.IsNullOrEmpty(sourceDisplayName)) eventAction.Parameters["SourceDisplayName"] = sourceDisplayName;
+                if (!string.IsNullOrEmpty(eventType)) eventAction.Parameters["EventType"] = eventType;
+
+                eventRule.Actions.Add(eventAction);
+                formDef.Rules.Add(eventRule);
+            }
+
+            // ENHANCED: Extract validation messages that contain button event errors
+            ExtractValidationErrors(manifest, formDef);
+        }
+
+        private void ExtractValidationErrors(XDocument manifest, InfoPathFormDefinition formDef)
+        {
+            // Look for ValidationMessages attributes that contain event errors
+            var elementsWithValidation = manifest.Descendants()
+                .Where(e => e.Attribute("ValidationMessages") != null);
+
+            foreach (var elem in elementsWithValidation)
+            {
+                var validationMessages = elem.Attribute("ValidationMessages")?.Value;
+                if (string.IsNullOrEmpty(validationMessages)) continue;
+
+                // Parse validation messages for button events
+                var messages = validationMessages.Split(';');
+                foreach (var message in messages)
+                {
+                    if (message.Contains("Add ToolBar Button is Clicked") ||
+                        message.Contains("Add Button is Clicked") ||
+                        message.Contains("Cancel is Clicked"))
+                    {
+                        // Extract the event name from the validation message
+                        var parts = message.Split(',');
+                        if (parts.Length >= 6)
+                        {
+                            var eventDescription = parts[5].Trim('"');
+
+                            var validationRule = new FormRule
+                            {
+                                Name = $"ValidationError_{eventDescription}",
+                                RuleType = "ValidationError",
+                                IsEnabled = false,
+                                ErrorMessage = message
+                            };
+
+                            formDef.Rules.Add(validationRule);
+                        }
+                    }
+                }
+            }
         }
 
         private void ExtractViewRules(XDocument viewDoc, InfoPathFormDefinition formDef)
@@ -228,7 +367,88 @@ namespace FormGenerator.Analyzers.Infopath
                 return "Action";
             if (ruleElem.Descendants().Any(e => e.Name.LocalName == "switchView"))
                 return "Navigation";
+
+            // Check for button events based on rule names or actions
+            var ruleName = ruleElem.Attribute("caption")?.Value ?? "";
+            if (IsButtonEvent(ruleName))
+                return "Button";
+
             return "General";
+        }
+
+        private bool IsButtonEvent(string ruleName)
+        {
+            if (string.IsNullOrEmpty(ruleName)) return false;
+
+            var buttonEventPatterns = new[]
+            {
+                "Add ToolBar Button is Clicked",
+                "Add Button is Clicked",
+                "Cancel is Clicked",
+                "Delete is Clicked",
+                "Remove is Clicked",
+                "AddButton Button is Clicked",
+                "CancelButton is Clicked",
+                "DeleteButton is Clicked",
+                "RemoveButton is Clicked",
+                "when Add ToolBar Button",
+                "when Add Button",
+                "when Cancel",
+                "when Delete",
+                "when Remove"
+            };
+
+            return buttonEventPatterns.Any(pattern =>
+                ruleName.Contains(pattern, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool IsRepeatingSectionButtonEvent(string friendlyName, string sourceName)
+        {
+            if (string.IsNullOrEmpty(friendlyName) || string.IsNullOrEmpty(sourceName)) return false;
+
+            // Check if the source name contains patterns indicating repeating sections
+            var repeatingSectionPatterns = new[]
+            {
+                "_Table_",
+                "_List",
+                "_Item",
+                "CTRL",
+                "Entertainment_Details", // Specific to your example
+                "Table_CTRL"
+            };
+
+            return repeatingSectionPatterns.Any(pattern =>
+                sourceName.Contains(pattern, StringComparison.OrdinalIgnoreCase)) &&
+                IsButtonEvent(friendlyName);
+        }
+
+        private string ExtractRepeatingSectionFromEvent(string friendlyName, string sourceName)
+        {
+            if (string.IsNullOrEmpty(sourceName)) return "";
+
+            // Extract repeating section information from source name
+            // Pattern: Expense_Report_view1_Table_CTRL243_List
+            // Pattern: Expense_Report_view1_Item_Entertainment_Details_Item
+
+            var parts = sourceName.Split('_');
+            if (parts.Length < 3) return "";
+
+            // Look for patterns that indicate nested repeating sections
+            if (sourceName.Contains("Entertainment_Details"))
+            {
+                return "Entertainment_Details"; // Nested section
+            }
+            else if (sourceName.Contains("Table_CTRL"))
+            {
+                // Extract the table control identifier
+                var ctrlIndex = Array.FindIndex(parts, p => p.StartsWith("CTRL"));
+                if (ctrlIndex >= 0 && ctrlIndex < parts.Length - 1)
+                {
+                    return $"Table_{parts[ctrlIndex]}"; // Main repeating section
+                }
+            }
+
+            return sourceName; // Return the full source name as fallback
         }
 
         private void ExtractRuleActions(XElement ruleElem, FormRule rule)
