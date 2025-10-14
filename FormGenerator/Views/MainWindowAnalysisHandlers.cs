@@ -181,6 +181,11 @@ namespace FormGenerator.Views
                 _ => new SolidColorBrush(Color.FromRgb(180, 180, 180)) // Default light gray
             };
         }
+        private TreeViewItem CreateFlatControlItem(ControlDefinition control)
+        {
+            return CreateEnhancedControlItem(control);
+        }
+
         private TreeViewItem CreateEnhancedControlItem(ControlDefinition control)
         {
             var headerPanel = new StackPanel { Orientation = Orientation.Horizontal };
@@ -214,10 +219,11 @@ namespace FormGenerator.Views
             // Control type badge
             AddControlTypeBadge(headerPanel, control.Type);
 
-            // Section indicator (if in a section)
-            if (!string.IsNullOrEmpty(control.ParentSection) || control.IsInRepeatingSection)
+            // Section indicator - ALWAYS show if control is in any section (repeating or normal)
+            var sectionName = GetSectionNameForControl(control);
+            if (!string.IsNullOrEmpty(sectionName))
             {
-                AddSectionIndicator(headerPanel, control);
+                AddSectionIndicator(headerPanel, control, sectionName);
             }
 
             // Grid position
@@ -577,26 +583,11 @@ namespace FormGenerator.Views
                 MinHeight = 26
             };
 
-            // Build hierarchical structure of sections and controls
-            var sectionHierarchy = BuildSectionHierarchy(view);
-
-            // Add controls without sections first
+            // FLAT STRUCTURE: Add all controls in order with section metadata
+            // Sections are just metadata, not hierarchical containers
             foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent).OrderBy(c => c.DocIndex))
             {
-                // Skip controls that belong to sections - they'll be added within their sections
-                if (string.IsNullOrEmpty(control.ParentSection) &&
-                    !control.IsInRepeatingSection &&
-                    control.Type != "RepeatingTable" &&
-                    control.Type != "RepeatingSection")
-                {
-                    viewItem.Items.Add(CreateEnhancedControlItem(control));
-                }
-            }
-
-            // Add sections with their hierarchical structure
-            foreach (var topLevelSection in sectionHierarchy)
-            {
-                viewItem.Items.Add(CreateSectionTreeItem(topLevelSection, view));
+                viewItem.Items.Add(CreateFlatControlItem(control));
             }
 
             // Add view statistics
@@ -827,38 +818,59 @@ namespace FormGenerator.Views
             foreach (var control in view.Controls.Where(c => !c.IsMergedIntoParent))
             {
                 string sectionKey = null;
+                bool controlAssigned = false;
 
-                // Check for nested section structure (e.g., "Trips > Round Trip")
+                // Priority 1: Check for nested section structure (e.g., "Trips > Round Trip")
                 if (!string.IsNullOrEmpty(control.ParentSection) && control.ParentSection.Contains(" > "))
                 {
                     var parts = control.ParentSection.Split(new[] { " > " }, StringSplitOptions.None);
                     sectionKey = parts.Last(); // Use the innermost section
                 }
+                // Priority 2: Check for conditional section property (overrides ParentSection)
+                else if (control.Properties != null && control.Properties.ContainsKey("ConditionalSection"))
+                {
+                    sectionKey = control.Properties["ConditionalSection"];
+                }
+                // Priority 3: Use ParentSection if set
                 else if (!string.IsNullOrEmpty(control.ParentSection))
                 {
                     sectionKey = control.ParentSection;
                 }
+                // Priority 4: Use RepeatingSectionName if control is in repeating section
                 else if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
                 {
                     sectionKey = control.RepeatingSectionName;
                 }
 
-                // Also check for conditional section property
-                if (control.Properties != null && control.Properties.ContainsKey("ConditionalSection"))
-                {
-                    sectionKey = control.Properties["ConditionalSection"];
-                }
-
+                // Try to add to the identified section
                 if (!string.IsNullOrEmpty(sectionKey) && sectionNodes.ContainsKey(sectionKey))
                 {
                     sectionNodes[sectionKey].Controls.Add(control);
+                    controlAssigned = true;
                 }
-                else if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+
+                // Fallback: If control wasn't assigned but is marked as in repeating section,
+                // try to add it to the repeating section by name
+                if (!controlAssigned && control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
                 {
-                    // Add to the repeating section even if not in a sub-section
                     if (sectionNodes.ContainsKey(control.RepeatingSectionName))
                     {
                         sectionNodes[control.RepeatingSectionName].Controls.Add(control);
+                        controlAssigned = true;
+                    }
+                    else
+                    {
+                        // The repeating section doesn't exist yet - create it
+                        var newSection = new SectionNode
+                        {
+                            Name = control.RepeatingSectionName,
+                            Type = "repeating",
+                            CtrlId = null,
+                            Controls = new List<ControlDefinition> { control },
+                            ChildSections = new List<SectionNode>()
+                        };
+                        sectionNodes[control.RepeatingSectionName] = newSection;
+                        controlAssigned = true;
                     }
                 }
             }
@@ -876,6 +888,21 @@ namespace FormGenerator.Views
         }
 
 
+
+        private void CollectControlsFromSection(SectionNode section, HashSet<ControlDefinition> collectedControls)
+        {
+            // Add all controls from this section
+            foreach (var control in section.Controls)
+            {
+                collectedControls.Add(control);
+            }
+
+            // Recursively collect from child sections
+            foreach (var childSection in section.ChildSections)
+            {
+                CollectControlsFromSection(childSection, collectedControls);
+            }
+        }
 
         private int CountAllControls(SectionNode section)
         {
@@ -2375,22 +2402,58 @@ namespace FormGenerator.Views
             panel.Children.Add(typeBadge);
         }
 
-        private void AddSectionIndicator(StackPanel panel, ControlDefinition control)
+        private string GetSectionNameForControl(ControlDefinition control)
         {
-            var sectionText = control.ParentSection ?? control.RepeatingSectionName;
+            // Priority order for section detection
+            // 1. RepeatingSectionName (if in repeating section)
+            if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
+            {
+                return control.RepeatingSectionName;
+            }
+
+            // 2. ParentSection (if in a normal section)
+            if (!string.IsNullOrEmpty(control.ParentSection))
+            {
+                // If it's a nested path like "Trips > Round Trip", use the innermost section
+                if (control.ParentSection.Contains(" > "))
+                {
+                    var parts = control.ParentSection.Split(new[] { " > " }, StringSplitOptions.RemoveEmptyEntries);
+                    return parts.Last();
+                }
+                return control.ParentSection;
+            }
+
+            // 3. Check ConditionalSection property
+            if (control.Properties != null && control.Properties.ContainsKey("ConditionalSection"))
+            {
+                return control.Properties["ConditionalSection"];
+            }
+
+            return null;
+        }
+
+        private void AddSectionIndicator(StackPanel panel, ControlDefinition control, string sectionName)
+        {
+            var isRepeating = control.IsInRepeatingSection;
             var sectionBadge = new Border
             {
-                Background = control.IsInRepeatingSection
+                Background = isRepeating
                     ? new SolidColorBrush(Color.FromArgb(30, 3, 169, 244))
                     : new SolidColorBrush(Color.FromArgb(30, 76, 175, 80)),
                 CornerRadius = new CornerRadius(3),
                 Padding = new Thickness(5, 1, 5, 1),
                 Margin = new Thickness(0, 0, 5, 0)
             };
+
+            // Show as "InSection: SectionName" format
+            var displayText = isRepeating
+                ? $"🔁 InRepeatingSection: {sectionName}"
+                : $"📦 InSection: {sectionName}";
+
             sectionBadge.Child = new TextBlock
             {
-                Text = $"📍 {sectionText}",
-                Foreground = control.IsInRepeatingSection
+                Text = displayText,
+                Foreground = isRepeating
                     ? (Brush)_mainWindow.FindResource("InfoColor")
                     : (Brush)_mainWindow.FindResource("SuccessColor"),
                 FontSize = 10,
