@@ -2404,26 +2404,28 @@ namespace FormGenerator.Views
 
         private string GetSectionNameForControl(ControlDefinition control)
         {
-            // Priority order for section detection
-            // 1. RepeatingSectionName (if in repeating section)
+            // CRITICAL: If control is in a repeating section, ALWAYS use the repeating section name
+            // Treat conditional sections inside repeating sections as transparent
             if (control.IsInRepeatingSection && !string.IsNullOrEmpty(control.RepeatingSectionName))
             {
                 return control.RepeatingSectionName;
             }
 
-            // 2. ParentSection (if in a normal section)
+            // Only use ParentSection if NOT in a repeating section
             if (!string.IsNullOrEmpty(control.ParentSection))
             {
-                // If it's a nested path like "Trips > Round Trip", use the innermost section
+                // If it's a nested path like "Section > Conditional Section"
+                // Use the outermost section (the actual structural section, not the conditional one)
                 if (control.ParentSection.Contains(" > "))
                 {
                     var parts = control.ParentSection.Split(new[] { " > " }, StringSplitOptions.RemoveEmptyEntries);
-                    return parts.Last();
+                    // Use the first part (outermost section) instead of the last
+                    return parts.First();
                 }
                 return control.ParentSection;
             }
 
-            // 3. Check ConditionalSection property
+            // Check ConditionalSection property as fallback
             if (control.Properties != null && control.Properties.ContainsKey("ConditionalSection"))
             {
                 return control.Properties["ConditionalSection"];

@@ -197,6 +197,16 @@ namespace FormGenerator.Analyzers.InfoPath
                         CtrlId = c.Properties != null && c.Properties.ContainsKey("CtrlId")
                             ? c.Properties["CtrlId"]
                             : null,
+                        // FLATTENED SECTION INFO - Top level properties
+                        IsInSection = !string.IsNullOrEmpty(c.ParentSection) || c.IsInRepeatingSection,
+                        // CRITICAL: If in repeating section, use repeating section name (treat conditional sections as transparent)
+                        // Otherwise, use the outermost section from ParentSection path
+                        SectionName = c.IsInRepeatingSection
+                            ? c.RepeatingSectionName
+                            : (!string.IsNullOrEmpty(c.ParentSection) && c.ParentSection.Contains(" > ")
+                                ? c.ParentSection.Split(new[] { " > " }, StringSplitOptions.RemoveEmptyEntries).First()
+                                : c.ParentSection),
+                        IsInRepeatingSection = c.IsInRepeatingSection,
                         // Add section information as properties rather than in the name
                         SectionInfo = !string.IsNullOrEmpty(c.ParentSection) ? new
                         {

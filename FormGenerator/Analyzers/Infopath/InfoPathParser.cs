@@ -927,6 +927,8 @@ namespace FormGenerator.Analyzers.Infopath
         private string currentSectionName = null;
         private bool insideExpressionBox = false;
         private int expressionBoxDepth = 0;
+        // Map template modes to their repeating contexts (for conditional sections)
+        private Dictionary<string, RepeatingContext> templateModeToRepeatingContext = new Dictionary<string, RepeatingContext>();
 
         public class LabelInfo
         {
@@ -1029,8 +1031,68 @@ namespace FormGenerator.Analyzers.Infopath
 
             Debug.WriteLine($"========================================\n");
 
-            debugInfo.ControlsExtracted = allControls.Count;
-            return new List<ControlDefinition>(allControls);
+            // Deduplicate controls by CtrlId and Label+Binding
+            // Strategy:
+            // 1. For controls with CtrlId, keep only one instance (prefer repeating section context)
+            // 2. For controls without CtrlId (labels), deduplicate by Label+Type+Binding
+            //    - Prefer the instance in a repeating section (more specific context)
+            //    - This handles duplicate labels appearing both inside and outside repeating sections
+
+            var controlsWithCtrlId = allControls
+                .Where(c => c.Properties.ContainsKey("CtrlId") && !string.IsNullOrEmpty(c.Properties["CtrlId"] as string))
+                .GroupBy(c => c.Properties["CtrlId"] as string)
+                .Select(g =>
+                {
+                    // Prefer controls in repeating sections over those outside
+                    var inRepeating = g.FirstOrDefault(c => c.IsInRepeatingSection);
+                    if (inRepeating != null)
+                    {
+                        Debug.WriteLine($"[DEDUP] Keeping {inRepeating.Name} (CtrlId: {g.Key}) from repeating section, discarding {g.Count() - 1} duplicate(s)");
+                        return inRepeating;
+                    }
+
+                    // Otherwise just take the first one
+                    Debug.WriteLine($"[DEDUP] Keeping first instance of {g.First().Name} (CtrlId: {g.Key}), discarding {g.Count() - 1} duplicate(s)");
+                    return g.First();
+                })
+                .ToList();
+
+            // For controls without CtrlId (mostly labels), deduplicate by Label+Type+Binding
+            var controlsWithoutCtrlId = allControls
+                .Where(c => !c.Properties.ContainsKey("CtrlId") || string.IsNullOrEmpty(c.Properties["CtrlId"] as string))
+                .GroupBy(c => new { c.Label, c.Type, c.Binding })
+                .Select(g =>
+                {
+                    // If there are duplicates, prefer the one in a repeating section
+                    if (g.Count() > 1)
+                    {
+                        var inRepeating = g.FirstOrDefault(c => c.IsInRepeatingSection);
+                        if (inRepeating != null)
+                        {
+                            Debug.WriteLine($"[DEDUP] Keeping label '{g.Key.Label}' ({g.Key.Type}) from repeating section, discarding {g.Count() - 1} duplicate(s)");
+                            return inRepeating;
+                        }
+
+                        // Otherwise keep the first one
+                        Debug.WriteLine($"[DEDUP] Keeping first instance of label '{g.Key.Label}' ({g.Key.Type}), discarding {g.Count() - 1} duplicate(s)");
+                        return g.First();
+                    }
+
+                    // No duplicates, keep as is
+                    return g.First();
+                })
+                .ToList();
+
+            var deduplicatedControls = controlsWithCtrlId.Concat(controlsWithoutCtrlId)
+                .OrderBy(c => c.DocIndex) // Maintain document order
+                .ToList();
+
+            Debug.WriteLine($"[DEDUP] Total controls before deduplication: {allControls.Count}");
+            Debug.WriteLine($"[DEDUP] Total controls after deduplication: {deduplicatedControls.Count}");
+            Debug.WriteLine($"[DEDUP] Removed {allControls.Count - deduplicatedControls.Count} duplicate controls");
+
+            debugInfo.ControlsExtracted = deduplicatedControls.Count;
+            return deduplicatedControls;
         }
 
         private void ResetParserState()
@@ -1469,6 +1531,15 @@ namespace FormGenerator.Analyzers.Infopath
             if (string.IsNullOrEmpty(select))
                 return false;
 
+            // Single-node paths (like "my:roundTrip" or "my:someField") are NOT repeating sections
+            // They're just field references or conditional sections
+            // Only paths with parent/child pattern (like "my:trips/my:trip") are repeating
+            if (!select.Contains("/"))
+            {
+                Debug.WriteLine($"Skipping single-node path as non-repeating: {select}");
+                return false;
+            }
+
             if (select.Contains("/"))
             {
                 var parts = select.Split('/');
@@ -1883,6 +1954,18 @@ namespace FormGenerator.Analyzers.Infopath
                 Debug.WriteLine($"  Already in context for {sectionName}, not creating duplicate");
             }
 
+            // Store the mapping between template mode and repeating context
+            // This allows conditional sections inside this template to know which repeating section they belong to
+            if (!alreadyInContext && repeatingContextStack.Count > 0)
+            {
+                var currentContext = repeatingContextStack.Peek();
+                if (!templateModeToRepeatingContext.ContainsKey(mode))
+                {
+                    templateModeToRepeatingContext[mode] = currentContext;
+                    Debug.WriteLine($"  Mapped template mode '{mode}' to repeating context '{currentContext.Name}'");
+                }
+            }
+
             // Find and process the corresponding template
             var doc = elem.Document;
             if (doc != null)
@@ -2117,9 +2200,38 @@ namespace FormGenerator.Analyzers.Infopath
 
                             // CRITICAL: Only process if we're in the right context
                             // If we're NOT in a repeating section, skip conditional sections that belong to repeating sections
+                            // BUT still extract the controls inside them WITH the proper repeating context!
                             if (repeatingContextStack.Count == 0 && IsConditionalForRepeatingSection(testCondition, ctrlId))
                             {
-                                Debug.WriteLine($"  Skipping conditional section {ctrlId} - belongs to repeating section but not in repeating context");
+                                Debug.WriteLine($"  Skipping conditional section {ctrlId} structure - but extracting controls inside WITH repeating context");
+
+                                // Get the repeating context this conditional belongs to
+                                var repeatingContext = GetRepeatingContextForConditional(testCondition, ctrlId);
+
+                                if (repeatingContext != null)
+                                {
+                                    // Temporarily push the repeating context so controls get marked properly
+                                    repeatingContextStack.Push(repeatingContext);
+                                    Debug.WriteLine($"  Pushed repeating context: {repeatingContext.Name}");
+
+                                    // Process the controls inside with repeating context
+                                    foreach (var child in sectionDiv.Elements())
+                                    {
+                                        ProcessElement(child);
+                                    }
+
+                                    // Pop the context after processing
+                                    repeatingContextStack.Pop();
+                                    Debug.WriteLine($"  Popped repeating context: {repeatingContext.Name}");
+                                }
+                                else
+                                {
+                                    // Fallback: process without context if we can't determine it
+                                    foreach (var child in sectionDiv.Elements())
+                                    {
+                                        ProcessElement(child);
+                                    }
+                                }
                                 continue;
                             }
 
@@ -2241,13 +2353,13 @@ namespace FormGenerator.Analyzers.Infopath
 
         private bool IsConditionalForRepeatingSection(string testCondition, string ctrlId)
         {
-            // Check if this is the Round Trip conditional (CTRL57)
-            if (ctrlId == "CTRL57")
+            // DYNAMIC APPROACH: Check if current template mode has a repeating context mapping
+            if (!string.IsNullOrEmpty(currentTemplateMode) && templateModeToRepeatingContext.ContainsKey(currentTemplateMode))
             {
-                return true; // Round Trip belongs to Trips repeating section
+                return true; // This template is for a repeating section
             }
 
-            // Check test condition for parent context indicators
+            // Fallback: Check test condition for parent context indicators
             if (!string.IsNullOrEmpty(testCondition))
             {
                 // Conditions with "../" typically reference parent context
@@ -2277,6 +2389,21 @@ namespace FormGenerator.Analyzers.Infopath
             }
 
             return true; // Default to true for other conditionals
+        }
+
+        private RepeatingContext GetRepeatingContextForConditional(string testCondition, string ctrlId)
+        {
+            // DYNAMIC APPROACH: Use the current template mode to look up the repeating context
+            // When we process a repeating section template, we store the mapping
+            if (!string.IsNullOrEmpty(currentTemplateMode) && templateModeToRepeatingContext.ContainsKey(currentTemplateMode))
+            {
+                var context = templateModeToRepeatingContext[currentTemplateMode];
+                Debug.WriteLine($"  Found repeating context from template mode '{currentTemplateMode}': {context.Name}");
+                return context;
+            }
+
+            Debug.WriteLine($"  No repeating context found for template mode '{currentTemplateMode}'");
+            return null; // No repeating context found
         }
 
         private bool ShouldProcessContentInCurrentContext(XElement ifElement)
@@ -2596,18 +2723,53 @@ namespace FormGenerator.Analyzers.Infopath
         {
             var className = elem.Attribute("class")?.Value ?? "";
 
+            // Check for xdRepeatingSection class AND validate binding pattern
             if (className.Contains("xdRepeatingSection") && className.Contains("xdRepeating"))
-                return true;
+            {
+                // Get the binding or apply-templates select to validate it's truly repeating
+                var binding = GetAttributeValue(elem, "binding");
+                var applyTemplates = elem.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "apply-templates" &&
+                                         e.Attribute("select") != null);
+
+                var selectValue = applyTemplates?.Attribute("select")?.Value ?? binding;
+
+                // Validate it's a true repeating pattern (parent/child), not just a single field
+                if (!string.IsNullOrEmpty(selectValue) && IsRepeatingSelectPattern(selectValue))
+                    return true;
+                else
+                {
+                    Debug.WriteLine($"Rejecting xdRepeatingSection with non-repeating binding: {selectValue}");
+                    return false; // Has repeating class but binding is not a repeating pattern
+                }
+            }
 
             var xctname = GetAttributeValue(elem, "xctname");
             if (xctname == "RepeatingSection")
-                return true;
+            {
+                // Validate the binding pattern before accepting as repeating section
+                var binding = GetAttributeValue(elem, "binding");
+                var applyTemplates = elem.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "apply-templates" &&
+                                         e.Attribute("select") != null);
 
+                var selectValue = applyTemplates?.Attribute("select")?.Value ?? binding;
+
+                if (!string.IsNullOrEmpty(selectValue) && IsRepeatingSelectPattern(selectValue))
+                    return true;
+                else
+                {
+                    Debug.WriteLine($"Rejecting xctname=RepeatingSection with non-repeating binding: {selectValue}");
+                    return false; // Has RepeatingSection name but binding is not a repeating pattern
+                }
+            }
+
+            // Check for apply-templates with repeating pattern
             var hasRepeatingTemplate = elem.Elements()
                 .Any(e => e.Name.LocalName == "apply-templates" &&
                           e.Attribute("mode") != null &&
                           e.Attribute("select") != null &&
-                          e.Attribute("select").Value.Contains("/"));
+                          IsRepeatingSelectPattern(e.Attribute("select").Value));
 
             return hasRepeatingTemplate;
         }
