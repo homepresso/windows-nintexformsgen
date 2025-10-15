@@ -658,13 +658,13 @@ namespace FormGenerator.Views
                     {
                         // Export SQL
                         var sqlContent = SqlPreview.Text;
-                        await Task.Run(() => File.WriteAllText(dialog.FileName, sqlContent));
+                        await File.WriteAllTextAsync(dialog.FileName, sqlContent);
                     }
                     else
                     {
                         // Export JSON - export all analyzed forms
                         var json = JsonConvert.SerializeObject(_allFormDefinitions, Formatting.Indented);
-                        await Task.Run(() => File.WriteAllText(dialog.FileName, json));
+                        await File.WriteAllTextAsync(dialog.FileName, json);
                     }
 
                     UpdateStatus($"Exported to: {dialog.FileName}", MessageSeverity.Info);
@@ -884,7 +884,7 @@ namespace FormGenerator.Views
                         ? JsonOutput.SelectedText
                         : JsonOutput.Text;
 
-                    await Task.Run(() => File.WriteAllText(dialog.FileName, jsonText));
+                    await File.WriteAllTextAsync(dialog.FileName, jsonText);
                     UpdateStatus($"JSON saved to: {dialog.FileName}", MessageSeverity.Info);
 
                     MessageBox.Show($"JSON successfully saved to:\n{dialog.FileName}",
