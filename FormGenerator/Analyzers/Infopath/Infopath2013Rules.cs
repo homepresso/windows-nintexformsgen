@@ -399,7 +399,7 @@ namespace FormGenerator.Analyzers.Infopath
             };
 
             return buttonEventPatterns.Any(pattern =>
-                ruleName.Contains(pattern, StringComparison.OrdinalIgnoreCase));
+                ruleName.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private bool IsRepeatingSectionButtonEvent(string friendlyName, string sourceName)
@@ -418,7 +418,7 @@ namespace FormGenerator.Analyzers.Infopath
             };
 
             return repeatingSectionPatterns.Any(pattern =>
-                sourceName.Contains(pattern, StringComparison.OrdinalIgnoreCase)) &&
+                sourceName.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0) &&
                 IsButtonEvent(friendlyName);
         }
 

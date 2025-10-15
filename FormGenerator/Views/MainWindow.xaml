@@ -1870,10 +1870,11 @@
                                           Text="Target Folder:" 
                                           VerticalAlignment="Center"
                                           Foreground="{StaticResource TextSecondary}"/>
-                                                <TextBox Grid.Row="4" Grid.Column="1" 
+                                                <TextBox Grid.Row="4" Grid.Column="1"
                                         Name="K2FolderTextBox"
                                         Style="{StaticResource ModernTextBox}"
-                                        Text="/Forms/Generated"
+                                        Text="TestForms"
+                                        ToolTip="Specify the root folder where K2 artifacts will be created"
                                         Margin="5,2"/>
                                                 <Button Grid.Row="4" Grid.Column="2"
                                        Name="BrowseK2FolderButton"
@@ -1917,35 +1918,73 @@
                                          IsChecked="True"/>
 
                                                 <CheckBox Name="UseExistingSmartObjectsCheckBox"
-                                         Content="Link to Existing SmartObjects"
+                                         Content="Link to Existing SmartObjects (Coming Soon)"
                                          Style="{StaticResource ModernCheckBox}"
-                                         IsChecked="False"/>
+                                         IsChecked="False"
+                                         IsEnabled="False"/>
 
                                                 <CheckBox Name="GenerateReusableViewsCheckBox"
                                          Content="Generate Reusable Views for Common Controls"
                                          Style="{StaticResource ModernCheckBox}"
                                          IsChecked="True"/>
 
-                                                <TextBlock Text="Form Type:" 
+                                                <TextBlock Text="Form Configuration:"
                                           FontWeight="Medium"
                                           Foreground="{StaticResource TextPrimary}"
                                           Margin="0,15,0,10"/>
 
-                                                <RadioButton Name="K2ItemViewRadio"
-                                            Content="Item View (Single record)"
-                                            Style="{StaticResource ModernRadioButton}"
-                                            IsChecked="True"
-                                            GroupName="K2FormType"/>
+                                                <!-- Form Theme -->
+                                                <Grid Margin="0,5">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="150"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0"
+                                                      Text="Form Theme:"
+                                                      VerticalAlignment="Center"
+                                                      Foreground="{StaticResource TextSecondary}"/>
+                                                    <ComboBox Grid.Column="1"
+                                                     Name="K2ThemeComboBox"
+                                                     Style="{StaticResource ModernComboBox}"
+                                                     SelectedIndex="0"
+                                                     Margin="5,0">
+                                                        <ComboBoxItem Content="Lithium"/>
+                                                        <ComboBoxItem Content="Platinum"/>
+                                                        <ComboBoxItem Content="SharePoint 2013"/>
+                                                        <ComboBoxItem Content="Blue Void"/>
+                                                        <ComboBoxItem Content="_Dynamic"/>
+                                                    </ComboBox>
+                                                </Grid>
 
-                                                <RadioButton Name="K2ListViewRadio"
-                                            Content="List View (Multiple records)"
-                                            Style="{StaticResource ModernRadioButton}"
-                                            GroupName="K2FormType"/>
+                                                <!-- SmartBox GUID -->
+                                                <Grid Margin="0,5">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="150"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0"
+                                                      Text="SmartBox GUID:"
+                                                      VerticalAlignment="Center"
+                                                      Foreground="{StaticResource TextSecondary}"/>
+                                                    <TextBox Grid.Column="1"
+                                                    Name="K2SmartBoxGuidTextBox"
+                                                    Style="{StaticResource ModernTextBox}"
+                                                    Text="e5609413-d844-4325-98c3-db3cacbd406d"
+                                                    Margin="5,0"/>
+                                                </Grid>
 
-                                                <RadioButton Name="K2BothViewsRadio"
-                                            Content="Both Item and List Views"
-                                            Style="{StaticResource ModernRadioButton}"
-                                            GroupName="K2FormType"/>
+                                                <!-- Configuration Options -->
+                                                <CheckBox Name="K2UseTimestampCheckBox"
+                                                 Content="Use Timestamp in Form Names"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="False"
+                                                 Margin="0,5"/>
+
+                                                <CheckBox Name="K2ForceCleanupCheckBox"
+                                                 Content="Force Cleanup (Delete existing artifacts)"
+                                                 Style="{StaticResource ModernCheckBox}"
+                                                 IsChecked="False"
+                                                 Margin="0,5"/>
 
                                                 <TextBlock Text="Advanced Options:" 
                                           FontWeight="Medium"

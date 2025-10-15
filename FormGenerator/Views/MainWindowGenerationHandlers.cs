@@ -22,6 +22,7 @@ namespace FormGenerator.Views
         public readonly MainWindow _mainWindow;
         public readonly SqlGeneratorService _sqlGenerator;
         public readonly SqlConnectionService _sqlConnection;
+        private readonly K2GenerationService _k2Generator;
         public string _currentConnectionString;
 
         public MainWindowGenerationHandlers(MainWindow mainWindow)
@@ -29,6 +30,25 @@ namespace FormGenerator.Views
             _mainWindow = mainWindow;
             _sqlGenerator = new SqlGeneratorService();
             _sqlConnection = new SqlConnectionService();
+            _k2Generator = new K2GenerationService();
+
+            // Wire up K2 generation events
+            _k2Generator.StatusUpdate += (sender, status) =>
+            {
+                _mainWindow.Dispatcher.Invoke(() =>
+                {
+                    _mainWindow.K2GenerationLog.Text += status + "\n";
+                    _mainWindow.UpdateStatus(status);
+                });
+            };
+
+            _k2Generator.ProgressUpdate += (sender, progress) =>
+            {
+                _mainWindow.Dispatcher.Invoke(() =>
+                {
+                    _mainWindow.K2GenerationLog.Text += $"  [{progress.PercentComplete}%] {progress.Stage}\n";
+                });
+            };
         }
 
         public void ClearCurrentConnection()
@@ -834,7 +854,7 @@ namespace FormGenerator.Views
                         ? "{ \"nintexForm\": { \"version\": \"1.0\", \"forms\": [] } }"
                         : "<?xml version=\"1.0\"?><NintexForms></NintexForms>";
 
-                    await File.WriteAllTextAsync(dialog.FileName, content);
+                    await Task.Run(() => File.WriteAllText(dialog.FileName, content));
 
                     _mainWindow.NintexGenerationLog.Text += "✅ Package saved successfully!\n";
                     _mainWindow.UpdateStatus($"Nintex package saved to: {dialog.FileName}", MessageSeverity.Info);
@@ -867,34 +887,75 @@ namespace FormGenerator.Views
             {
                 _mainWindow.UpdateStatus("Testing K2 connection...");
                 _mainWindow.K2GenerationLog.Text = "Testing connection to K2 server...\n";
+
+                // Validate inputs
+                if (string.IsNullOrWhiteSpace(_mainWindow.K2ServerTextBox.Text))
+                {
+                    MessageBox.Show("Please enter a K2 server name.",
+                                   "Missing Information",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (!uint.TryParse(_mainWindow.K2PortTextBox.Text, out uint port))
+                {
+                    MessageBox.Show("Please enter a valid port number.",
+                                   "Invalid Port",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
+
                 _mainWindow.K2GenerationLog.Text += $"Server: {_mainWindow.K2ServerTextBox.Text}\n";
-                _mainWindow.K2GenerationLog.Text += $"Port: {_mainWindow.K2PortTextBox.Text}\n";
-                _mainWindow.K2GenerationLog.Text += $"Username: {_mainWindow.K2UsernameTextBox.Text}\n\n";
+                _mainWindow.K2GenerationLog.Text += $"Port: {port}\n\n";
 
-                // Simulate connection test
-                await Task.Delay(1000);
+                // Test connection using K2GenerationService
+                var connectionResult = await _k2Generator.TestConnectionAsync(
+                    _mainWindow.K2ServerTextBox.Text,
+                    port);
 
-                _mainWindow.K2GenerationLog.Text += "✅ Connection successful!\n";
-                _mainWindow.K2GenerationLog.Text += "K2 Server Version: 5.5\n";
-                _mainWindow.K2GenerationLog.Text += "SmartForms Version: 5.5.0.0\n";
+                if (connectionResult.Success)
+                {
+                    _mainWindow.K2GenerationLog.Text += $"✅ {connectionResult.Message}\n";
+                    if (!string.IsNullOrEmpty(connectionResult.ServerVersion))
+                    {
+                        _mainWindow.K2GenerationLog.Text += $"Server Version: {connectionResult.ServerVersion}\n";
+                    }
 
-                _mainWindow.UpdateStatus("K2 connection test successful", MessageSeverity.Info);
+                    _mainWindow.UpdateStatus("K2 connection test successful", MessageSeverity.Info);
 
-                // Enable generation button after successful connection
-                _mainWindow.GenerateK2Button.IsEnabled = true;
+                    // Enable generation button after successful connection
+                    _mainWindow.GenerateK2Button.IsEnabled = true;
 
-                MessageBox.Show("Connection to K2 server successful!",
-                               "Connection Test",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Information);
+                    MessageBox.Show($"{connectionResult.Message}\n\nYou can now generate K2 artifacts.",
+                                   "Connection Test Successful",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Information);
+                }
+                else
+                {
+                    _mainWindow.K2GenerationLog.Text += $"❌ {connectionResult.Message}\n";
+                    if (!string.IsNullOrEmpty(connectionResult.ErrorDetails))
+                    {
+                        _mainWindow.K2GenerationLog.Text += $"Details: {connectionResult.ErrorDetails}\n";
+                    }
+
+                    _mainWindow.UpdateStatus("K2 connection test failed", MessageSeverity.Error);
+
+                    MessageBox.Show($"Connection failed:\n{connectionResult.Message}",
+                                   "Connection Error",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Error);
+                }
             }
             catch (Exception ex)
             {
-                _mainWindow.K2GenerationLog.Text += $"❌ Connection failed: {ex.Message}\n";
-                _mainWindow.UpdateStatus("K2 connection test failed", MessageSeverity.Error);
+                _mainWindow.K2GenerationLog.Text += $"❌ Unexpected error: {ex.Message}\n";
+                _mainWindow.UpdateStatus("K2 connection test error", MessageSeverity.Error);
 
-                MessageBox.Show($"Connection failed:\n{ex.Message}",
-                               "Connection Error",
+                MessageBox.Show($"An unexpected error occurred:\n{ex.Message}",
+                               "Error",
                                MessageBoxButton.OK,
                                MessageBoxImage.Error);
             }
@@ -963,69 +1024,128 @@ namespace FormGenerator.Views
                     return;
                 }
 
-                _mainWindow.K2GenerationLog.Text += $"Target Folder: {_mainWindow.K2FolderTextBox.Text}\n\n";
-
-                // Process options
-                if (_mainWindow.GenerateSmartObjectsCheckBox.IsChecked == true)
+                // Validate required inputs
+                if (string.IsNullOrWhiteSpace(_mainWindow.K2ServerTextBox.Text))
                 {
-                    _mainWindow.K2GenerationLog.Text += "Generating SmartObjects...\n";
-                    await Task.Delay(500);
+                    MessageBox.Show("Please enter a K2 server name.",
+                                   "Missing Information",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
                 }
 
-                string formType = "Item View";
-                if (_mainWindow.K2ListViewRadio.IsChecked == true)
-                    formType = "List View";
-                else if (_mainWindow.K2BothViewsRadio.IsChecked == true)
-                    formType = "Item and List Views";
-
-                _mainWindow.K2GenerationLog.Text += $"Form Type: {formType}\n\n";
-
-                // Simulate generation for each form
-                foreach (var form in _mainWindow._allAnalysisResults)
+                if (!uint.TryParse(_mainWindow.K2PortTextBox.Text, out uint port))
                 {
-                    _mainWindow.K2GenerationLog.Text += $"Processing: {form.Key}\n";
-                    await Task.Delay(500);
-
-                    if (_mainWindow.GenerateSmartObjectsCheckBox.IsChecked == true)
-                    {
-                        _mainWindow.K2GenerationLog.Text += "  - Creating SmartObject...\n";
-                        await Task.Delay(300);
-                    }
-
-                    _mainWindow.K2GenerationLog.Text += "  - Creating views...\n";
-                    await Task.Delay(300);
-
-                    if (_mainWindow.IncludeRulesK2CheckBox.IsChecked == true)
-                    {
-                        _mainWindow.K2GenerationLog.Text += "  - Adding form rules...\n";
-                        await Task.Delay(300);
-                    }
-
-                    if (_mainWindow.IncludeStylesK2CheckBox.IsChecked == true)
-                    {
-                        _mainWindow.K2GenerationLog.Text += "  - Applying styles...\n";
-                        await Task.Delay(200);
-                    }
+                    MessageBox.Show("Please enter a valid port number.",
+                                   "Invalid Port",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
                 }
 
-                if (_mainWindow.GenerateWorkflowK2CheckBox.IsChecked == true)
+                // Get configuration values from UI
+                string formTheme = (_mainWindow.K2ThemeComboBox.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "Lithium";
+                bool useTimestamp = _mainWindow.K2UseTimestampCheckBox.IsChecked == true;
+                bool forceCleanup = _mainWindow.K2ForceCleanupCheckBox.IsChecked == true;
+                string smartBoxGuid = string.IsNullOrWhiteSpace(_mainWindow.K2SmartBoxGuidTextBox.Text)
+                    ? "e5609413-d844-4325-98c3-db3cacbd406d"
+                    : _mainWindow.K2SmartBoxGuidTextBox.Text;
+
+                // Get target folder from UI (with default fallback)
+                string targetFolder = string.IsNullOrWhiteSpace(_mainWindow.K2FolderTextBox.Text)
+                    ? "TestForms"
+                    : _mainWindow.K2FolderTextBox.Text;
+
+                _mainWindow.K2GenerationLog.Text += $"Server: {_mainWindow.K2ServerTextBox.Text}:{port}\n";
+                _mainWindow.K2GenerationLog.Text += $"Theme: {formTheme}\n";
+                _mainWindow.K2GenerationLog.Text += $"Target Folder: {targetFolder}\n";
+                _mainWindow.K2GenerationLog.Text += $"Use Timestamp: {useTimestamp}\n";
+                _mainWindow.K2GenerationLog.Text += $"Force Cleanup: {forceCleanup}\n\n";
+
+                // Create K2 generation request
+                var request = new K2GenerationRequest
                 {
-                    _mainWindow.K2GenerationLog.Text += "\nGenerating K2 Workflow...\n";
-                    await Task.Delay(500);
+                    ServerName = _mainWindow.K2ServerTextBox.Text,
+                    ServerPort = port,
+                    FormTheme = formTheme,
+                    UseTimestamp = useTimestamp,
+                    ForceCleanup = forceCleanup,
+                    SmartBoxGuid = smartBoxGuid,
+                    TargetFolder = targetFolder,
+                    FormDefinitions = _mainWindow._allAnalysisResults
+                };
+
+                // Generate K2 artifacts using K2GenerationService
+                var generationResult = await _k2Generator.GenerateK2ArtifactsAsync(request);
+
+                if (generationResult.Success)
+                {
+                    _mainWindow.K2GenerationLog.Text += "\n✅ K2 artifacts generated successfully!\n";
+                    _mainWindow.K2GenerationLog.Text += $"Form: {generationResult.FormName}\n";
+                    _mainWindow.K2GenerationLog.Text += $"SmartObjects created: {generationResult.SmartObjectsCreated}\n";
+                    _mainWindow.K2GenerationLog.Text += $"Views created: {generationResult.ViewsCreated}\n";
+                    _mainWindow.K2GenerationLog.Text += $"Forms created: {generationResult.FormsCreated}\n";
+
+                    if (generationResult.GeneratedArtifacts != null)
+                    {
+                        _mainWindow.K2GenerationLog.Text += "\nDetailed breakdown:\n";
+                        foreach (var artifact in generationResult.GeneratedArtifacts)
+                        {
+                            if (artifact.Value > 0)
+                            {
+                                _mainWindow.K2GenerationLog.Text += $"  • {artifact.Key}: {artifact.Value}\n";
+                            }
+                        }
+                    }
+
+                    _mainWindow.UpdateStatus("K2 SmartForms generated successfully", MessageSeverity.Info);
+
+                    // Note: Deploy and Export buttons would be enabled here once those features are implemented
+                    // For now, K2 artifacts are generated directly to the server
+                    _mainWindow.DeployK2Button.IsEnabled = false; // Not yet implemented
+                    _mainWindow.ExportK2PackageButton.IsEnabled = false; // Not yet implemented
+
+                    MessageBox.Show(
+                        $"K2 artifacts have been generated successfully!\n\n" +
+                        $"Form: {generationResult.FormName}\n" +
+                        $"SmartObjects: {generationResult.SmartObjectsCreated}\n" +
+                        $"Views: {generationResult.ViewsCreated}\n" +
+                        $"Forms: {generationResult.FormsCreated}\n\n" +
+                        "The artifacts have been deployed to the K2 server.\n\n" +
+                        "NOTE: If forms don't appear in K2 Designer immediately,\n" +
+                        "please refresh the K2 Designer (F5) or wait a few moments\n" +
+                        "for K2 to finish indexing the new forms.",
+                        "Generation Complete",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
                 }
+                else
+                {
+                    _mainWindow.K2GenerationLog.Text += $"\n❌ Generation failed: {generationResult.Message}\n";
+                    if (!string.IsNullOrEmpty(generationResult.ErrorDetails))
+                    {
+                        _mainWindow.K2GenerationLog.Text += $"Details: {generationResult.ErrorDetails}\n";
+                    }
 
-                _mainWindow.K2GenerationLog.Text += "\n✅ K2 SmartForms generated successfully!\n";
-                _mainWindow.K2GenerationLog.Text += $"SmartObjects created: {_mainWindow._allAnalysisResults.Count}\n";
-                _mainWindow.K2GenerationLog.Text += $"Views created: {_mainWindow._allAnalysisResults.Count * (_mainWindow.K2BothViewsRadio.IsChecked == true ? 2 : 1)}\n";
+                    _mainWindow.UpdateStatus("K2 generation failed", MessageSeverity.Error);
 
-                _mainWindow.UpdateStatus("K2 SmartForms generated successfully", MessageSeverity.Info);
-                _mainWindow.DeployK2Button.IsEnabled = true;
-                _mainWindow.ExportK2PackageButton.IsEnabled = true;
+                    MessageBox.Show(
+                        $"K2 generation failed:\n{generationResult.Message}",
+                        "Generation Error",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
             }
             catch (Exception ex)
             {
-                _mainWindow.K2GenerationLog.Text += $"\n❌ Error: {ex.Message}\n";
+                _mainWindow.K2GenerationLog.Text += $"\n❌ Unexpected error: {ex.Message}\n";
                 _mainWindow.UpdateStatus($"K2 generation failed: {ex.Message}", MessageSeverity.Error);
+
+                MessageBox.Show(
+                    $"An unexpected error occurred:\n{ex.Message}",
+                    "Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
             }
             finally
             {
@@ -1035,115 +1155,31 @@ namespace FormGenerator.Views
 
         public async Task DeployK2()
         {
-            try
-            {
-                var result = MessageBox.Show("Are you sure you want to deploy the generated forms to the K2 server?\n\nThis will create new SmartForms in the specified folder.",
-                                             "Confirm Deployment",
-                                             MessageBoxButton.YesNo,
-                                             MessageBoxImage.Warning);
+            // Note: K2 artifacts are deployed directly to the server during generation
+            // This method is kept for future functionality if offline generation is added
+            await Task.CompletedTask;
 
-                if (result != MessageBoxResult.Yes)
-                    return;
-
-                _mainWindow.DeployK2Button.IsEnabled = false;
-                _mainWindow.UpdateStatus("Deploying to K2 server...");
-                _mainWindow.K2GenerationLog.Text += "\n\nStarting deployment to K2 server...\n";
-
-                // Simulate deployment
-                _mainWindow.K2GenerationLog.Text += "Connecting to K2 server...\n";
-                await Task.Delay(500);
-
-                _mainWindow.K2GenerationLog.Text += "Deploying SmartObjects...\n";
-                await Task.Delay(1000);
-
-                _mainWindow.K2GenerationLog.Text += "Deploying SmartForms...\n";
-                await Task.Delay(1000);
-
-                if (_mainWindow.GenerateWorkflowK2CheckBox.IsChecked == true)
-                {
-                    _mainWindow.K2GenerationLog.Text += "Deploying Workflow...\n";
-                    await Task.Delay(500);
-                }
-
-                _mainWindow.K2GenerationLog.Text += "\n✅ Deployment completed successfully!\n";
-                _mainWindow.K2GenerationLog.Text += $"Location: {_mainWindow.K2ServerTextBox.Text}{_mainWindow.K2FolderTextBox.Text}\n";
-
-                _mainWindow.UpdateStatus("K2 deployment completed", MessageSeverity.Info);
-
-                MessageBox.Show("K2 SmartForms have been successfully deployed to the server!",
-                               "Deployment Successful",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Information);
-            }
-            catch (Exception ex)
-            {
-                _mainWindow.K2GenerationLog.Text += $"\n❌ Deployment failed: {ex.Message}\n";
-                _mainWindow.UpdateStatus($"K2 deployment failed: {ex.Message}", MessageSeverity.Error);
-
-                MessageBox.Show($"Deployment failed:\n{ex.Message}",
-                               "Deployment Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
-            }
-            finally
-            {
-                _mainWindow.DeployK2Button.IsEnabled = true;
-            }
+            MessageBox.Show(
+                "K2 artifacts are deployed directly to the server during generation.\n\n" +
+                "Use the 'Generate K2' button to create and deploy artifacts in one step.",
+                "Information",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         public async Task ExportK2Package()
         {
-            try
-            {
-                var dialog = new SaveFileDialog
-                {
-                    Title = "Export K2 Package",
-                    Filter = "K2 Package Files (*.k2pkg)|*.k2pkg|ZIP Files (*.zip)|*.zip|All Files (*.*)|*.*",
-                    FileName = "K2SmartForms_Package"
-                };
+            // Note: K2 artifacts are created directly on the server and cannot be exported to package files
+            // This method is kept for future functionality if package export is added
+            await Task.CompletedTask;
 
-                if (dialog.ShowDialog() == true)
-                {
-                    _mainWindow.K2GenerationLog.Text += $"\nExporting K2 package to: {dialog.FileName}\n";
-
-                    // Simulate package creation
-                    _mainWindow.K2GenerationLog.Text += "Creating package...\n";
-                    await Task.Delay(500);
-
-                    _mainWindow.K2GenerationLog.Text += "  - Adding SmartObjects...\n";
-                    await Task.Delay(300);
-
-                    _mainWindow.K2GenerationLog.Text += "  - Adding SmartForms...\n";
-                    await Task.Delay(300);
-
-                    if (_mainWindow.GenerateWorkflowK2CheckBox.IsChecked == true)
-                    {
-                        _mainWindow.K2GenerationLog.Text += "  - Adding Workflow...\n";
-                        await Task.Delay(300);
-                    }
-
-                    // Create a mock file
-                    await File.WriteAllTextAsync(dialog.FileName, "K2 Package Content");
-
-                    _mainWindow.K2GenerationLog.Text += "\n✅ Package exported successfully!\n";
-                    _mainWindow.UpdateStatus($"K2 package exported to: {dialog.FileName}", MessageSeverity.Info);
-
-                    MessageBox.Show($"K2 package has been exported to:\n{dialog.FileName}",
-                                   "Export Complete",
-                                   MessageBoxButton.OK,
-                                   MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                _mainWindow.K2GenerationLog.Text += $"\n❌ Export failed: {ex.Message}\n";
-                _mainWindow.UpdateStatus($"K2 export failed: {ex.Message}", MessageSeverity.Error);
-
-                MessageBox.Show($"Export failed:\n{ex.Message}",
-                               "Export Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
-            }
+            MessageBox.Show(
+                "K2 artifacts are deployed directly to the server.\n\n" +
+                "Package export functionality is not currently supported by the K2 API.\n\n" +
+                "You can use K2 SmartObject and Forms Management tools to export artifacts if needed.",
+                "Information",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         #endregion

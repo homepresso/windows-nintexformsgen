@@ -3828,7 +3828,7 @@ namespace FormGenerator.Analyzers.Infopath
                 return true;
 
             var sectionKeywords = new[] { "List", "Items", "Details", "Information", "Data" };
-            if (sectionKeywords.Any(k => text.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            if (sectionKeywords.Any(k => text.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0))
                 return true;
 
             return true;
