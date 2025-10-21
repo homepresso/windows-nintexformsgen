@@ -15,7 +15,10 @@
       "Bash(taskkill:*)",
       "Bash(dir \"C:\\Users\\k2admin\\source\\repos\" /s /b)",
       "Read(//c/Users/k2admin/source/repos/**)",
-      "Read(//c/**)"
+      "Read(//c/**)",
+      "Bash(dir \"C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\bin\\Debug\\net8.0-windows\")",
+      "Bash(dir:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
