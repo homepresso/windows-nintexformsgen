@@ -1,0 +1,8 @@
+is_global = true
+build_property.RootNamespace = FormGenerator
+build_property.ProjectDir = C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.CsWinRTUseWindowsUIXamlProjections = false
+build_property.EffectiveAnalysisLevelStyle = 
+build_property.EnableCodeStyleSeverity = 

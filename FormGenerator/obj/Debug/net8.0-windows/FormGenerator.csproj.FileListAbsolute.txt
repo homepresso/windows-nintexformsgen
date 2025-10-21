@@ -94,7 +94,14 @@ C:\Users\Administrator\source\repos\homepresso\windows-nintexformsgen\FormGenera
 C:\Users\Administrator\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\runtimes\win-x86\native\Microsoft.Data.SqlClient.SNI.dll
 C:\Users\Administrator\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\runtimes\win\lib\net8.0\System.Diagnostics.EventLog.dll
 C:\Users\Administrator\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\runtimes\win\lib\net8.0\System.Security.Cryptography.Pkcs.dll
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator.csproj.AssemblyReference.cache
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\Views\MainWindow.g.cs
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\App.g.cs
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\GeneratedInternalTypeHelper.g.cs
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator_MarkupCompile.cache
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator_MarkupCompile.lref
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\FormGenerator.exe
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\FormGenerator.dll.config
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\FormGenerator.deps.json
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\FormGenerator.runtimeconfig.json
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\FormGenerator.dll
@@ -146,12 +153,7 @@ C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bi
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\runtimes\win-x86\native\Microsoft.Data.SqlClient.SNI.dll
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\runtimes\win\lib\net8.0\System.Diagnostics.EventLog.dll
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net8.0-windows\runtimes\win\lib\net8.0\System.Security.Cryptography.Pkcs.dll
-C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator.csproj.AssemblyReference.cache
-C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\Views\MainWindow.g.cs
-C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\App.g.cs
-C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\GeneratedInternalTypeHelper.g.cs
-C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator_MarkupCompile.cache
-C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator_MarkupCompile.lref
+C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\Resources\MainWindowStyles.baml
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\Views\MainWindow.baml
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator.g.resources
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator.GeneratedMSBuildEditorConfig.editorconfig
@@ -165,4 +167,3 @@ C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\ob
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator.pdb
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\FormGenerator.genruntimeconfig.cache
 C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\ref\FormGenerator.dll
-C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\obj\Debug\net8.0-windows\Resources\MainWindowStyles.baml
