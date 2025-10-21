@@ -1,0 +1,121 @@
+<Window x:Class="NWConverter.PreviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+        Title="Form Preview" 
+        Height="600" 
+        Width="800"
+        WindowStartupLocation="CenterOwner"
+        TextElement.Foreground="{DynamicResource MaterialDesignBody}"
+        TextElement.FontWeight="Regular"
+        TextElement.FontSize="13"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="Auto"
+        Background="{DynamicResource MaterialDesignPaper}"
+        FontFamily="{DynamicResource MaterialDesignFont}">
+    
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <materialDesign:Card Grid.Row="0" Margin="16" Padding="16">
+            <StackPanel>
+                <TextBlock x:Name="TitleTextBlock" 
+                           Text="Form Preview" 
+                           Style="{DynamicResource MaterialDesignHeadline5TextBlock}"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,8"/>
+                <TextBlock x:Name="SubtitleTextBlock" 
+                           Text="Converted form structure" 
+                           Style="{DynamicResource MaterialDesignBody2TextBlock}"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+            </StackPanel>
+        </materialDesign:Card>
+
+        <!-- Content -->
+        <Grid Grid.Row="1" Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Form Structure -->
+            <materialDesign:Card Grid.Column="0" Margin="0,0,8,0">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="Form Structure" 
+                               Style="{DynamicResource MaterialDesignHeadline6TextBlock}"
+                               Margin="0,0,0,16"/>
+
+                    <TreeView x:Name="FormStructureTreeView" 
+                              Grid.Row="1"
+                              materialDesign:ScrollViewerAssist.BubbleVerticalScroll="True">
+                        <TreeView.ItemTemplate>
+                            <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="{Binding Icon}" 
+                                                             Width="16" 
+                                                             Height="16" 
+                                                             Margin="0,0,8,0"
+                                                             VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding Name}" 
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </HierarchicalDataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
+                </Grid>
+            </materialDesign:Card>
+
+            <!-- Form Details -->
+            <materialDesign:Card Grid.Column="1" Margin="8,0,0,0">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="Form Details" 
+                               Style="{DynamicResource MaterialDesignHeadline6TextBlock}"
+                               Margin="0,0,0,16"/>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <TextBox x:Name="FormDetailsTextBox" 
+                                 IsReadOnly="True"
+                                 FontFamily="Consolas"
+                                 FontSize="11"
+                                 AcceptsReturn="True"
+                                 TextWrapping="TextWrapping.Wrap"
+                                 materialDesign:ScrollViewerAssist.BubbleVerticalScroll="True"/>
+                    </ScrollViewer>
+                </Grid>
+            </materialDesign:Card>
+        </Grid>
+
+        <!-- Footer -->
+        <materialDesign:Card Grid.Row="2" Margin="16">
+            <StackPanel Orientation="Horizontal" 
+                        HorizontalAlignment="Right" 
+                        Margin="16">
+                <Button x:Name="ExportButton" 
+                        Content="Export JSON" 
+                        Style="{DynamicResource MaterialDesignOutlinedButton}"
+                        Click="Export_Click"
+                        Margin="0,0,8,0"/>
+                <Button x:Name="CloseButton" 
+                        Content="Close" 
+                        Style="{DynamicResource MaterialDesignRaisedButton}"
+                        Click="Close_Click"/>
+            </StackPanel>
+        </materialDesign:Card>
+    </Grid>
+</Window>

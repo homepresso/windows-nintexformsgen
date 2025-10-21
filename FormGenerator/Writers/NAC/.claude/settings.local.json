@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/k2admin/source/repos/homepresso/windows-nintexformsgen/FormGenerator/**)",
+      "Read(//c/Users/k2admin/source/repos/homepresso/windows-nintexformsgen/**)",
+      "Bash(rm App.xaml App.xaml.cs MainWindow.xaml MainWindow.xaml.cs PreviewWindow.xaml PreviewWindow.xaml.cs NWConverter.csproj debug.txt .gitignore)",
+      "Bash(mkdir -p Rebuilders References)",
+      "Bash(dotnet build FormGenerator.csproj)",
+      "Bash(dotnet clean)",
+      "Bash(dotnet clean C:Usersk2adminsourcereposhomepressowindows-nintexformsgenFormGeneratorFormGenerator.csproj)",
+      "Bash(dotnet build C:Usersk2adminsourcereposhomepressowindows-nintexformsgenFormGeneratorFormGenerator.csproj)",
+      "Bash(dotnet clean \"C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj\")",
+      "Bash(dotnet build \"C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj\")",
+      "Bash(Select-String -Pattern \"error|succeeded|failed\")",
+      "Bash(Select-Object -Last 5)",
+      "Read(//c/Users/k2admin/source/repos/homepresso/**)",
+      "Bash(Get-ChildItem -Path \"C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(dir /b)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

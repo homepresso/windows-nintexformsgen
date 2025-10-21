@@ -27,4 +27,16 @@
     </Resource>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Exclude the standalone NAC converter example from the build -->
+    <Compile Remove="Writers\NAC\NWCONVERSIONEXAMPLE\**" />
+    <EmbeddedResource Remove="Writers\NAC\NWCONVERSIONEXAMPLE\**" />
+    <None Remove="Writers\NAC\NWCONVERSIONEXAMPLE\**" />
+    <Page Remove="Writers\NAC\NWCONVERSIONEXAMPLE\**" />
+
+    <!-- Exclude K2 Writers (not part of main build) -->
+    <Compile Remove="Writers\K2\**" />
+    <Compile Remove="Services\K2GenerationService.cs" />
+  </ItemGroup>
+
 </Project>

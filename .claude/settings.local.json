@@ -5,7 +5,17 @@
       "Bash(dotnet build:*)",
       "Bash(dotnet clean:*)",
       "Bash(dotnet run:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(tasklist)",
+      "Bash(findstr:*)",
+      "Bash(powershell:*)",
+      "Bash(Select-String -Pattern \"Build succeeded|Build FAILED|error\" -Context 0,2)",
+      "Bash(dir \"C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\Writers\")",
+      "Bash(dir \"C:\\Users\\k2admin\\source\\repos\\consoleapp-writek2\")",
+      "Bash(taskkill:*)",
+      "Bash(dir \"C:\\Users\\k2admin\\source\\repos\" /s /b)",
+      "Read(//c/Users/k2admin/source/repos/**)",
+      "Read(//c/**)"
     ],
     "deny": [],
     "ask": []

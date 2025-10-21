@@ -1,0 +1,57 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="Resources\Logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Core\Models\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+	<PackageReference Include="Microsoft.Data.SqlClient" Version="6.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="SourceCode.Forms.Authoring">
+      <HintPath>..\..\..\..\..\..\..\Program Files\K2\Host Server\Bin\SourceCode.Forms.Authoring.dll</HintPath>
+    </Reference>
+    <Reference Include="SourceCode.Forms.Management">
+      <HintPath>..\..\..\..\..\..\..\Program Files\K2\Host Server\Bin\SourceCode.Forms.Management.dll</HintPath>
+    </Reference>
+    <Reference Include="SourceCode.Forms.Utilities">
+      <HintPath>..\..\..\..\..\..\..\Program Files\K2\Host Server\Bin\SourceCode.Forms.Utilities.dll</HintPath>
+    </Reference>
+    <Reference Include="SourceCode.Framework">
+      <HintPath>..\..\consoleapp-writek2\SmartObjectAuthoringSample\References\SourceCode.Framework.dll</HintPath>
+    </Reference>
+    <Reference Include="SourceCode.HostClientAPI">
+      <HintPath>..\..\consoleapp-writek2\SmartObjectAuthoringSample\References\SourceCode.HostClientAPI.dll</HintPath>
+    </Reference>
+    <Reference Include="SourceCode.SmartObjects.Authoring">
+      <HintPath>..\..\consoleapp-writek2\SmartObjectAuthoringSample\References\SourceCode.SmartObjects.Authoring.dll</HintPath>
+    </Reference>
+    <Reference Include="SourceCode.SmartObjects.Client">
+      <HintPath>..\..\consoleapp-writek2\SmartObjectAuthoringSample\References\SourceCode.SmartObjects.Client.dll</HintPath>
+    </Reference>
+    <Reference Include="SourceCode.SmartObjects.Management">
+      <HintPath>..\..\consoleapp-writek2\SmartObjectAuthoringSample\References\SourceCode.SmartObjects.Management.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\Logo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+  </ItemGroup>
+
+</Project>
