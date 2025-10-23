@@ -37,6 +37,15 @@ namespace K2SmartObjectGenerator
 
             Console.WriteLine($"\nProcessing form: {formName}");
 
+            // Extract TargetFolder from JSON (injected by K2GenerationService)
+            JObject formDefJson = formDefinition?["FormDefinition"] as JObject;
+            string targetFolder = formDefJson?["TargetFolder"]?.Value<string>();
+            if (string.IsNullOrEmpty(targetFolder))
+            {
+                targetFolder = _config?.Form?.TargetFolder ?? "Generated";
+            }
+            Console.WriteLine($"  SmartObject target folder: {targetFolder}");
+
             JArray dataArray = formDefinition["FormDefinition"]["Data"] as JArray;
             if (dataArray == null)
             {
@@ -45,7 +54,7 @@ namespace K2SmartObjectGenerator
             }
 
             // Generate lookup SmartObjects first
-            GenerateLookupSmartObjects(formName, formDisplayName, dataArray);
+            GenerateLookupSmartObjects(formName, formDisplayName, dataArray, targetFolder);
 
             // Separate main fields and repeating sections
             var mainFields = new List<JObject>();
@@ -74,7 +83,7 @@ namespace K2SmartObjectGenerator
 
             // Create main SmartObject and track its fields
             Console.WriteLine($"\nCreating main SmartObject: {formName}");
-            SmartObjectDefinition mainSmo = CreateMainSmartObject(formName, mainFields, formDisplayName);
+            SmartObjectDefinition mainSmo = CreateMainSmartObject(formName, mainFields, formDisplayName, targetFolder);
             publishSmo.SmartObjects.Add(mainSmo);
 
             // Create child SmartObjects for repeating sections
@@ -82,7 +91,7 @@ namespace K2SmartObjectGenerator
             {
                 string childSmoName = $"{formName}_{section.Key.Replace(" ", "_")}";
                 Console.WriteLine($"Creating child SmartObject: {childSmoName}");
-                SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, section.Value, formName, formDisplayName);
+                SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, section.Value, formName, formDisplayName, targetFolder);
                 publishSmo.SmartObjects.Add(childSmo);
             }
 
@@ -102,7 +111,7 @@ namespace K2SmartObjectGenerator
                     string childSmoName = $"{formName}_{section.Key.Replace(" ", "_")}";
                     Console.WriteLine($"Creating association: {formName} -> {childSmoName}");
                     SmartObjectDefinition association = CreateAssociation(formName, childSmoName,
-                        SourceCode.SmartObjects.Authoring.AssociationType.OneToMany, formDisplayName);
+                        SourceCode.SmartObjects.Authoring.AssociationType.OneToMany, formDisplayName, targetFolder);
                     publishSmo.SmartObjects.Add(association);
                 }
 
@@ -111,7 +120,7 @@ namespace K2SmartObjectGenerator
             }
         }
 
-        private void GenerateLookupSmartObjects(string formName, string formDisplayName, JArray dataArray)
+        private void GenerateLookupSmartObjects(string formName, string formDisplayName, JArray dataArray, string targetFolder)
         {
             // Collect all dropdown fields and their values
             Dictionary<string, JArray> allLookupData = new Dictionary<string, JArray>();
@@ -143,7 +152,7 @@ namespace K2SmartObjectGenerator
             Console.WriteLine($"Creating consolidated lookup SmartObject: {consolidatedLookupName}");
 
             SmartObjectDefinitionsPublish publishSmo = new SmartObjectDefinitionsPublish();
-            SmartObjectDefinition lookupSmo = CreateConsolidatedLookupSmartObject(consolidatedLookupName, formDisplayName);
+            SmartObjectDefinition lookupSmo = CreateConsolidatedLookupSmartObject(consolidatedLookupName, formDisplayName, targetFolder);
             publishSmo.SmartObjects.Add(lookupSmo);
 
             // Store the GUID for later reference
@@ -161,7 +170,7 @@ namespace K2SmartObjectGenerator
             PopulateConsolidatedLookupData(consolidatedLookupName, allLookupData);
         }
 
-        private SmartObjectDefinition CreateConsolidatedLookupSmartObject(string smoName, string formName = null)
+        private SmartObjectDefinition CreateConsolidatedLookupSmartObject(string smoName, string formName = null, string targetFolder = null)
         {
             try
             {
@@ -221,8 +230,16 @@ namespace K2SmartObjectGenerator
 
                 SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
                 smoDefinition.Create(extendObject);
-                // NEW STRUCTURE: {formName}\Lookups
-                string category = string.IsNullOrEmpty(formName) ? "Generated Lookups" : $"{formName}\\Lookups";
+                // STRUCTURE: {TargetFolder}\{formName}\Lookups
+                string category;
+                if (string.IsNullOrEmpty(targetFolder))
+                {
+                    category = string.IsNullOrEmpty(formName) ? "Generated Lookups" : $"{formName}\\Lookups";
+                }
+                else
+                {
+                    category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\Lookups" : $"{targetFolder}\\{formName}\\Lookups";
+                }
                 smoDefinition.AddDeploymentCategory(category);
                 smoDefinition.Build();
 
@@ -246,7 +263,7 @@ namespace K2SmartObjectGenerator
             }
         }
 
-        private SmartObjectDefinition CreateMainSmartObject(string smoName, List<JObject> fields, string formName = null)
+        private SmartObjectDefinition CreateMainSmartObject(string smoName, List<JObject> fields, string formName = null, string targetFolder = null)
         {
             try
             {
@@ -311,8 +328,16 @@ namespace K2SmartObjectGenerator
 
                 SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
                 smoDefinition.Create(extendObject);
-                // NEW STRUCTURE: {formName}\SmartObjects
-                string category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
+                // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
+                string category;
+                if (string.IsNullOrEmpty(targetFolder))
+                {
+                    category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
+                }
+                else
+                {
+                    category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
+                }
                 smoDefinition.AddDeploymentCategory(category);
                 smoDefinition.Build();
 
@@ -336,7 +361,7 @@ namespace K2SmartObjectGenerator
             }
         }
 
-        private SmartObjectDefinition CreateChildSmartObject(string smoName, List<JObject> fields, string parentSmoName, string formName = null)
+        private SmartObjectDefinition CreateChildSmartObject(string smoName, List<JObject> fields, string parentSmoName, string formName = null, string targetFolder = null)
         {
             try
             {
@@ -412,8 +437,16 @@ namespace K2SmartObjectGenerator
 
                 SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
                 smoDefinition.Create(extendObject);
-                // NEW STRUCTURE: {formName}\SmartObjects
-                string category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
+                // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
+                string category;
+                if (string.IsNullOrEmpty(targetFolder))
+                {
+                    category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
+                }
+                else
+                {
+                    category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
+                }
                 smoDefinition.AddDeploymentCategory(category);
                 smoDefinition.Build();
 
@@ -619,7 +652,7 @@ namespace K2SmartObjectGenerator
         }
 
         private SmartObjectDefinition CreateAssociation(string parentSmo, string childSmo,
-            SourceCode.SmartObjects.Authoring.AssociationType associationType, string formName = null)
+            SourceCode.SmartObjects.Authoring.AssociationType associationType, string formName = null, string targetFolder = null)
         {
             try
             {
@@ -636,8 +669,16 @@ namespace K2SmartObjectGenerator
 
                 parentDefinition.AddAssociation(childDefinition, parentIdProperty, parentPrimaryKey,
                     associationType, $"{parentSmo} to {childSmo} association");
-                // NEW STRUCTURE: {formName}\SmartObjects
-                string category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
+                // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
+                string category;
+                if (string.IsNullOrEmpty(targetFolder))
+                {
+                    category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
+                }
+                else
+                {
+                    category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
+                }
                 parentDefinition.AddDeploymentCategory(category);
                 parentDefinition.Build();
 

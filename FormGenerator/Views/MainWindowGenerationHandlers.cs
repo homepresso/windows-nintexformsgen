@@ -1050,6 +1050,9 @@ namespace FormGenerator.Views
                 // Process each form using K2GenerationService
                 var k2Service = new Services.K2GenerationService();
 
+                // Enable verbose logging if checkbox is checked
+                k2Service.EnableVerboseLogging = _mainWindow.EnableVerboseLoggingK2CheckBox.IsChecked == true;
+
                 // Wire up progress events
                 k2Service.StatusUpdate += (sender, message) =>
                 {
@@ -1083,11 +1086,11 @@ namespace FormGenerator.Views
                 {
                     ServerName = serverName,
                     ServerPort = port,
-                    FormTheme = "Default", // Default theme
+                    FormTheme = "Lithium", // Using Lithium theme (valid K2 theme)
                     FormDefinitions = _mainWindow._allAnalysisResults,
                     TargetFolder = _mainWindow.K2FolderTextBox.Text,
                     UseTimestamp = false,
-                    ForceCleanup = false // Don't cleanup by default during generation
+                    ForceCleanup = true // Always cleanup existing artifacts before generation
                 };
 
                 // Generate K2 artifacts

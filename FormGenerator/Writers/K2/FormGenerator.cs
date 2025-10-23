@@ -76,9 +76,21 @@ namespace K2SmartObjectGenerator
             // NEW: Extract view grid positions for ordering
             ExtractViewGridPositions(viewsArray, baseFormName);
 
-            // Define base category path for forms - use display name with spaces
-            // NEW STRUCTURE: forms go directly under {formName}
-            string formCategory = baseFormDisplayName;
+            // Define base category path for forms - respect TargetFolder from configuration
+            // Get target folder from config, extract it from the original JSON if passed via K2GenerationService
+            string targetFolder = "Generated"; // Default
+            JObject formDefJson = formDefinition?["FormDefinition"] as JObject;
+            string configTargetFolder = formDefJson?["TargetFolder"]?.Value<string>();
+
+            if (!string.IsNullOrEmpty(configTargetFolder))
+            {
+                targetFolder = configTargetFolder;
+            }
+
+            // STRUCTURE: {TargetFolder}\{formDisplayName}
+            string formCategory = $"{targetFolder}\\{baseFormDisplayName}";
+
+            Console.WriteLine($"  Form category: {formCategory}");
 
             // Track which views have been mapped to forms
             Dictionary<string, FormDefinition> infopathViewToForm = new Dictionary<string, FormDefinition>();
@@ -3379,6 +3391,16 @@ namespace K2SmartObjectGenerator
                         // ADD ID PARAMETER HERE - Before any other modifications
                         AddIDParameterToForm(formDoc);
                         Console.WriteLine($"    Added ID parameter to form: {formDef.FormName}");
+
+                        // Update theme to _Dynamic and disable legacy theme for ALL forms
+                        XmlNodeList formElementsList = formDoc.GetElementsByTagName("Form");
+                        if (formElementsList.Count > 0)
+                        {
+                            XmlElement formElem = (XmlElement)formElementsList[0];
+                            formElem.SetAttribute("Theme", "_Dynamic");
+                            Console.WriteLine("    Updated form theme to _Dynamic");
+                        }
+                        UpdateFormControlLegacyTheme(formDoc);
 
                         // For forms WITHOUT repeating sections, add form-level rules here
                         if (!formDef.HasRepeatingSections)

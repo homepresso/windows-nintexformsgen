@@ -23,6 +23,12 @@ namespace FormGenerator.Services
 
         private ServerConnectionManager? _connectionManager;
         private GeneratorConfiguration? _config;
+        private K2Logger? _logger;
+
+        /// <summary>
+        /// Enable or disable verbose/debug logging
+        /// </summary>
+        public bool EnableVerboseLogging { get; set; } = false;
 
         public K2GenerationService()
         {
@@ -166,8 +172,42 @@ namespace FormGenerator.Services
         {
             return await Task.Run(() =>
             {
+                // Capture Console.WriteLine output and redirect to status updates
+                var originalConsoleOut = Console.Out;
+                var consoleWriter = new System.IO.StringWriter();
+                System.Threading.Timer? consoleFlushTimer = null;
+                Console.SetOut(consoleWriter);
+
                 try
                 {
+                    // Initialize logger with appropriate log level
+                    if (EnableVerboseLogging)
+                    {
+                        K2LoggingConfiguration.EnableDebug();
+                    }
+                    else
+                    {
+                        K2LoggingConfiguration.SetNormal();
+                    }
+
+                    _logger = new K2Logger(OnStatusUpdate, "K2Gen");
+
+                    // Create a background task to flush console output periodically
+                    consoleFlushTimer = new System.Threading.Timer(_ =>
+                    {
+                        var output = consoleWriter.ToString();
+                        if (!string.IsNullOrEmpty(output))
+                        {
+                            // Split by lines and send each line
+                            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                            foreach (var line in lines)
+                            {
+                                OnStatusUpdate($"[Console] {line}");
+                            }
+                            consoleWriter.GetStringBuilder().Clear();
+                        }
+                    }, null, 500, 500); // Flush every 500ms
+
                     var result = new K2GenerationResult
                     {
                         Message = string.Empty,
@@ -175,58 +215,78 @@ namespace FormGenerator.Services
                         GeneratedArtifacts = new Dictionary<string, int>()
                     };
 
-                    OnStatusUpdate("==============================================");
-                    OnStatusUpdate("=== K2 GENERATION DIAGNOSTICS - START ===");
-                    OnStatusUpdate("==============================================");
+                    _logger.LogSection("K2 GENERATION START");
+                    _logger.Info($"Verbose Logging: {(EnableVerboseLogging ? "ENABLED" : "DISABLED")}");
+                    _logger.Info($"Log Level: {K2LoggingConfiguration.CurrentLogLevel}");
 
                     // 1. Setup configuration
-                    OnStatusUpdate("Setting up K2 generation configuration...");
+                    _logger.LogSubSection("Configuration Setup");
+                    _logger.Info("Setting up K2 generation configuration...");
                     _config = CreateConfiguration(request);
-                    OnStatusUpdate($"Target Folder configured: {_config.Form.TargetFolder}");
-                    OnStatusUpdate($"[DIAG] Target Folder: {_config.Form.TargetFolder}");
-                    OnStatusUpdate($"[DIAG] Form Theme: {_config.Form.Theme}");
-                    OnStatusUpdate($"[DIAG] Force Cleanup: {_config.Form.ForceCleanup}");
+                    _logger.Info($"Target Folder: {_config.Form.TargetFolder}");
+                    _logger.Verbose($"Form Theme: {_config.Form.Theme}");
+                    _logger.Verbose($"Force Cleanup: {_config.Form.ForceCleanup}");
+                    _logger.Verbose($"Use Timestamp: {_config.Form.UseTimestamp}");
+                    _logger.Debug($"Server: {_config.Server.HostName}:{_config.Server.Port}");
+                    _logger.Debug($"SmartBox GUID: {_config.K2.SmartBoxGuid}");
 
                     // 2. Create fresh connection for EACH generation
                     // IMPORTANT: K2 connection must be fresh to avoid stale state issues
-                    OnStatusUpdate("Establishing fresh connection to K2 server...");
-                    OnStatusUpdate($"[DIAG] Connection Manager Before Disconnect: {(_connectionManager != null ? "EXISTS" : "NULL")}");
+                    _logger.LogSubSection("Server Connection");
+                    _logger.Info("Establishing fresh connection to K2 server...");
+                    _logger.Debug($"Connection Manager State Before: {(_connectionManager != null ? "EXISTS" : "NULL")}");
 
                     // Disconnect and completely null out existing connection to force fresh state
                     if (_connectionManager != null)
                     {
                         try
                         {
-                            OnStatusUpdate("[DIAG] Disconnecting existing connection...");
+                            _logger.Verbose("Disconnecting existing connection...");
                             _connectionManager.Disconnect();
-                            OnStatusUpdate("[DIAG] Existing connection disconnected successfully");
+                            _logger.Debug("Existing connection disconnected successfully");
                         }
                         catch (Exception disconnectEx)
                         {
-                            OnStatusUpdate($"[DIAG] Disconnect warning: {disconnectEx.Message}");
+                            _logger.Warning($"Disconnect warning: {disconnectEx.Message}");
                         }
 
                         // Null out to force garbage collection and truly fresh state
                         _connectionManager = null;
-                        OnStatusUpdate("[DIAG] Connection manager nulled out for fresh start");
+                        _logger.Debug("Connection manager nulled out for fresh start");
                     }
 
                     // Create completely new connection with fresh instance
-                    OnStatusUpdate($"[DIAG] Creating new connection to: {request.ServerName}:{request.ServerPort}");
+                    _logger.Verbose($"Creating new connection to: {request.ServerName}:{request.ServerPort}");
                     _connectionManager = new ServerConnectionManager(request.ServerName, request.ServerPort);
                     _connectionManager.Connect(); // Explicitly connect
-                    OnStatusUpdate("[DIAG] New connection manager created and connected");
-                    OnStatusUpdate("K2 connection established");
+                    _logger.Debug("New connection manager created and connected");
+                    _logger.Info("✓ K2 connection established");
 
                     // 3. Clear registry for fresh generation
-                    OnStatusUpdate("Initializing generation session...");
-                    OnStatusUpdate($"[DIAG] Registry counts BEFORE Clear - SmartObjects: {SmartObjectViewRegistry.GetSmartObjectCount()}, Views: {SmartObjectViewRegistry.GetViewCount()}, Forms: {SmartObjectViewRegistry.GetFormCount()}");
+                    _logger.LogSubSection("Registry Initialization");
+                    _logger.Info("Initializing generation session...");
+                    var registryBefore = new {
+                        SmartObjects = SmartObjectViewRegistry.GetSmartObjectCount(),
+                        Views = SmartObjectViewRegistry.GetViewCount(),
+                        Forms = SmartObjectViewRegistry.GetFormCount()
+                    };
+                    _logger.Debug($"Registry BEFORE Clear - SmartObjects: {registryBefore.SmartObjects}, Views: {registryBefore.Views}, Forms: {registryBefore.Forms}");
+
                     SmartObjectViewRegistry.Clear();
-                    OnStatusUpdate($"[DIAG] Registry counts AFTER Clear - SmartObjects: {SmartObjectViewRegistry.GetSmartObjectCount()}, Views: {SmartObjectViewRegistry.GetViewCount()}, Forms: {SmartObjectViewRegistry.GetFormCount()}");
+
+                    var registryAfter = new {
+                        SmartObjects = SmartObjectViewRegistry.GetSmartObjectCount(),
+                        Views = SmartObjectViewRegistry.GetViewCount(),
+                        Forms = SmartObjectViewRegistry.GetFormCount()
+                    };
+                    _logger.Debug($"Registry AFTER Clear - SmartObjects: {registryAfter.SmartObjects}, Views: {registryAfter.Views}, Forms: {registryAfter.Forms}");
+                    _logger.Info("✓ Registry cleared successfully");
 
                     // 4. Convert form definitions to JSON
-                    OnStatusUpdate("Preparing form definitions for K2 generation...");
+                    _logger.LogSubSection("Form Definition Preparation");
+                    _logger.Info($"Converting {request.FormDefinitions.Count} form definition(s) to JSON...");
                     string jsonContent = ConvertFormDefinitionsToJson(request.FormDefinitions);
+                    _logger.Debug($"JSON Content Length: {jsonContent.Length} characters");
 
                     // 4.5. Extract form metadata for later use
                     JObject formData = JObject.Parse(jsonContent);
@@ -236,61 +296,83 @@ namespace FormGenerator.Services
                     string targetFolder = _config.Form.TargetFolder.Replace("\\", "/");
                     string targetCategory = $"{targetFolder}/{formDisplayName}";
 
-                    OnStatusUpdate($"Target category: {targetCategory}");
-                    OnStatusUpdate($"[DIAG] Form Name: {formName}");
-                    OnStatusUpdate($"[DIAG] Form Display Name: {formDisplayName}");
-                    OnStatusUpdate($"[DIAG] Target Category: {targetCategory}");
+                    _logger.Info($"Form Name (sanitized): {formName}");
+                    _logger.Verbose($"Form Display Name: {formDisplayName}");
+                    _logger.Verbose($"Target Category: {targetCategory}");
 
                     // 5. Optional cleanup
                     if (request.ForceCleanup)
                     {
-                        OnStatusUpdate("Cleaning up existing K2 objects...");
+                        _logger.LogSubSection("Cleanup Phase");
+                        _logger.Info("Cleaning up existing K2 objects...");
                         OnProgressUpdate(new K2GenerationProgress { Stage = "Cleanup", PercentComplete = 10 });
-                        OnStatusUpdate("[DIAG] Performing cleanup...");
+                        _logger.Verbose("Starting cleanup of Forms, Views, and SmartObjects...");
                         PerformCleanup(jsonContent);
-                        OnStatusUpdate("[DIAG] Cleanup completed");
+                        _logger.Info("✓ Cleanup completed");
                     }
 
                     // 6. Generate SmartObjects
-                    OnStatusUpdate("Generating K2 SmartObjects...");
+                    _logger.LogSection("SMARTOBJECT GENERATION");
+                    _logger.Info("Starting SmartObject generation...");
                     OnProgressUpdate(new K2GenerationProgress { Stage = "SmartObjects", PercentComplete = 25 });
-                    OnStatusUpdate("[DIAG] Starting SmartObject generation...");
+                    _logger.Verbose("Initializing SmartObjectGenerator...");
+                    _logger.Debug($"Passing configuration and connection to SmartObjectGenerator");
 
                     var smoGenerator = new SmartObjectGenerator(_connectionManager, _config);
+                    _logger.Verbose("Calling GenerateSmartObjectsFromJson...");
                     smoGenerator.GenerateSmartObjectsFromJson(jsonContent);
 
                     result.SmartObjectsCreated = SmartObjectViewRegistry.GetSmartObjectCount();
-                    OnStatusUpdate($"Created {result.SmartObjectsCreated} SmartObjects");
-                    OnStatusUpdate($"[DIAG] SmartObjects created: {result.SmartObjectsCreated}");
+                    _logger.Info($"✓ Created {result.SmartObjectsCreated} SmartObjects");
+                    _logger.Debug($"Main SmartObjects: {SmartObjectViewRegistry.GetSmartObjectCount(SmartObjectViewRegistry.SmartObjectType.Main)}");
+                    _logger.Debug($"Child SmartObjects: {SmartObjectViewRegistry.GetSmartObjectCount(SmartObjectViewRegistry.SmartObjectType.Child)}");
+                    _logger.Debug($"Lookup SmartObjects: {SmartObjectViewRegistry.GetSmartObjectCount(SmartObjectViewRegistry.SmartObjectType.Lookup)}");
 
                     // 7. Generate Views
-                    OnStatusUpdate("Generating K2 Views...");
+                    _logger.LogSection("VIEW GENERATION");
+                    _logger.Info("Starting View generation...");
                     OnProgressUpdate(new K2GenerationProgress { Stage = "Views", PercentComplete = 50 });
-                    OnStatusUpdate("[DIAG] Starting View generation...");
-                    OnStatusUpdate($"[DIAG] ViewTitles count before generation: {0}");
+                    _logger.Verbose("Initializing ViewGenerator with field mappings...");
+                    _logger.Debug($"Field mappings count: {smoGenerator.FieldMappings.Count}");
 
                     var viewGenerator = new ViewGenerator(_connectionManager, smoGenerator.FieldMappings, smoGenerator, _config);
+                    _logger.Verbose("Calling GenerateViewsFromJson...");
                     viewGenerator.GenerateViewsFromJson(jsonContent);
 
                     result.ViewsCreated = SmartObjectViewRegistry.GetViewCount();
-                    OnStatusUpdate($"Created {result.ViewsCreated} Views");
-                    OnStatusUpdate($"[DIAG] Views created: {result.ViewsCreated}");
-                    OnStatusUpdate($"[DIAG] ViewTitles count after generation: {viewGenerator.ViewTitles.Count}");
+                    _logger.Info($"✓ Created {result.ViewsCreated} Views");
+                    _logger.Verbose($"ViewTitles collected: {viewGenerator.ViewTitles.Count}");
+                    _logger.Debug($"Capture Views: {SmartObjectViewRegistry.GetViewCount(SmartObjectViewRegistry.ViewType.Capture)}");
+                    _logger.Debug($"Item Views: {SmartObjectViewRegistry.GetViewCount(SmartObjectViewRegistry.ViewType.Item)}");
+                    _logger.Debug($"List Views: {SmartObjectViewRegistry.GetViewCount(SmartObjectViewRegistry.ViewType.List)}");
 
                     // 8. Generate Forms with verification and retry
-                    OnStatusUpdate("Generating K2 Forms...");
+                    _logger.LogSection("FORM GENERATION");
+
+                    // Validate that views were created before attempting form generation
+                    if (result.ViewsCreated == 0)
+                    {
+                        _logger.Error("❌ Cannot generate forms: No views were created");
+                        _logger.Warning("This usually means views from a previous run are still in use or checked out");
+                        _logger.Warning("Please manually delete existing forms and views in K2 Designer before regenerating");
+                        throw new InvalidOperationException("Cannot generate forms without views. Please clean up existing artifacts in K2 Designer (Forms→Views→SmartObjects) and try again.");
+                    }
+
+                    _logger.Info("Starting Form generation...");
                     OnProgressUpdate(new K2GenerationProgress { Stage = "Forms", PercentComplete = 75 });
-                    OnStatusUpdate("[DIAG] Starting Form generation...");
-                    OnStatusUpdate($"[DIAG] Passing {viewGenerator.ViewTitles.Count} view titles to form generator");
+                    _logger.Verbose($"Initializing FormGenerator with theme: {request.FormTheme}");
+                    _logger.Debug($"Passing {viewGenerator.ViewTitles.Count} view titles to form generator");
 
                     var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, request.FormTheme, smoGenerator);
 
                     // Form name was already extracted earlier for category creation
+                    _logger.Verbose("Calling GenerateFormsFromJson...");
                     formGenerator.GenerateFormsFromJson(jsonContent, viewGenerator.ViewTitles);
-                    OnStatusUpdate("[DIAG] Form generation completed");
+                    _logger.Info("✓ Form generation completed");
 
                     // 9. Register everything
-                    OnStatusUpdate("[DIAG] Starting form registration...");
+                    _logger.LogSubSection("Form Registration");
+                    _logger.Info("Registering forms in SmartObjectViewRegistry...");
                     var allSmartObjects = new List<string> { formName };
                     allSmartObjects.AddRange(SmartObjectViewRegistry.GetChildSmartObjects(formName));
 
@@ -298,13 +380,16 @@ namespace FormGenerator.Services
                     if (SmartObjectViewRegistry.SmartObjectExists(lookupSmo))
                     {
                         allSmartObjects.Add(lookupSmo);
-                        OnStatusUpdate($"[DIAG] Added lookup SmartObject: {lookupSmo}");
+                        _logger.Verbose($"Added lookup SmartObject: {lookupSmo}");
                     }
 
-                    OnStatusUpdate($"[DIAG] Total SmartObjects to register: {allSmartObjects.Count}");
-                    foreach (var smo in allSmartObjects)
+                    _logger.Verbose($"Total SmartObjects to register: {allSmartObjects.Count}");
+                    if (_logger != null && K2LoggingConfiguration.ShouldLog(K2LogLevel.Debug))
                     {
-                        OnStatusUpdate($"[DIAG]   - SmartObject: {smo}");
+                        foreach (var smo in allSmartObjects)
+                        {
+                            _logger.Debug($"  • SmartObject: {smo}");
+                        }
                     }
 
                     var formViews = new List<string>();
@@ -312,24 +397,26 @@ namespace FormGenerator.Services
                     {
                         var views = SmartObjectViewRegistry.GetViewsForSmartObject(smo);
                         formViews.AddRange(views);
-                        OnStatusUpdate($"[DIAG] SmartObject '{smo}' has {views.Count} views");
+                        _logger.Verbose($"SmartObject '{smo}' has {views.Count} view(s)");
                     }
 
-                    OnStatusUpdate($"[DIAG] Total form views: {formViews.Count}");
-                    foreach (var view in formViews)
+                    _logger.Verbose($"Total form views: {formViews.Count}");
+                    if (_logger != null && K2LoggingConfiguration.ShouldLog(K2LogLevel.Debug))
                     {
-                        OnStatusUpdate($"[DIAG]   - View: {view}");
+                        foreach (var view in formViews)
+                        {
+                            _logger.Debug($"  • View: {view}");
+                        }
                     }
 
                     SmartObjectViewRegistry.RegisterForm(formName, formViews, allSmartObjects);
-                    OnStatusUpdate($"[DIAG] Form '{formName}' registered in registry");
+                    _logger.Info($"✓ Form '{formName}' registered in registry");
 
                     result.FormsCreated = SmartObjectViewRegistry.GetFormCount();
-                    OnStatusUpdate($"Created {result.FormsCreated} Forms");
-                    OnStatusUpdate($"[DIAG] Registry reports {result.FormsCreated} forms created");
+                    _logger.Info($"✓ Registry reports {result.FormsCreated} form(s) created");
 
                     // 10. Generate summary
-                    OnStatusUpdate("K2 generation completed successfully!");
+                    _logger.LogSection("GENERATION COMPLETE");
                     OnProgressUpdate(new K2GenerationProgress { Stage = "Complete", PercentComplete = 100 });
 
                     result.Success = true;
@@ -337,14 +424,17 @@ namespace FormGenerator.Services
                     result.FormName = formName;
                     result.GeneratedArtifacts = GetGeneratedArtifactsSummary();
 
-                    OnStatusUpdate("==============================================");
-                    OnStatusUpdate("=== K2 GENERATION DIAGNOSTICS - END ===");
-                    OnStatusUpdate($"=== SUCCESS: {result.FormsCreated} forms created ===");
-                    OnStatusUpdate("==============================================");
+                    _logger.Info("════════════════════════════════════════════════");
+                    _logger.Info($"✓ SUCCESS: K2 generation completed");
+                    _logger.Info($"  • SmartObjects: {result.SmartObjectsCreated}");
+                    _logger.Info($"  • Views: {result.ViewsCreated}");
+                    _logger.Info($"  • Forms: {result.FormsCreated}");
+                    _logger.Info("════════════════════════════════════════════════");
 
                     // Clear K2 connection and force garbage collection to reset any cached state
                     // This ensures the next generation starts with a completely clean slate
-                    OnStatusUpdate("[DIAG] Clearing K2 connection and cache...");
+                    _logger.LogSubSection("Cleanup");
+                    _logger.Verbose("Clearing K2 connection and cache...");
                     if (_connectionManager != null)
                     {
                         try
@@ -354,11 +444,23 @@ namespace FormGenerator.Services
                             GC.Collect();
                             GC.WaitForPendingFinalizers();
                             GC.Collect();
-                            OnStatusUpdate("[DIAG] K2 connection cleared and garbage collected");
+                            _logger.Debug("K2 connection cleared and garbage collected");
                         }
                         catch (Exception cleanupEx)
                         {
-                            OnStatusUpdate($"[DIAG] Cleanup warning: {cleanupEx.Message}");
+                            _logger.Warning($"Cleanup warning: {cleanupEx.Message}");
+                        }
+                    }
+
+                    // Dispose timer and flush any remaining console output
+                    consoleFlushTimer?.Dispose();
+                    var finalOutput = consoleWriter.ToString();
+                    if (!string.IsNullOrEmpty(finalOutput))
+                    {
+                        var lines = finalOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var line in lines)
+                        {
+                            OnStatusUpdate($"[Console] {line}");
                         }
                     }
 
@@ -366,7 +468,29 @@ namespace FormGenerator.Services
                 }
                 catch (Exception ex)
                 {
-                    OnStatusUpdate($"K2 generation failed: {ex.Message}");
+                    // Dispose timer and flush any remaining console output
+                    consoleFlushTimer?.Dispose();
+                    var finalOutput = consoleWriter.ToString();
+                    if (!string.IsNullOrEmpty(finalOutput))
+                    {
+                        var lines = finalOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var line in lines)
+                        {
+                            OnStatusUpdate($"[Console] {line}");
+                        }
+                    }
+
+                    if (_logger != null)
+                    {
+                        _logger.Error($"K2 generation failed: {ex.Message}");
+                        _logger.Debug($"Exception type: {ex.GetType().FullName}");
+                        _logger.Debug($"Stack trace: {ex.StackTrace}");
+                    }
+                    else
+                    {
+                        OnStatusUpdate($"K2 generation failed: {ex.Message}");
+                    }
+
                     return new K2GenerationResult
                     {
                         Success = false,
@@ -375,6 +499,12 @@ namespace FormGenerator.Services
                         FormName = string.Empty,
                         GeneratedArtifacts = new Dictionary<string, int>()
                     };
+                }
+                finally
+                {
+                    // Always restore original console output
+                    Console.SetOut(originalConsoleOut);
+                    consoleWriter?.Dispose();
                 }
             });
         }
@@ -397,7 +527,12 @@ namespace FormGenerator.Services
             config.Form.Theme = request.FormTheme;
             config.Form.UseTimestamp = request.UseTimestamp;
             config.Form.ForceCleanup = request.ForceCleanup;
-            config.Form.TargetFolder = request.TargetFolder ?? "TestForms";
+
+            // Normalize target folder path - remove leading/trailing slashes and convert to backslash
+            var targetFolder = request.TargetFolder ?? "TestForms";
+            targetFolder = targetFolder.Trim('/', '\\').Replace("/", "\\");
+            config.Form.TargetFolder = string.IsNullOrEmpty(targetFolder) ? "Generated" : targetFolder;
+
             config.K2.SmartBoxGuid = request.SmartBoxGuid ?? "e5609413-d844-4325-98c3-db3cacbd406d";
 
             return config;
@@ -420,6 +555,12 @@ namespace FormGenerator.Services
                     // Convert the anonymous object to JObject and wrap it in FormDefinition structure
                     var formJsonString = JsonConvert.SerializeObject(formObject);
                     var formData = JObject.Parse(formJsonString);
+
+                    // Inject TargetFolder into the FormDefinition so generators can access it
+                    if (_config != null && !string.IsNullOrEmpty(_config.Form.TargetFolder))
+                    {
+                        formData["TargetFolder"] = _config.Form.TargetFolder;
+                    }
 
                     // Wrap the form data in the expected structure
                     var wrappedFormData = new JObject();

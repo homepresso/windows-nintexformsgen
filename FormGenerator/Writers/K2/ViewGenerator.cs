@@ -96,9 +96,12 @@ namespace K2SmartObjectGenerator
                 Console.WriteLine($"  Found conditional visibility rules for {conditionalVisibility.Properties().Count()} field(s) at form level");
             }
 
-            // Define base category paths - organize under form name (with spaces for display)
-            // NEW STRUCTURE: {formDisplayName}\Views
-            string baseCategory = formDisplayName;
+            // Define base category paths - respect TargetFolder from configuration
+            // STRUCTURE: {TargetFolder}\{formDisplayName}\Views
+            string targetFolder = _config.Form.TargetFolder ?? "Generated";
+            string baseCategory = $"{targetFolder}\\{formDisplayName}";
+
+            Console.WriteLine($"  View base category: {baseCategory}");
 
             // Process each InfoPath view independently
             foreach (JObject viewDef in viewsArray)

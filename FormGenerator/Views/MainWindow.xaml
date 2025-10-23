@@ -1971,6 +1971,12 @@
                                          Content="Enable Form Versioning"
                                          Style="{StaticResource ModernCheckBox}"
                                          IsChecked="False"/>
+
+                                                <CheckBox Name="EnableVerboseLoggingK2CheckBox"
+                                         Content="Enable Verbose Logging (Debug Mode)"
+                                         Style="{StaticResource ModernCheckBox}"
+                                         IsChecked="False"
+                                         ToolTip="Enable detailed diagnostic logging for troubleshooting K2 generation issues"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </Border>
