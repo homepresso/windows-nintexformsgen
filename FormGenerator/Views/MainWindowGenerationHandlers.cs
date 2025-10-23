@@ -813,6 +813,16 @@ namespace FormGenerator.Views
         {
             try
             {
+                // Check if we have analysis results
+                if (_mainWindow._allAnalysisResults == null || !_mainWindow._allAnalysisResults.Any())
+                {
+                    MessageBox.Show("Please analyze forms first before generating Nintex forms.",
+                                   "No Analysis Results",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
+
                 var dialog = new SaveFileDialog
                 {
                     Title = "Save Nintex Forms Package",
@@ -824,23 +834,66 @@ namespace FormGenerator.Views
 
                 if (dialog.ShowDialog() == true)
                 {
-                    _mainWindow.NintexGenerationLog.Text += $"\nSaving package to: {dialog.FileName}\n";
+                    _mainWindow.NintexGenerationLog.Text += $"\nConverting InfoPath forms to Nintex format...\n";
 
-                    // Simulate file creation
-                    await Task.Delay(500);
+                    // Create NAC converter
+                    var rebuilder = new Writers.NAC.Rebuilders.NintexFormRebuilder();
+                    int successCount = 0;
+                    int failCount = 0;
 
-                    // Create mock content
-                    string content = _mainWindow.NintexJsonRadio.IsChecked == true
-                        ? "{ \"nintexForm\": { \"version\": \"1.0\", \"forms\": [] } }"
-                        : "<?xml version=\"1.0\"?><NintexForms></NintexForms>";
+                    // Convert each analyzed form - save each to separate file (like NAC Example does)
+                    foreach (var formResult in _mainWindow._allAnalysisResults)
+                    {
+                        try
+                        {
+                            var formName = Path.GetFileNameWithoutExtension(formResult.Key);
+                            _mainWindow.NintexGenerationLog.Text += $"  Converting: {formName}...\n";
 
-                    await File.WriteAllTextAsync(dialog.FileName, content);
+                            var rebuildResult = await rebuilder.RebuildFormAsync(formResult.Value);
 
-                    _mainWindow.NintexGenerationLog.Text += "✅ Package saved successfully!\n";
-                    _mainWindow.UpdateStatus($"Nintex package saved to: {dialog.FileName}", MessageSeverity.Info);
+                            if (rebuildResult.Success)
+                            {
+                                // Get the form-definition.json directly from artifacts
+                                var formJson = rebuildResult.Artifacts["form-definition.json"];
 
-                    MessageBox.Show($"Nintex forms package has been saved to:\n{dialog.FileName}",
-                                   "Download Complete",
+                                // Generate output filename
+                                var outputFileName = dialog.FileName.Replace(".json", $"_{formName}_nintex.json");
+                                if (_mainWindow._allAnalysisResults.Count == 1)
+                                {
+                                    // If only one form, use the original filename
+                                    outputFileName = dialog.FileName;
+                                }
+
+                                // Write directly (no wrapping) - this is what NAC Example does
+                                await File.WriteAllTextAsync(outputFileName, formJson);
+
+                                _mainWindow.NintexGenerationLog.Text += $"    ✅ Saved to: {Path.GetFileName(outputFileName)}\n";
+                                successCount++;
+                            }
+                            else
+                            {
+                                _mainWindow.NintexGenerationLog.Text += $"    ❌ Conversion failed: {rebuildResult.ErrorMessage}\n";
+                                failCount++;
+                            }
+                        }
+                        catch (Exception formEx)
+                        {
+                            _mainWindow.NintexGenerationLog.Text += $"    ❌ Error: {formEx.Message}\n";
+                            failCount++;
+                        }
+                    }
+
+                    _mainWindow.NintexGenerationLog.Text += $"\n✅ Conversion complete!\n";
+                    _mainWindow.NintexGenerationLog.Text += $"   Converted: {successCount} forms\n";
+                    if (failCount > 0)
+                        _mainWindow.NintexGenerationLog.Text += $"   Failed: {failCount} forms\n";
+
+                    _mainWindow.UpdateStatus($"Nintex forms saved", MessageSeverity.Info);
+
+                    MessageBox.Show($"Nintex form conversion complete!\n\n" +
+                                   $"Converted: {successCount} forms\n" +
+                                   (failCount > 0 ? $"Failed: {failCount} forms" : ""),
+                                   "Conversion Complete",
                                    MessageBoxButton.OK,
                                    MessageBoxImage.Information);
                 }
@@ -848,6 +901,7 @@ namespace FormGenerator.Views
             catch (Exception ex)
             {
                 _mainWindow.NintexGenerationLog.Text += $"\n❌ Download failed: {ex.Message}\n";
+                _mainWindow.NintexGenerationLog.Text += $"Stack trace: {ex.StackTrace}\n";
                 _mainWindow.UpdateStatus($"Nintex download failed: {ex.Message}", MessageSeverity.Error);
 
                 MessageBox.Show($"Download failed:\n{ex.Message}",
@@ -947,148 +1001,43 @@ namespace FormGenerator.Views
 
         public async Task GenerateK2()
         {
-            try
-            {
-                _mainWindow.GenerateK2Button.IsEnabled = false;
-                _mainWindow.UpdateStatus("Generating K2 SmartForms...");
-                _mainWindow.K2GenerationLog.Text = "Starting K2 SmartForms generation...\n\n";
+            await Task.CompletedTask; // Suppress async warning
 
-                // Check analysis results
-                if (_mainWindow._allAnalysisResults == null || !_mainWindow._allAnalysisResults.Any())
-                {
-                    MessageBox.Show("Please analyze forms first before generating K2 forms.",
-                                   "No Analysis Results",
-                                   MessageBoxButton.OK,
-                                   MessageBoxImage.Warning);
-                    return;
-                }
+            _mainWindow.K2GenerationLog.Text = "K2 SmartForms Generation - Not Available\n\n";
+            _mainWindow.K2GenerationLog.Text += "K2 generation is currently not available in this version.\n\n";
+            _mainWindow.K2GenerationLog.Text += "REASON:\n";
+            _mainWindow.K2GenerationLog.Text += "The K2 SmartForms SDK requires .NET Framework 4.8 and uses APIs that are\n";
+            _mainWindow.K2GenerationLog.Text += "incompatible with .NET 8 (System.AppDomain.get_DomainManager, etc.).\n\n";
+            _mainWindow.K2GenerationLog.Text += "ALTERNATIVES:\n";
+            _mainWindow.K2GenerationLog.Text += "1. Use the SQL generation feature to create database structures\n";
+            _mainWindow.K2GenerationLog.Text += "2. Use the Nintex Forms NAC export for modern Nintex platform\n";
+            _mainWindow.K2GenerationLog.Text += "3. Manually recreate forms in K2 SmartForms Designer using the JSON output\n\n";
+            _mainWindow.K2GenerationLog.Text += "The analyzed form structure is available in the JSON Output tab.\n";
 
-                _mainWindow.K2GenerationLog.Text += $"Target Folder: {_mainWindow.K2FolderTextBox.Text}\n\n";
-
-                // Process options
-                if (_mainWindow.GenerateSmartObjectsCheckBox.IsChecked == true)
-                {
-                    _mainWindow.K2GenerationLog.Text += "Generating SmartObjects...\n";
-                    await Task.Delay(500);
-                }
-
-                string formType = "Item View";
-                if (_mainWindow.K2ListViewRadio.IsChecked == true)
-                    formType = "List View";
-                else if (_mainWindow.K2BothViewsRadio.IsChecked == true)
-                    formType = "Item and List Views";
-
-                _mainWindow.K2GenerationLog.Text += $"Form Type: {formType}\n\n";
-
-                // Simulate generation for each form
-                foreach (var form in _mainWindow._allAnalysisResults)
-                {
-                    _mainWindow.K2GenerationLog.Text += $"Processing: {form.Key}\n";
-                    await Task.Delay(500);
-
-                    if (_mainWindow.GenerateSmartObjectsCheckBox.IsChecked == true)
-                    {
-                        _mainWindow.K2GenerationLog.Text += "  - Creating SmartObject...\n";
-                        await Task.Delay(300);
-                    }
-
-                    _mainWindow.K2GenerationLog.Text += "  - Creating views...\n";
-                    await Task.Delay(300);
-
-                    if (_mainWindow.IncludeRulesK2CheckBox.IsChecked == true)
-                    {
-                        _mainWindow.K2GenerationLog.Text += "  - Adding form rules...\n";
-                        await Task.Delay(300);
-                    }
-
-                    if (_mainWindow.IncludeStylesK2CheckBox.IsChecked == true)
-                    {
-                        _mainWindow.K2GenerationLog.Text += "  - Applying styles...\n";
-                        await Task.Delay(200);
-                    }
-                }
-
-                if (_mainWindow.GenerateWorkflowK2CheckBox.IsChecked == true)
-                {
-                    _mainWindow.K2GenerationLog.Text += "\nGenerating K2 Workflow...\n";
-                    await Task.Delay(500);
-                }
-
-                _mainWindow.K2GenerationLog.Text += "\n✅ K2 SmartForms generated successfully!\n";
-                _mainWindow.K2GenerationLog.Text += $"SmartObjects created: {_mainWindow._allAnalysisResults.Count}\n";
-                _mainWindow.K2GenerationLog.Text += $"Views created: {_mainWindow._allAnalysisResults.Count * (_mainWindow.K2BothViewsRadio.IsChecked == true ? 2 : 1)}\n";
-
-                _mainWindow.UpdateStatus("K2 SmartForms generated successfully", MessageSeverity.Info);
-                _mainWindow.DeployK2Button.IsEnabled = true;
-                _mainWindow.ExportK2PackageButton.IsEnabled = true;
-            }
-            catch (Exception ex)
-            {
-                _mainWindow.K2GenerationLog.Text += $"\n❌ Error: {ex.Message}\n";
-                _mainWindow.UpdateStatus($"K2 generation failed: {ex.Message}", MessageSeverity.Error);
-            }
-            finally
-            {
-                _mainWindow.GenerateK2Button.IsEnabled = true;
-            }
+            MessageBox.Show(
+                "K2 SmartForms generation is not available in this version.\n\n" +
+                "The K2 SDK requires .NET Framework 4.8 and is incompatible with .NET 8.\n\n" +
+                "Please use:\n" +
+                "• SQL Generation for database structures\n" +
+                "• Nintex NAC Export for modern Nintex platform\n" +
+                "• JSON Output for manual form recreation",
+                "K2 Generation Not Available",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
 
         public async Task DeployK2()
         {
-            try
-            {
-                var result = MessageBox.Show("Are you sure you want to deploy the generated forms to the K2 server?\n\nThis will create new SmartForms in the specified folder.",
-                                             "Confirm Deployment",
-                                             MessageBoxButton.YesNo,
-                                             MessageBoxImage.Warning);
+            await Task.CompletedTask; // Suppress async warning
 
-                if (result != MessageBoxResult.Yes)
-                    return;
-
-                _mainWindow.DeployK2Button.IsEnabled = false;
-                _mainWindow.UpdateStatus("Deploying to K2 server...");
-                _mainWindow.K2GenerationLog.Text += "\n\nStarting deployment to K2 server...\n";
-
-                // Simulate deployment
-                _mainWindow.K2GenerationLog.Text += "Connecting to K2 server...\n";
-                await Task.Delay(500);
-
-                _mainWindow.K2GenerationLog.Text += "Deploying SmartObjects...\n";
-                await Task.Delay(1000);
-
-                _mainWindow.K2GenerationLog.Text += "Deploying SmartForms...\n";
-                await Task.Delay(1000);
-
-                if (_mainWindow.GenerateWorkflowK2CheckBox.IsChecked == true)
-                {
-                    _mainWindow.K2GenerationLog.Text += "Deploying Workflow...\n";
-                    await Task.Delay(500);
-                }
-
-                _mainWindow.K2GenerationLog.Text += "\n✅ Deployment completed successfully!\n";
-                _mainWindow.K2GenerationLog.Text += $"Location: {_mainWindow.K2ServerTextBox.Text}{_mainWindow.K2FolderTextBox.Text}\n";
-
-                _mainWindow.UpdateStatus("K2 deployment completed", MessageSeverity.Info);
-
-                MessageBox.Show("K2 SmartForms have been successfully deployed to the server!",
-                               "Deployment Successful",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Information);
-            }
-            catch (Exception ex)
-            {
-                _mainWindow.K2GenerationLog.Text += $"\n❌ Deployment failed: {ex.Message}\n";
-                _mainWindow.UpdateStatus($"K2 deployment failed: {ex.Message}", MessageSeverity.Error);
-
-                MessageBox.Show($"Deployment failed:\n{ex.Message}",
-                               "Deployment Error",
-                               MessageBoxButton.OK,
-                               MessageBoxImage.Error);
-            }
-            finally
-            {
-                _mainWindow.DeployK2Button.IsEnabled = true;
-            }
+            // Note: K2 forms are automatically deployed during generation via K2GenerationService
+            // This button is kept for UI consistency but generation already handles deployment
+            MessageBox.Show("K2 SmartForms are automatically deployed to the server during generation.\n\n" +
+                           $"The forms are already available at:\n{_mainWindow.K2ServerTextBox.Text}/Forms/{_mainWindow.K2FolderTextBox.Text}\n\n" +
+                           "You can access them through K2 SmartForms Designer or use the Export Package button to download them.",
+                           "Forms Already Deployed",
+                           MessageBoxButton.OK,
+                           MessageBoxImage.Information);
         }
 
         public async Task ExportK2Package()

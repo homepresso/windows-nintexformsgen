@@ -459,9 +459,11 @@ namespace FormGenerator.Views
         {
             var dialog = new OpenFileDialog
             {
-                Title = "Select InfoPath Forms",
+                Title = "Select InfoPath Forms (or pre-extracted folders)",
                 Filter = "InfoPath Forms (*.xsn)|*.xsn|All Files (*.*)|*.*",
-                Multiselect = true
+                Multiselect = true,
+                CheckFileExists = false,
+                CheckPathExists = true
             };
 
             if (dialog.ShowDialog() == true)
@@ -507,25 +509,41 @@ namespace FormGenerator.Views
                 // Check if file is already added
                 if (_uploadedFiles.Any(f => f.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase)))
                 {
-                    UpdateStatus($"File already added: {Path.GetFileName(filePath)}");
+                    UpdateStatus($"Path already added: {Path.GetFileName(filePath)}");
                     continue;
                 }
 
-                // Check if file can be analyzed
-                var formType = GetSelectedFormType();
-                var analyzer = _analyzerFactory.GetAnalyzer(formType);
+                // Check if this is a directory (pre-extracted folder)
+                bool isDirectory = Directory.Exists(filePath);
 
-                if (analyzer == null || !analyzer.CanAnalyze(filePath))
+                // For directories, check if they contain view files
+                if (isDirectory)
                 {
-                    UpdateStatus($"Cannot analyze file: {Path.GetFileName(filePath)}", MessageSeverity.Warning);
-                    continue;
+                    var viewFiles = Directory.GetFiles(filePath, "view*.xsl");
+                    if (viewFiles.Length == 0)
+                    {
+                        UpdateStatus($"Folder does not contain view*.xsl files: {Path.GetFileName(filePath)}", MessageSeverity.Warning);
+                        continue;
+                    }
+                }
+                else
+                {
+                    // Check if file can be analyzed
+                    var formType = GetSelectedFormType();
+                    var analyzer = _analyzerFactory.GetAnalyzer(formType);
+
+                    if (analyzer == null || !analyzer.CanAnalyze(filePath))
+                    {
+                        UpdateStatus($"Cannot analyze file: {Path.GetFileName(filePath)}", MessageSeverity.Warning);
+                        continue;
+                    }
                 }
 
                 var fileInfo = new FormFileInfo
                 {
                     FilePath = filePath,
-                    FileName = Path.GetFileName(filePath),
-                    FileSize = new FileInfo(filePath).Length,
+                    FileName = isDirectory ? Path.GetFileName(filePath) + " (folder)" : Path.GetFileName(filePath),
+                    FileSize = isDirectory ? 0 : new FileInfo(filePath).Length,
                     Status = "Ready",
                     UploadedDate = DateTime.Now
                 };

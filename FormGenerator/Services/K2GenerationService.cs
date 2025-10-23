@@ -513,39 +513,39 @@ namespace FormGenerator.Services
 
     public class K2GenerationRequest
     {
-        public required string ServerName { get; set; }
+        public string ServerName { get; set; } = string.Empty;
         public uint ServerPort { get; set; }
-        public required string FormTheme { get; set; }
+        public string FormTheme { get; set; } = "Default";
         public bool UseTimestamp { get; set; }
         public bool ForceCleanup { get; set; }
         public string? SmartBoxGuid { get; set; }
         public string? TargetFolder { get; set; }
-        public required Dictionary<string, Core.Models.FormAnalysisResult> FormDefinitions { get; set; }
+        public Dictionary<string, Core.Models.FormAnalysisResult> FormDefinitions { get; set; } = new();
     }
 
     public class K2GenerationResult
     {
         public bool Success { get; set; }
-        public required string Message { get; set; }
+        public string Message { get; set; } = string.Empty;
         public string? ErrorDetails { get; set; }
-        public required string FormName { get; set; }
+        public string FormName { get; set; } = string.Empty;
         public int SmartObjectsCreated { get; set; }
         public int ViewsCreated { get; set; }
         public int FormsCreated { get; set; }
-        public required Dictionary<string, int> GeneratedArtifacts { get; set; }
+        public Dictionary<string, int> GeneratedArtifacts { get; set; } = new();
     }
 
     public class K2ConnectionResult
     {
         public bool Success { get; set; }
-        public required string Message { get; set; }
+        public string Message { get; set; } = string.Empty;
         public string? ErrorDetails { get; set; }
-        public required string ServerVersion { get; set; }
+        public string ServerVersion { get; set; } = string.Empty;
     }
 
     public class K2GenerationProgress
     {
-        public required string Stage { get; set; }
+        public string Stage { get; set; } = string.Empty;
         public int PercentComplete { get; set; }
         public string? CurrentItem { get; set; }
     }

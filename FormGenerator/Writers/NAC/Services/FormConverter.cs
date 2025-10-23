@@ -80,6 +80,7 @@ namespace FormGenerator.Writers.NAC.Services
             ProcessDataFallback(sourceForm, formDefinition);
 
             AddActionPanel(formDefinition);
+
             return formDefinition;
         }
 

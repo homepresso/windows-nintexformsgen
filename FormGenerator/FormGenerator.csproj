@@ -34,7 +34,13 @@
     <None Remove="Writers\NAC\NWCONVERSIONEXAMPLE\**" />
     <Page Remove="Writers\NAC\NWCONVERSIONEXAMPLE\**" />
 
-    <!-- Exclude K2 Writers (not part of main build) -->
+    <!-- Exclude NAC Example folder -->
+    <Compile Remove="NAC Example\**" />
+    <EmbeddedResource Remove="NAC Example\**" />
+    <None Remove="NAC Example\**" />
+    <Page Remove="NAC Example\**" />
+
+    <!-- Exclude K2 Writers (K2 SDK requires .NET Framework 4.8, incompatible with .NET 8) -->
     <Compile Remove="Writers\K2\**" />
     <Compile Remove="Services\K2GenerationService.cs" />
   </ItemGroup>

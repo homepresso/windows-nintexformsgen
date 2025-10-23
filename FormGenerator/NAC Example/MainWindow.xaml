@@ -1,0 +1,193 @@
+<Window x:Class="NWConverter.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+        Title="Nintex Workflow Form Converter" 
+        Height="700" 
+        Width="1000"
+        WindowStartupLocation="CenterScreen"
+        TextElement.Foreground="{DynamicResource MaterialDesignBody}"
+        TextElement.FontWeight="Regular"
+        TextElement.FontSize="13"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="Auto"
+        Background="{DynamicResource MaterialDesignPaper}"
+        FontFamily="{DynamicResource MaterialDesignFont}">
+    
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <materialDesign:Card Grid.Row="0" Margin="16" Padding="16">
+            <StackPanel>
+                <TextBlock Text="Nintex Workflow Form Converter" 
+                           Style="{DynamicResource MaterialDesignHeadline5TextBlock}"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,8"/>
+                <TextBlock Text="Convert legacy form definitions to Nintex Workflow format" 
+                           Style="{DynamicResource MaterialDesignBody2TextBlock}"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource MaterialDesignBodyLight}"/>
+            </StackPanel>
+        </materialDesign:Card>
+
+        <!-- Main Content -->
+        <Grid Grid.Row="1" Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Source Files Section -->
+            <materialDesign:Card Grid.Column="0" Margin="0,0,8,0">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="Source Files" 
+                               Style="{DynamicResource MaterialDesignHeadline6TextBlock}"
+                               Margin="0,0,0,16"/>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ListBox x:Name="SourceFilesListBox" 
+                                 materialDesign:ScrollViewerAssist.BubbleVerticalScroll="True"
+                                 MaxHeight="400">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding FileName}" 
+                                                   VerticalAlignment="Center"/>
+                                        <Button Grid.Column="1" 
+                                                Style="{DynamicResource MaterialDesignIconButton}"
+                                                materialDesign:ButtonAssist.CornerRadius="4"
+                                                Click="RemoveFile_Click"
+                                                Tag="{Binding}">
+                                            <materialDesign:PackIcon Kind="Close" Width="16" Height="16"/>
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,16,0,0">
+                        <Button x:Name="AddFilesButton" 
+                                Content="Add Files" 
+                                Style="{DynamicResource MaterialDesignOutlinedButton}"
+                                Click="AddFiles_Click"
+                                Margin="0,0,8,0"/>
+                        <Button x:Name="AddFolderButton" 
+                                Content="Add Folder" 
+                                Style="{DynamicResource MaterialDesignOutlinedButton}"
+                                Click="AddFolder_Click"/>
+                    </StackPanel>
+                </Grid>
+            </materialDesign:Card>
+
+            <!-- Convert Button -->
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="16,0">
+                <Button x:Name="ConvertButton" 
+                        Content="Convert →" 
+                        Style="{DynamicResource MaterialDesignRaisedButton}"
+                        Click="Convert_Click"
+                        Padding="16,8"
+                        FontSize="16"
+                        IsEnabled="False"/>
+                
+                <Button x:Name="PreviewButton" 
+                        Content="Preview" 
+                        Style="{DynamicResource MaterialDesignOutlinedButton}"
+                        Click="Preview_Click"
+                        Margin="0,8,0,0"
+                        IsEnabled="False"/>
+            </StackPanel>
+
+            <!-- Output Section -->
+            <materialDesign:Card Grid.Column="2" Margin="8,0,0,0">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="Output" 
+                               Style="{DynamicResource MaterialDesignHeadline6TextBlock}"
+                               Margin="0,0,0,16"/>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ListBox x:Name="OutputFilesListBox" 
+                                 materialDesign:ScrollViewerAssist.BubbleVerticalScroll="True"
+                                 MaxHeight="400">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding FileName}" 
+                                                   VerticalAlignment="Center"/>
+                                        <Button Grid.Column="1" 
+                                                Style="{DynamicResource MaterialDesignIconButton}"
+                                                materialDesign:ButtonAssist.CornerRadius="4"
+                                                Click="OpenOutput_Click"
+                                                Tag="{Binding}">
+                                            <materialDesign:PackIcon Kind="OpenInNew" Width="16" Height="16"/>
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </ScrollViewer>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,16,0,0">
+                        <Button x:Name="OpenOutputFolderButton" 
+                                Content="Open Output Folder" 
+                                Style="{DynamicResource MaterialDesignOutlinedButton}"
+                                Click="OpenOutputFolder_Click"
+                                Margin="0,0,8,0"/>
+                        <Button x:Name="ClearOutputButton" 
+                                Content="Clear" 
+                                Style="{DynamicResource MaterialDesignOutlinedButton}"
+                                Click="ClearOutput_Click"/>
+                    </StackPanel>
+                </Grid>
+            </materialDesign:Card>
+        </Grid>
+
+        <!-- Status Bar -->
+        <materialDesign:Card Grid.Row="2" Margin="16,0,16,16">
+            <Grid Margin="16,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
+                <TextBlock x:Name="StatusTextBlock" 
+                           Text="Ready to convert forms" 
+                           Style="{DynamicResource MaterialDesignBody2TextBlock}"
+                           VerticalAlignment="Center"/>
+                
+                <ProgressBar x:Name="ProgressBar" 
+                             Grid.Column="1" 
+                             Width="200" 
+                             Height="4" 
+                             Margin="16,0,0,0"
+                             Visibility="Collapsed"/>
+            </Grid>
+        </materialDesign:Card>
+    </Grid>
+</Window>

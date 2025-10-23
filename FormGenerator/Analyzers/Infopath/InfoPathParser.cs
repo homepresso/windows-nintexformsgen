@@ -219,8 +219,31 @@ namespace FormGenerator.Analyzers.Infopath
     {
         private DebugInfo debugInfo = new DebugInfo();
 
+        // Recursion protection
+        private int currentRecursionDepth = 0;
+        private const int MAX_RECURSION_DEPTH = 500;
+        private int elementCount = 0;
+        private const int MAX_ELEMENT_COUNT = 100000;
+        private DateTime parseStartTime;
+        private const int MAX_PARSE_TIME_SECONDS = 30;
+
+        private void Log(string message)
+        {
+            Console.WriteLine(message);
+            Debug.WriteLine(message);
+        }
+
         public InfoPathFormDefinition ParseXsnFile(string xsnFilePath)
         {
+            // Check if the path is actually a directory (pre-extracted folder)
+            if (Directory.Exists(xsnFilePath))
+            {
+                Console.WriteLine("========================================");
+                Console.WriteLine($"Analyzing pre-extracted folder: {xsnFilePath}");
+                Console.WriteLine("========================================\n");
+                return ParseExtractedFolder(xsnFilePath);
+            }
+
             string tempDir = Path.Combine(
                 Path.GetTempPath(),
                 Path.GetFileNameWithoutExtension(xsnFilePath) + "_" + Guid.NewGuid().ToString("N"));
@@ -245,25 +268,24 @@ namespace FormGenerator.Analyzers.Infopath
                 var viewFiles = Directory.GetFiles(tempDir, "view*.xsl");
                 if (viewFiles.Length == 0)
                 {
-                    Console.WriteLine("No view*.xsl found in XSN.");
+                    Console.WriteLine("ERROR: No view*.xsl found in XSN. The file may be corrupted or extraction may have failed.");
+                    throw new Exception("No view files found in XSN. The form could not be analyzed. This may indicate that the file is too large/complex for expand.exe to extract within the timeout period.");
                 }
-                else
+
+                Console.WriteLine($"Found {viewFiles.Length} view files");
+
+                foreach (var viewFile in viewFiles)
                 {
-                    Console.WriteLine($"Found {viewFiles.Length} view files");
+                    Console.WriteLine($"\n===== PARSING VIEW: {Path.GetFileName(viewFile)} =====");
+                    var singleView = ParseSingleView(viewFile);
 
-                    foreach (var viewFile in viewFiles)
-                    {
-                        Console.WriteLine($"\n===== PARSING VIEW: {Path.GetFileName(viewFile)} =====");
-                        var singleView = ParseSingleView(viewFile);
+                    // Extract dynamic sections from view
+                    var xslDoc = XDocument.Load(viewFile);
+                    var dynamicHandler = new DynamicSectionHandler();
+                    var dynamicSections = dynamicHandler.ExtractDynamicSections(xslDoc);
+                    formDef.DynamicSections.AddRange(dynamicSections);
 
-                        // Extract dynamic sections from view
-                        var xslDoc = XDocument.Load(viewFile);
-                        var dynamicHandler = new DynamicSectionHandler();
-                        var dynamicSections = dynamicHandler.ExtractDynamicSections(xslDoc);
-                        formDef.DynamicSections.AddRange(dynamicSections);
-
-                        formDef.Views.Add(singleView);
-                    }
+                    formDef.Views.Add(singleView);
                 }
 
                 // Extract rules and validation
@@ -317,6 +339,71 @@ namespace FormGenerator.Analyzers.Infopath
                     Console.WriteLine($"Warning: Cleanup failed: {ex.Message}");
                 }
             }
+        }
+
+        private InfoPathFormDefinition ParseExtractedFolder(string folderPath)
+        {
+            var formDef = new InfoPathFormDefinition();
+            formDef.DebugInfo = debugInfo;
+            formDef.FormName = Path.GetFileName(folderPath);
+            formDef.FileName = Path.GetFileName(folderPath);
+
+            // Extract views
+            var viewFiles = Directory.GetFiles(folderPath, "view*.xsl");
+            if (viewFiles.Length == 0)
+            {
+                Console.WriteLine("ERROR: No view*.xsl found in folder.");
+                throw new Exception("No view files found in extracted folder.");
+            }
+
+            Console.WriteLine($"Found {viewFiles.Length} view files");
+
+            foreach (var viewFile in viewFiles)
+            {
+                Console.WriteLine($"\n===== PARSING VIEW: {Path.GetFileName(viewFile)} =====");
+                var singleView = ParseSingleView(viewFile);
+
+                // Extract dynamic sections from view
+                var xslDoc = XDocument.Load(viewFile);
+                var dynamicHandler = new DynamicSectionHandler();
+                var dynamicSections = dynamicHandler.ExtractDynamicSections(xslDoc);
+                formDef.DynamicSections.AddRange(dynamicSections);
+
+                formDef.Views.Add(singleView);
+            }
+
+            // Extract rules and validation
+            Console.WriteLine("\n===== EXTRACTING RULES AND VALIDATION =====");
+            var rulesExtractor = new RulesExtractor();
+            rulesExtractor.ExtractRules(folderPath, formDef);
+            Console.WriteLine($"Extracted {formDef.Rules.Count} rules");
+            Console.WriteLine($"Extracted {formDef.Validations.Count} validation rules");
+            Console.WriteLine($"Extracted {formDef.ConditionalRules.Count} conditional rules");
+
+            // Extract title from manifest if available
+            var manifestPath = Path.Combine(folderPath, "manifest.xsf");
+            if (File.Exists(manifestPath))
+            {
+                var manifestDoc = XDocument.Load(manifestPath);
+                ExtractFormMetadataFromManifest(manifestDoc, formDef);
+            }
+
+            // Post-process form definition
+            PostProcessFormDefinition(formDef);
+
+            // Update dynamic sections with rules
+            UpdateDynamicSectionsWithRules(formDef);
+
+            // Ensure title is set
+            if (string.IsNullOrEmpty(formDef.Title))
+            {
+                formDef.Title = FormatDisplayName(formDef.FormName);
+            }
+
+            PrintDebugSummary();
+            PrintRulesSummary(formDef);
+
+            return formDef;
         }
 
         private void ExtractFormMetadataFromManifest(XDocument manifest, InfoPathFormDefinition formDef)
@@ -524,6 +611,20 @@ namespace FormGenerator.Analyzers.Infopath
 
         private bool ExtractXsn(string xsnFilePath, string tempDir)
         {
+            // Try PowerShell first - it uses Shell.Application COM (same as Windows Explorer)
+            // This works best for complex CAB files with many files
+            try
+            {
+                ExtractUsingPowerShell(xsnFilePath, tempDir);
+                Console.WriteLine("Successfully extracted using PowerShell");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("PowerShell extraction failed: " + ex.Message);
+            }
+
+            // Fall back to expand.exe (native Windows CAB extractor)
             try
             {
                 ExtractUsingExpandExe(xsnFilePath, tempDir);
@@ -535,6 +636,7 @@ namespace FormGenerator.Analyzers.Infopath
                 Console.WriteLine("Expand.exe extraction failed: " + ex.Message);
             }
 
+            // Last resort: try treating it as a ZIP file
             try
             {
                 ZipFile.ExtractToDirectory(xsnFilePath, tempDir);
@@ -544,17 +646,6 @@ namespace FormGenerator.Analyzers.Infopath
             catch (Exception ex)
             {
                 Console.WriteLine("ZIP extraction failed: " + ex.Message);
-            }
-
-            try
-            {
-                ExtractUsingPowerShell(xsnFilePath, tempDir);
-                Console.WriteLine("Successfully extracted using PowerShell");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("PowerShell extraction failed: " + ex.Message);
             }
 
             return false;
@@ -860,7 +951,20 @@ namespace FormGenerator.Analyzers.Infopath
 
             using (var process = Process.Start(startInfo))
             {
-                process.WaitForExit();
+                // Set timeout to 180 seconds (3 minutes) for complex forms with many files
+                const int timeoutMs = 180000;
+                if (!process.WaitForExit(timeoutMs))
+                {
+                    // Process timed out, kill it
+                    try
+                    {
+                        process.Kill();
+                        Console.WriteLine($"Expand.exe timed out after {timeoutMs/1000} seconds and was terminated");
+                    }
+                    catch { }
+                    throw new TimeoutException($"Expand.exe extraction timed out after {timeoutMs/1000} seconds. The XSN file may be too large or complex.");
+                }
+
                 if (process.ExitCode != 0)
                 {
                     string error = process.StandardError.ReadToEnd();
@@ -871,27 +975,39 @@ namespace FormGenerator.Analyzers.Infopath
 
         private void ExtractUsingPowerShell(string cabFile, string destFolder)
         {
-            string script = $@"
-                $shell = New-Object -ComObject Shell.Application
-                $sourceFolder = $shell.NameSpace('{cabFile}')
-                $destFolder = $shell.NameSpace('{destFolder}')
-                $destFolder.CopyHere($sourceFolder.Items(), 16)
-            ";
-
-            var startInfo = new ProcessStartInfo
+            // First try: Use makecab.exe to extract (Microsoft's CAB utility)
+            var makeCABStartInfo = new ProcessStartInfo
             {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{script}\"",
+                FileName = "extrac32.exe",
+                Arguments = $"/Y /E \"{cabFile}\" /L \"{destFolder}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
 
-            using (var process = Process.Start(startInfo))
+            using (var process = Process.Start(makeCABStartInfo))
             {
-                process.WaitForExit(10000);
-                Thread.Sleep(1000);
+                if (!process.WaitForExit(120000))
+                {
+                    try
+                    {
+                        process.Kill();
+                        Console.WriteLine("extrac32.exe timed out after 120 seconds");
+                    }
+                    catch { }
+                    throw new TimeoutException("extrac32.exe extraction timed out after 120 seconds.");
+                }
+
+                // extrac32 returns 0 on success
+                if (process.ExitCode == 0)
+                {
+                    return;
+                }
+
+                string error = process.StandardError.ReadToEnd();
+                Console.WriteLine($"extrac32.exe failed with exit code {process.ExitCode}: {error}");
+                throw new Exception($"extrac32.exe failed with exit code {process.ExitCode}: {error}");
             }
         }
     }
@@ -929,6 +1045,14 @@ namespace FormGenerator.Analyzers.Infopath
         private int expressionBoxDepth = 0;
         // Map template modes to their repeating contexts (for conditional sections)
         private Dictionary<string, RepeatingContext> templateModeToRepeatingContext = new Dictionary<string, RepeatingContext>();
+
+        // Recursion protection
+        private int currentRecursionDepth = 0;
+        private const int MAX_RECURSION_DEPTH = 500;
+        private int elementCount = 0;
+        private const int MAX_ELEMENT_COUNT = 100000;
+        private DateTime parseStartTime;
+        private const int MAX_PARSE_TIME_SECONDS = 30;
 
         public class LabelInfo
         {
@@ -987,10 +1111,23 @@ namespace FormGenerator.Analyzers.Infopath
             Debug.WriteLine($"========================================\n");
 
             ResetParserState();
+            parseStartTime = DateTime.Now;
+            currentRecursionDepth = 0;
+            elementCount = 0;
             XDocument doc = XDocument.Load(viewFile);
 
             // Start the recursive processing
-            ProcessElement(doc.Root);
+            try
+            {
+                ProcessElement(doc.Root);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR during view parsing: {ex.Message}");
+                Console.WriteLine($"Elements processed: {elementCount}");
+                Console.WriteLine($"Max recursion depth reached: {currentRecursionDepth}");
+                throw;
+            }
 
             Debug.WriteLine($"\n========================================");
             Debug.WriteLine($"PARSE COMPLETE - Total Controls Found: {allControls.Count}");
@@ -1126,8 +1263,49 @@ namespace FormGenerator.Analyzers.Infopath
         {
             if (elem == null) return;
 
-            debugInfo.TotalElementsExamined++;
-            var elemName = elem.Name.LocalName.ToLower();
+            // Check recursion depth limit
+            currentRecursionDepth++;
+            if (currentRecursionDepth > MAX_RECURSION_DEPTH)
+            {
+                Console.WriteLine($"WARNING: Max recursion depth ({MAX_RECURSION_DEPTH}) exceeded at element: {elem.Name.LocalName}");
+                currentRecursionDepth--;
+                return;
+            }
+
+            try
+            {
+                // Check element count limit
+                elementCount++;
+                if (elementCount > MAX_ELEMENT_COUNT)
+                {
+                    throw new Exception($"Parsing terminated: Element count exceeded {MAX_ELEMENT_COUNT}. This form may be too complex to analyze.");
+                }
+
+                // Check timeout
+                if ((DateTime.Now - parseStartTime).TotalSeconds > MAX_PARSE_TIME_SECONDS)
+                {
+                    throw new TimeoutException($"Parsing terminated: Exceeded {MAX_PARSE_TIME_SECONDS} seconds timeout. This form may be too complex or contain circular references.");
+                }
+
+                // Log progress every 1000 elements
+                if (elementCount % 1000 == 0)
+                {
+                    Console.WriteLine($"Progress: {elementCount} elements processed, depth: {currentRecursionDepth}, controls found: {allControls.Count}");
+                }
+
+                debugInfo.TotalElementsExamined++;
+                var elemName = elem.Name.LocalName.ToLower();
+
+                ProcessElementInternal(elem, elemName);
+            }
+            finally
+            {
+                currentRecursionDepth--;
+            }
+        }
+
+        private void ProcessElementInternal(XElement elem, string elemName)
+        {
 
             // Track element types
             if (!debugInfo.ElementTypeCounts.ContainsKey(elemName))

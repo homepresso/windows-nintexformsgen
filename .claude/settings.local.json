@@ -18,7 +18,12 @@
       "Read(//c/**)",
       "Bash(dir \"C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\bin\\Debug\\net8.0-windows\")",
       "Bash(dir:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Read(//c//**)",
+      "Bash(awk:*)",
+      "Bash(timeout:*)",
+      "Bash(Select-String \"Build succeeded|Build FAILED|error\" -Context 0,2)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
