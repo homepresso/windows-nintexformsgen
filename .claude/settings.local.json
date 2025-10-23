@@ -23,7 +23,8 @@
       "Bash(awk:*)",
       "Bash(timeout:*)",
       "Bash(Select-String \"Build succeeded|Build FAILED|error\" -Context 0,2)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(Select-String \"error\" -Context 0,1)"
     ],
     "deny": [],
     "ask": []

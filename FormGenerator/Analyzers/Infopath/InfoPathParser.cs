@@ -4006,7 +4006,8 @@ namespace FormGenerator.Analyzers.Infopath
                 return true;
 
             var sectionKeywords = new[] { "List", "Items", "Details", "Information", "Data" };
-            if (sectionKeywords.Any(k => text.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            var textUpper = text.ToUpperInvariant();
+            if (sectionKeywords.Any(k => textUpper.Contains(k.ToUpperInvariant())))
                 return true;
 
             return true;
@@ -5496,6 +5497,18 @@ namespace FormGenerator.Analyzers.Infopath
         private bool IsLabelElement(XElement elem)
         {
             var elemName = elem.Name.LocalName.ToLower();
+
+            // Check for InfoPath's xdlabel spans (most common in InfoPath forms)
+            if (elemName == "span")
+            {
+                var classAttr = elem.Attribute("class")?.Value ?? "";
+                if (classAttr.Contains("xdlabel"))
+                {
+                    // Make sure it has text content
+                    var text = GetDirectTextContent(elem).Trim();
+                    return !string.IsNullOrWhiteSpace(text) && text.Length > 1;
+                }
+            }
 
             // Check for common label elements
             if (elemName == "strong" || elemName == "font" || elemName == "label" ||

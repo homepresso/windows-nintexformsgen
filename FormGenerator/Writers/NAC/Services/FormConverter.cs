@@ -323,8 +323,8 @@ namespace FormGenerator.Writers.NAC.Services
         {
             var name = (item.DisplayName ?? item.ColumnName ?? string.Empty).Trim();
             if (string.IsNullOrEmpty(name)) return true;
-            if (name.Contains("FILTER", StringComparison.OrdinalIgnoreCase)) return true;
-            if (name.StartsWith("string(\"", StringComparison.OrdinalIgnoreCase)) return true;
+            if (name.ToUpperInvariant().Contains("FILTER")) return true;
+            if (name.ToUpperInvariant().StartsWith("STRING(\"")) return true;
             return false;
         }
 
@@ -1476,8 +1476,8 @@ namespace FormGenerator.Writers.NAC.Services
             {
                             if (sectionControl.Type == "Label" && string.IsNullOrEmpty(sectionControl.Binding))
                                 continue;
-                            
-                            if (sectionControl.Name.Contains("FILTER", StringComparison.OrdinalIgnoreCase))
+
+                            if (sectionControl.Name.ToUpperInvariant().Contains("FILTER"))
                                 continue;
                                 
                 if (sectionControl.Type == "span")
@@ -1578,7 +1578,7 @@ namespace FormGenerator.Writers.NAC.Services
                     continue;
 
                 // KEY FIX: Filter out FILTER controls (from summary views)
-                if (sectionControl.Name.Contains("FILTER", StringComparison.OrdinalIgnoreCase))
+                if (sectionControl.Name.ToUpperInvariant().Contains("FILTER"))
                     continue;
 
                 // Filter out span controls
@@ -1935,12 +1935,12 @@ namespace FormGenerator.Writers.NAC.Services
 
         private string GenerateId()
         {
-            return $"_{Guid.NewGuid().ToString("N")[..8]}";
+            return $"_{Guid.NewGuid().ToString("N").Substring(0, 8)}";
         }
 
         private string GenerateControlId()
         {
-            return $"_{Guid.NewGuid().ToString("N")[..8]}";
+            return $"_{Guid.NewGuid().ToString("N").Substring(0, 8)}";
         }
 
         private string GenerateVariableId(string controlName)
@@ -1969,7 +1969,7 @@ namespace FormGenerator.Writers.NAC.Services
             }
             
             _usedVariableNames.Add(variableName);
-            var suffix = Guid.NewGuid().ToString("N")[..8];
+            var suffix = Guid.NewGuid().ToString("N").Substring(0, 8);
             return $"{variableName}_{suffix}";
         }
 

@@ -42,7 +42,7 @@ namespace FormGenerator.Services
 
             public override int GetHashCode()
             {
-                return HashCode.Combine(NormalizedLabel, Type);
+                return NetFrameworkCompatibility.CombineHashCodes(NormalizedLabel, Type);
             }
         }
 

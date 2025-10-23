@@ -865,7 +865,7 @@ namespace FormGenerator.Views
                                 }
 
                                 // Write directly (no wrapping) - this is what NAC Example does
-                                await File.WriteAllTextAsync(outputFileName, formJson);
+                                await NetFrameworkCompatibility.WriteAllTextAsync(outputFileName, formJson);
 
                                 _mainWindow.NintexGenerationLog.Text += $"    ✅ Saved to: {Path.GetFileName(outputFileName)}\n";
                                 successCount++;
@@ -921,16 +921,40 @@ namespace FormGenerator.Views
             {
                 _mainWindow.UpdateStatus("Testing K2 connection...");
                 _mainWindow.K2GenerationLog.Text = "Testing connection to K2 server...\n";
-                _mainWindow.K2GenerationLog.Text += $"Server: {_mainWindow.K2ServerTextBox.Text}\n";
+
+                // Clean the server name (remove protocol prefix if present)
+                var serverName = _mainWindow.K2ServerTextBox.Text.Trim();
+                serverName = serverName.Replace("https://", "").Replace("http://", "");
+
+                _mainWindow.K2GenerationLog.Text += $"Server: {serverName}\n";
                 _mainWindow.K2GenerationLog.Text += $"Port: {_mainWindow.K2PortTextBox.Text}\n";
                 _mainWindow.K2GenerationLog.Text += $"Username: {_mainWindow.K2UsernameTextBox.Text}\n\n";
 
-                // Simulate connection test
-                await Task.Delay(1000);
+                // Actually test the connection
+                uint port = 5555;
+                if (!string.IsNullOrEmpty(_mainWindow.K2PortTextBox.Text))
+                {
+                    uint.TryParse(_mainWindow.K2PortTextBox.Text, out port);
+                }
 
-                _mainWindow.K2GenerationLog.Text += "✅ Connection successful!\n";
-                _mainWindow.K2GenerationLog.Text += "K2 Server Version: 5.5\n";
-                _mainWindow.K2GenerationLog.Text += "SmartForms Version: 5.5.0.0\n";
+                await Task.Run(() =>
+                {
+                    var connectionManager = new K2SmartObjectGenerator.Utilities.ServerConnectionManager(serverName, port);
+                    try
+                    {
+                        connectionManager.Connect();
+
+                        _mainWindow.Dispatcher.Invoke(() =>
+                        {
+                            _mainWindow.K2GenerationLog.Text += "✅ Connection successful!\n";
+                            _mainWindow.K2GenerationLog.Text += "K2 Server is reachable\n";
+                        });
+                    }
+                    finally
+                    {
+                        connectionManager.Disconnect();
+                    }
+                });
 
                 _mainWindow.UpdateStatus("K2 connection test successful", MessageSeverity.Info);
 
@@ -945,9 +969,13 @@ namespace FormGenerator.Views
             catch (Exception ex)
             {
                 _mainWindow.K2GenerationLog.Text += $"❌ Connection failed: {ex.Message}\n";
+                if (ex.InnerException != null)
+                {
+                    _mainWindow.K2GenerationLog.Text += $"   Details: {ex.InnerException.Message}\n";
+                }
                 _mainWindow.UpdateStatus("K2 connection test failed", MessageSeverity.Error);
 
-                MessageBox.Show($"Connection failed:\n{ex.Message}",
+                MessageBox.Show($"Connection failed:\n{ex.Message}\n\nPlease verify:\n- Server name is correct (without http:// or https://)\n- Port is correct (typically 5555)\n- Network connectivity to server\n- Firewall settings",
                                "Connection Error",
                                MessageBoxButton.OK,
                                MessageBoxImage.Error);
@@ -1001,29 +1029,107 @@ namespace FormGenerator.Views
 
         public async Task GenerateK2()
         {
-            await Task.CompletedTask; // Suppress async warning
+            try
+            {
+                _mainWindow.GenerateK2Button.IsEnabled = false;
+                _mainWindow.UpdateStatus("Generating K2 SmartForms...");
+                _mainWindow.K2GenerationLog.Text = "Starting K2 SmartForms generation...\n\n";
 
-            _mainWindow.K2GenerationLog.Text = "K2 SmartForms Generation - Not Available\n\n";
-            _mainWindow.K2GenerationLog.Text += "K2 generation is currently not available in this version.\n\n";
-            _mainWindow.K2GenerationLog.Text += "REASON:\n";
-            _mainWindow.K2GenerationLog.Text += "The K2 SmartForms SDK requires .NET Framework 4.8 and uses APIs that are\n";
-            _mainWindow.K2GenerationLog.Text += "incompatible with .NET 8 (System.AppDomain.get_DomainManager, etc.).\n\n";
-            _mainWindow.K2GenerationLog.Text += "ALTERNATIVES:\n";
-            _mainWindow.K2GenerationLog.Text += "1. Use the SQL generation feature to create database structures\n";
-            _mainWindow.K2GenerationLog.Text += "2. Use the Nintex Forms NAC export for modern Nintex platform\n";
-            _mainWindow.K2GenerationLog.Text += "3. Manually recreate forms in K2 SmartForms Designer using the JSON output\n\n";
-            _mainWindow.K2GenerationLog.Text += "The analyzed form structure is available in the JSON Output tab.\n";
+                // Check analysis results
+                if (_mainWindow._allAnalysisResults == null || !_mainWindow._allAnalysisResults.Any())
+                {
+                    MessageBox.Show("Please analyze forms first before generating K2 forms.",
+                                   "No Analysis Results",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
 
-            MessageBox.Show(
-                "K2 SmartForms generation is not available in this version.\n\n" +
-                "The K2 SDK requires .NET Framework 4.8 and is incompatible with .NET 8.\n\n" +
-                "Please use:\n" +
-                "• SQL Generation for database structures\n" +
-                "• Nintex NAC Export for modern Nintex platform\n" +
-                "• JSON Output for manual form recreation",
-                "K2 Generation Not Available",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                _mainWindow.K2GenerationLog.Text += $"Target Folder: {_mainWindow.K2FolderTextBox.Text}\n\n";
+
+                // Process each form using K2GenerationService
+                var k2Service = new Services.K2GenerationService();
+
+                // Wire up progress events
+                k2Service.StatusUpdate += (sender, message) =>
+                {
+                    _mainWindow.Dispatcher.Invoke(() =>
+                    {
+                        _mainWindow.K2GenerationLog.Text += $"{message}\n";
+                    });
+                };
+
+                k2Service.ProgressUpdate += (sender, progress) =>
+                {
+                    _mainWindow.Dispatcher.Invoke(() =>
+                    {
+                        _mainWindow.K2GenerationLog.Text += $"[{progress.Stage}] {progress.PercentComplete}%\n";
+                    });
+                };
+
+                // Clean the server name (remove protocol prefix if present)
+                var serverName = _mainWindow.K2ServerTextBox.Text.Trim();
+                serverName = serverName.Replace("https://", "").Replace("http://", "");
+
+                // Parse port
+                uint port = 5555;
+                if (!string.IsNullOrEmpty(_mainWindow.K2PortTextBox.Text))
+                {
+                    uint.TryParse(_mainWindow.K2PortTextBox.Text, out port);
+                }
+
+                // Generate all forms in a single request (K2GenerationService processes them together)
+                var request = new Services.K2GenerationRequest
+                {
+                    ServerName = serverName,
+                    ServerPort = port,
+                    FormTheme = "Default", // Default theme
+                    FormDefinitions = _mainWindow._allAnalysisResults,
+                    TargetFolder = _mainWindow.K2FolderTextBox.Text,
+                    UseTimestamp = false,
+                    ForceCleanup = false // Don't cleanup by default during generation
+                };
+
+                // Generate K2 artifacts
+                var result = await k2Service.GenerateK2ArtifactsAsync(request);
+
+                if (result.Success)
+                {
+                    _mainWindow.K2GenerationLog.Text += $"\n✅ Generation completed successfully!\n";
+                    _mainWindow.K2GenerationLog.Text += $"   SmartObjects: {result.SmartObjectsCreated}\n";
+                    _mainWindow.K2GenerationLog.Text += $"   Views: {result.ViewsCreated}\n";
+                    _mainWindow.K2GenerationLog.Text += $"   Forms: {result.FormsCreated}\n";
+
+                    // Build proper K2 form URL
+                    var cleanServerName = serverName; // Already cleaned above
+                    var formPath = _mainWindow.K2FolderTextBox.Text.TrimStart('/');
+                    var formUrl = $"https://{cleanServerName}/Runtime/Runtime/Form/{result.FormName}";
+
+                    _mainWindow.K2GenerationLog.Text += $"\nK2 Form URL: {formUrl}\n";
+                    _mainWindow.K2GenerationLog.Text += $"Category Path: {formPath}\n";
+                }
+                else
+                {
+                    _mainWindow.K2GenerationLog.Text += $"\n❌ Generation failed: {result.Message}\n";
+                    if (!string.IsNullOrEmpty(result.ErrorDetails))
+                        _mainWindow.K2GenerationLog.Text += $"   Details: {result.ErrorDetails}\n";
+                }
+
+                _mainWindow.K2GenerationLog.Text += "\n✅ K2 SmartForms generated successfully!\n";
+                _mainWindow.UpdateStatus("K2 SmartForms generated successfully", MessageSeverity.Info);
+                _mainWindow.DeployK2Button.IsEnabled = true;
+                _mainWindow.ExportK2PackageButton.IsEnabled = true;
+            }
+            catch (Exception ex)
+            {
+                _mainWindow.K2GenerationLog.Text += $"\n❌ Error: {ex.Message}\n";
+                _mainWindow.K2GenerationLog.Text += $"Stack trace: {ex.StackTrace}\n";
+                _mainWindow.UpdateStatus($"K2 generation failed: {ex.Message}", MessageSeverity.Error);
+            }
+            finally
+            {
+                _mainWindow.GenerateK2Button.IsEnabled = true;
+            }
         }
 
         public async Task DeployK2()
@@ -1031,7 +1137,6 @@ namespace FormGenerator.Views
             await Task.CompletedTask; // Suppress async warning
 
             // Note: K2 forms are automatically deployed during generation via K2GenerationService
-            // This button is kept for UI consistency but generation already handles deployment
             MessageBox.Show("K2 SmartForms are automatically deployed to the server during generation.\n\n" +
                            $"The forms are already available at:\n{_mainWindow.K2ServerTextBox.Text}/Forms/{_mainWindow.K2FolderTextBox.Text}\n\n" +
                            "You can access them through K2 SmartForms Designer or use the Export Package button to download them.",
@@ -1072,7 +1177,7 @@ namespace FormGenerator.Views
                     }
 
                     // Create a mock file
-                    await File.WriteAllTextAsync(dialog.FileName, "K2 Package Content");
+                    await NetFrameworkCompatibility.WriteAllTextAsync(dialog.FileName, "K2 Package Content");
 
                     _mainWindow.K2GenerationLog.Text += "\n✅ Package exported successfully!\n";
                     _mainWindow.UpdateStatus($"K2 package exported to: {dialog.FileName}", MessageSeverity.Info);

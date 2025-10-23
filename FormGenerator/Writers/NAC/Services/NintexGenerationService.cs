@@ -49,8 +49,10 @@ namespace FormGenerator.Writers.NAC.Services
             int completed = 0;
             int totalForms = analyses.Count;
 
-            foreach (var (fileName, analysis) in analyses)
+            foreach (var kvp in analyses)
             {
+                var fileName = kvp.Key;
+                var analysis = kvp.Value;
                 try
                 {
                     OnProgressUpdated($"Processing {fileName} ({completed + 1}/{totalForms})...");
@@ -150,8 +152,11 @@ namespace FormGenerator.Writers.NAC.Services
 
                 using (var archive = ZipFile.Open(outputPath, ZipArchiveMode.Create))
                 {
-                    foreach (var (formName, formResult) in result.FormResults)
+                    foreach (var formKvp in result.FormResults)
                     {
+                        var formName = formKvp.Key;
+                        var formResult = formKvp.Value;
+
                         if (!formResult.Success)
                             continue;
 
@@ -168,8 +173,11 @@ namespace FormGenerator.Writers.NAC.Services
                         // Add artifacts
                         if (formResult.Artifacts != null)
                         {
-                            foreach (var (artifactName, artifactContent) in formResult.Artifacts)
+                            foreach (var artifactKvp in formResult.Artifacts)
                             {
+                                var artifactName = artifactKvp.Key;
+                                var artifactContent = artifactKvp.Value;
+
                                 if (string.IsNullOrEmpty(artifactContent))
                                     continue;
 

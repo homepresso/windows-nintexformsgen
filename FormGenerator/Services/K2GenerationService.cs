@@ -232,7 +232,9 @@ namespace FormGenerator.Services
                     JObject formData = JObject.Parse(jsonContent);
                     string formName = formData.Properties().First().Name.Replace(" ", "_");
                     string formDisplayName = formData.Properties().First().Name;
-                    string targetCategory = $"{_config.Form.TargetFolder}\\{formDisplayName}";
+                    // Normalize path to use forward slashes for K2 category paths
+                    string targetFolder = _config.Form.TargetFolder.Replace("\\", "/");
+                    string targetCategory = $"{targetFolder}/{formDisplayName}";
 
                     OnStatusUpdate($"Target category: {targetCategory}");
                     OnStatusUpdate($"[DIAG] Form Name: {formName}");
@@ -281,7 +283,7 @@ namespace FormGenerator.Services
                     OnStatusUpdate("[DIAG] Starting Form generation...");
                     OnStatusUpdate($"[DIAG] Passing {viewGenerator.ViewTitles.Count} view titles to form generator");
 
-                    var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, request.FormTheme, smoGenerator, _config);
+                    var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, request.FormTheme, smoGenerator);
 
                     // Form name was already extracted earlier for category creation
                     formGenerator.GenerateFormsFromJson(jsonContent, viewGenerator.ViewTitles);
@@ -443,7 +445,7 @@ namespace FormGenerator.Services
 
                 // Clean in reverse dependency order: Forms → Views → SmartObjects
                 var smoGenerator = new SmartObjectGenerator(_connectionManager, _config);
-                var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, _config.Form.Theme, smoGenerator, _config);
+                var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, _config.Form.Theme, smoGenerator);
                 var viewGenerator = new ViewGenerator(_connectionManager, smoGenerator.FieldMappings, smoGenerator, _config);
 
                 formGenerator.TryCleanupExistingForms(jsonContent);

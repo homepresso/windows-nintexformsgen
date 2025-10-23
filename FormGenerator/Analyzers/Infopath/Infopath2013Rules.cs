@@ -398,8 +398,9 @@ namespace FormGenerator.Analyzers.Infopath
                 "when Remove"
             };
 
+            var ruleNameUpper = ruleName.ToUpperInvariant();
             return buttonEventPatterns.Any(pattern =>
-                ruleName.Contains(pattern, StringComparison.OrdinalIgnoreCase));
+                ruleNameUpper.Contains(pattern.ToUpperInvariant()));
         }
 
         private bool IsRepeatingSectionButtonEvent(string friendlyName, string sourceName)
@@ -417,8 +418,9 @@ namespace FormGenerator.Analyzers.Infopath
                 "Table_CTRL"
             };
 
+            var sourceNameUpper = sourceName.ToUpperInvariant();
             return repeatingSectionPatterns.Any(pattern =>
-                sourceName.Contains(pattern, StringComparison.OrdinalIgnoreCase)) &&
+                sourceNameUpper.Contains(pattern.ToUpperInvariant())) &&
                 IsButtonEvent(friendlyName);
         }
 
