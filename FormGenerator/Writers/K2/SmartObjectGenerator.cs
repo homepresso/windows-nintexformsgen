@@ -108,7 +108,7 @@ namespace K2SmartObjectGenerator
                 // Create main SmartObject and track its fields
                 if (_config.Logging.ShowProgress)
                     Console.WriteLine($"\nCreating main SmartObject: {formName}");
-                SmartObjectDefinition mainSmo = CreateMainSmartObject(formName, mainFields, formDisplayName, targetFolder);
+                SmartObjectDefinition mainSmo = CreateMainSmartObject(formName, mainFields, formName, targetFolder);
                 publishSmo.SmartObjects.Add(mainSmo);
 
                 // Create child SmartObjects for repeating sections
@@ -119,7 +119,7 @@ namespace K2SmartObjectGenerator
                     string childSmoName = $"{formName}_{sectionName}";
                     if (_config.Logging.ShowProgress)
                         Console.WriteLine($"Creating child SmartObject: {childSmoName}");
-                    SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, section.Value, formName, formDisplayName, targetFolder);
+                    SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, section.Value, formName, formName, targetFolder);
                     publishSmo.SmartObjects.Add(childSmo);
                 }
 
@@ -157,7 +157,7 @@ namespace K2SmartObjectGenerator
                         if (_config.Logging.VerboseLogging)
                             Console.WriteLine($"Creating association: {formName} -> {childSmoName}");
                         SmartObjectDefinition association = await CreateAssociationAsync(formName, childSmoName,
-                            SourceCode.SmartObjects.Authoring.AssociationType.OneToMany, formDisplayName, targetFolder);
+                            SourceCode.SmartObjects.Authoring.AssociationType.OneToMany, formName, targetFolder);
                         publishSmo.SmartObjects.Add(association);
                     }
 
@@ -206,7 +206,7 @@ namespace K2SmartObjectGenerator
                 Console.WriteLine($"Creating consolidated lookup SmartObject: {consolidatedLookupName}");
 
             SmartObjectDefinitionsPublish publishSmo = new SmartObjectDefinitionsPublish();
-            SmartObjectDefinition lookupSmo = CreateConsolidatedLookupSmartObject(consolidatedLookupName, formDisplayName, targetFolder);
+            SmartObjectDefinition lookupSmo = CreateConsolidatedLookupSmartObject(consolidatedLookupName, formName, targetFolder);
             publishSmo.SmartObjects.Add(lookupSmo);
 
             // Store the GUID for later reference

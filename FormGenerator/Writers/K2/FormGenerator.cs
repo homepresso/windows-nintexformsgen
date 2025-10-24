@@ -87,8 +87,8 @@ namespace K2SmartObjectGenerator
                 targetFolder = configTargetFolder;
             }
 
-            // STRUCTURE: {TargetFolder}\{formName} (using sanitized name to match SmartObjects)
-            string formCategory = $"{targetFolder}\\{baseFormName}";
+            // STRUCTURE: {TargetFolder}\{formName}\Forms (consistent with SmartObjects and Views)
+            string formCategory = $"{targetFolder}\\{baseFormName}\\Forms";
 
             Console.WriteLine($"  Form category: {formCategory}");
 
