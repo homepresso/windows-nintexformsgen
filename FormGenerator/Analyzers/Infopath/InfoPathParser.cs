@@ -831,6 +831,9 @@ namespace FormGenerator.Analyzers.Infopath
             labelAssociator.AssociateLabelControls(controls);
             labelHandler.ProcessMultiLineLabels(controls);
 
+            // Merge standalone labels with their associated controls
+            MergeLabelControls(controls);
+
             viewDef.Sections = sectionParser.GetSections();
             viewDef.Controls = controls;
             return viewDef;
@@ -1324,6 +1327,45 @@ namespace FormGenerator.Analyzers.Infopath
                 // Clean up process resources
                 process?.Dispose();
             }
+        }
+
+        private void MergeLabelControls(List<ControlDefinition> controls)
+        {
+            Debug.WriteLine($"[MERGE LABELS] Starting label merge process. Total controls: {controls.Count}");
+
+            var labelsToRemove = new List<ControlDefinition>();
+
+            foreach (var label in controls.Where(c => c.Type == "Label" &&
+                                                     !c.Properties.ContainsKey("IsTableHeader")))
+            {
+                // Find the next control after this label
+                var nextControl = controls
+                    .Where(c => c.Type != "Label" &&
+                               c.DocIndex > label.DocIndex &&
+                               string.IsNullOrEmpty(c.Label))
+                    .OrderBy(c => c.DocIndex)
+                    .FirstOrDefault();
+
+                if (nextControl != null)
+                {
+                    // Check proximity (should be close together)
+                    if (nextControl.DocIndex - label.DocIndex <= 3)
+                    {
+                        Debug.WriteLine($"[MERGE LABELS] Merging label '{label.Label}' with control '{nextControl.Name}'");
+                        nextControl.Label = label.Label;
+                        labelsToRemove.Add(label);
+                    }
+                }
+            }
+
+            // Remove merged labels
+            foreach (var label in labelsToRemove)
+            {
+                Debug.WriteLine($"[MERGE LABELS] Removing merged label: {label.Name}");
+                controls.Remove(label);
+            }
+
+            Debug.WriteLine($"[MERGE LABELS] Merge complete. Removed {labelsToRemove.Count} standalone labels. Remaining controls: {controls.Count}");
         }
     }
 
@@ -3590,6 +3632,9 @@ namespace FormGenerator.Analyzers.Infopath
             // NOW process table header labels within the repeating context
             ProcessTableHeaderLabels(elem, headerLabels);
 
+            // IMPORTANT: Store headers for ProcessTableRow to use when applying labels to controls
+            currentTableHeaders = headerLabels;
+
             // Process the repeating rows
             ProcessTableStructure(elem);
 
@@ -3728,7 +3773,8 @@ namespace FormGenerator.Analyzers.Infopath
 
                 foreach (var cell in cells)
                 {
-                    var labelText = ExtractCellText(cell).Trim();
+                    // Use ExtractLabelText instead of ExtractCellText to handle nested formatting
+                    var labelText = ExtractLabelText(cell).Trim();
                     if (!string.IsNullOrWhiteSpace(labelText))
                     {
                         headerLabels.Add(labelText);
@@ -4011,6 +4057,10 @@ namespace FormGenerator.Analyzers.Infopath
         {
             var controls = new List<ControlDefinition>();
 
+            // FIRST: Look for a label element in the cell (inline label)
+            var inlineLabel = ExtractInlineLabelFromCell(cellElem);
+            var effectiveLabel = !string.IsNullOrEmpty(inlineLabel) ? inlineLabel : headerLabel;
+
             // Look for all controls in the cell
             var controlElements = cellElem.Descendants()
                 .Where(e =>
@@ -4028,11 +4078,49 @@ namespace FormGenerator.Analyzers.Infopath
                 var control = TryExtractControl(elem);
                 if (control != null)
                 {
+                    // Apply the effective label
+                    if (string.IsNullOrEmpty(control.Label) && !string.IsNullOrEmpty(effectiveLabel))
+                    {
+                        control.Label = effectiveLabel;
+                        Debug.WriteLine($"      Applied label to control: {control.Name} -> {effectiveLabel}");
+                    }
+
                     controls.Add(control);
                 }
             }
 
             return controls;
+        }
+
+        private string ExtractInlineLabelFromCell(XElement cellElem)
+        {
+            // Look for standalone label elements (font, strong, div without controls)
+            var labelCandidates = cellElem.Descendants()
+                .Where(e => (e.Name.LocalName == "font" ||
+                            e.Name.LocalName == "strong" ||
+                            e.Name.LocalName == "div" ||
+                            e.Name.LocalName == "span") &&
+                            !e.Descendants().Any(d =>
+                                d.Name.LocalName == "input" ||
+                                d.Name.LocalName == "select" ||
+                                d.Name.LocalName == "textarea" ||
+                                !string.IsNullOrEmpty(GetAttributeValue(d, "binding"))));
+
+            foreach (var candidate in labelCandidates)
+            {
+                var text = ExtractLabelText(candidate);
+                if (!string.IsNullOrWhiteSpace(text) && text.Length > 2)
+                {
+                    // Don't return text that ends with colon if followed by a control (it's likely a standalone label)
+                    // But return text that's descriptive
+                    if (!text.EndsWith(":") || text.Length > 3)
+                    {
+                        return text;
+                    }
+                }
+            }
+
+            return null;
         }
 
         private bool IsDatePickerSubComponent(XElement elem)
@@ -4156,56 +4244,121 @@ namespace FormGenerator.Analyzers.Infopath
         {
             var labels = new List<string>();
 
-            // Look for the header tbody (with class xdTableHeader)
-            var headerBody = tableElem.Descendants()
-                .FirstOrDefault(e => e.Name.LocalName == "tbody" &&
-                                    e.Attribute("class")?.Value?.Contains("xdTableHeader") == true);
+            // Strategy 1: Look for thead or tbody with xdTableHeader class (current logic)
+            var headerSection = tableElem.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "thead" ||
+                                    (e.Name.LocalName == "tbody" &&
+                                     e.Attribute("class")?.Value?.Contains("xdTableHeader") == true));
 
-            if (headerBody != null)
+            // Strategy 2: If not found, look for first <tr> in table
+            if (headerSection == null)
             {
-                // Get the first row in the header
-                var headerRow = headerBody.Elements()
-                    .FirstOrDefault(e => e.Name.LocalName == "tr");
+                var tbody = tableElem.Elements()
+                    .FirstOrDefault(e => e.Name.LocalName == "tbody");
 
-                if (headerRow != null)
+                if (tbody != null)
                 {
-                    // Get all td/th elements
-                    var headerCells = headerRow.Elements()
-                        .Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th");
+                    // Check if first row looks like a header (has font/strong elements)
+                    var firstRow = tbody.Elements()
+                        .FirstOrDefault(e => e.Name.LocalName == "tr");
 
-                    foreach (var cell in headerCells)
+                    if (firstRow != null && IsHeaderRow(firstRow))
                     {
-                        // Extract the text from the cell
-                        var labelText = ExtractCellText(cell).Trim();
-                        labels.Add(labelText);
-
-                        Debug.WriteLine($"    Header label: {labelText}");
+                        Debug.WriteLine($"    Found header row by style detection");
+                        return ExtractLabelsFromRow(firstRow);
                     }
                 }
             }
-            else
+
+            // Strategy 3: Look for xsl:for-each siblings - the row before it is often the header
+            var forEachElem = tableElem.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "for-each");
+
+            if (forEachElem != null && headerSection == null)
             {
-                // Alternative: Look for thead element
-                var thead = tableElem.Descendants()
-                    .FirstOrDefault(e => e.Name.LocalName == "thead");
+                // Find the tbody that contains the for-each
+                var forEachTbody = forEachElem.Ancestors()
+                    .FirstOrDefault(a => a.Name.LocalName == "tbody");
 
-                if (thead != null)
+                if (forEachTbody != null)
                 {
-                    var headerRow = thead.Elements()
-                        .FirstOrDefault(e => e.Name.LocalName == "tr");
+                    // Look for a sibling tbody before this one (header section)
+                    var previousTbody = forEachTbody.ElementsBeforeSelf()
+                        .LastOrDefault(e => e.Name.LocalName == "tbody");
 
-                    if (headerRow != null)
+                    if (previousTbody != null)
                     {
-                        var headerCells = headerRow.Elements()
-                            .Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th");
+                        var headerRow = previousTbody.Elements()
+                            .FirstOrDefault(e => e.Name.LocalName == "tr");
 
-                        foreach (var cell in headerCells)
+                        if (headerRow != null)
                         {
-                            var labelText = ExtractCellText(cell).Trim();
-                            labels.Add(labelText);
+                            Debug.WriteLine($"    Found header row before xsl:for-each");
+                            return ExtractLabelsFromRow(headerRow);
                         }
                     }
                 }
+            }
+
+            // Extract labels from the identified header section
+            if (headerSection != null)
+            {
+                var headerRow = headerSection.Name.LocalName == "tr"
+                    ? headerSection
+                    : headerSection.Elements().FirstOrDefault(e => e.Name.LocalName == "tr");
+
+                if (headerRow != null)
+                {
+                    Debug.WriteLine($"    Found header row in thead/tbody");
+                    return ExtractLabelsFromRow(headerRow);
+                }
+            }
+
+            return labels;
+        }
+
+        private bool IsHeaderRow(XElement row)
+        {
+            // Check if row has characteristics of a header row
+            var cells = row.Elements().Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th");
+
+            foreach (var cell in cells)
+            {
+                // Header rows often have font/strong/bold styling
+                if (cell.Descendants().Any(d => d.Name.LocalName == "strong" ||
+                                                d.Name.LocalName == "b" ||
+                                                (d.Attribute("style")?.Value?.Contains("font-weight:bold") == true) ||
+                                                (d.Attribute("style")?.Value?.Contains("font-weight: bold") == true)))
+                {
+                    return true;
+                }
+
+                // Check for font size attributes (headers often have larger fonts)
+                var fontElem = cell.Descendants().FirstOrDefault(d => d.Name.LocalName == "font");
+                if (fontElem != null)
+                {
+                    var size = fontElem.Attribute("size")?.Value;
+                    if (!string.IsNullOrEmpty(size) && (size == "3" || size == "4" || size == "+1" || size == "+2"))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private List<string> ExtractLabelsFromRow(XElement row)
+        {
+            var labels = new List<string>();
+            var cells = row.Elements().Where(e => e.Name.LocalName == "td" || e.Name.LocalName == "th");
+
+            foreach (var cell in cells)
+            {
+                // Use ExtractLabelText instead of ExtractCellText to handle nested formatting
+                var labelText = ExtractLabelText(cell);
+                labels.Add(labelText?.Trim() ?? "");
+                Debug.WriteLine($"    Header label: {labelText?.Trim() ?? "(empty)"}");
             }
 
             return labels;
@@ -4652,7 +4805,7 @@ namespace FormGenerator.Analyzers.Infopath
                 return null;
             }
 
-            // Skip font elements that contain controls - handled by ProcessFontElement
+            // Handle font elements that contain controls - process children instead of skipping
             if (elemName == "font")
             {
                 var hasControls = elem.Descendants().Any(d =>
@@ -4661,8 +4814,15 @@ namespace FormGenerator.Analyzers.Infopath
 
                 if (hasControls)
                 {
-                    Debug.WriteLine($"[TRY EXTRACT] Skipping font element with child controls");
-                    return null;
+                    Debug.WriteLine($"[TRY EXTRACT] Font element has controls, processing children");
+
+                    // Process children directly to ensure controls aren't missed
+                    foreach (var child in elem.Elements())
+                    {
+                        ProcessElement(child);
+                    }
+
+                    return null; // Don't create control for the font itself
                 }
             }
 
@@ -4857,6 +5017,30 @@ namespace FormGenerator.Analyzers.Infopath
                 }
 
                 Debug.WriteLine($"[TRY EXTRACT] Final control: Name={control.Name}, Type={control.Type}, Binding={control.Binding}, Grid={control.GridPosition}");
+            }
+
+            // Fallback: If we have a CtrlId but didn't create a control, create a generic one
+            if (control == null && !string.IsNullOrEmpty(ctrlId))
+            {
+                Debug.WriteLine($"[TRY EXTRACT] Creating fallback control for CtrlId: {ctrlId}");
+
+                control = new ControlDefinition
+                {
+                    Type = "Unknown",
+                    Binding = bindingAttr,
+                    Label = elem.Attribute("title")?.Value ?? "",
+                    DocIndex = ++docIndexCounter,
+                    GridPosition = currentRow + GetColumnLetter(currentCol)
+                };
+
+                control.Name = GenerateControlName(elem, control.Label, control.Binding, control.Type);
+                control.Properties["Warning"] = "Control type could not be determined";
+                control.Properties["CtrlId"] = ctrlId;
+                control.Properties["ElementName"] = elemName;
+
+                ApplyControlContext(control);
+
+                Debug.WriteLine($"[TRY EXTRACT] Created fallback control: {control.Name}");
             }
 
             return control;
@@ -5880,15 +6064,8 @@ namespace FormGenerator.Analyzers.Infopath
         {
             var sb = new StringBuilder();
 
-            // Only get direct text nodes, not text from child elements
-            foreach (var node in elem.Nodes())
-            {
-                if (node is XText textNode)
-                {
-                    sb.Append(textNode.Value);
-                }
-                // Don't recurse into child elements
-            }
+            // Get all text content, including nested elements
+            ExtractTextRecursive(elem, sb);
 
             var text = sb.ToString().Trim();
 
@@ -5896,6 +6073,26 @@ namespace FormGenerator.Analyzers.Infopath
             text = Regex.Replace(text, @"\s+", " ");
 
             return text;
+        }
+
+        private void ExtractTextRecursive(XElement elem, StringBuilder sb)
+        {
+            foreach (var node in elem.Nodes())
+            {
+                if (node is XText textNode)
+                {
+                    sb.Append(textNode.Value);
+                }
+                else if (node is XElement childElem)
+                {
+                    // Skip certain elements that shouldn't contribute to label text
+                    var skipElements = new[] { "input", "select", "textarea", "button", "object" };
+                    if (!skipElements.Contains(childElem.Name.LocalName.ToLower()))
+                    {
+                        ExtractTextRecursive(childElem, sb);
+                    }
+                }
+            }
         }
 
         private string GetDirectTextContent(XElement elem)
