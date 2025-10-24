@@ -19,7 +19,7 @@ namespace FormGenerator.Analyzers.InfoPath
 
         public string AnalyzerName => "InfoPath 2013 Analyzer";
         public string SupportedVersion => "2013";
-        public string[] SupportedFileExtensions => new[] { ".xsn" };
+        public string[] SupportedFileExtensions => new[] { ".xsn", ".cab" }; // XSN files are CAB archives
 
         public InfoPath2013Analyzer()
         {
@@ -735,7 +735,7 @@ public class InfoPath2010Analyzer : IFormAnalyzer
     {
         public string AnalyzerName => "InfoPath 2010 Analyzer";
         public string SupportedVersion => "2010";
-        public string[] SupportedFileExtensions => new[] { ".xsn" };
+        public string[] SupportedFileExtensions => new[] { ".xsn", ".cab" }; // XSN files are CAB archives
 
         public bool CanAnalyze(string filePath)
         {

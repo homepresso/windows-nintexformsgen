@@ -290,8 +290,9 @@ namespace FormGenerator.Services
 
                     // 4.5. Extract form metadata for later use
                     JObject formData = JObject.Parse(jsonContent);
-                    string formName = formData.Properties().First().Name.Replace(" ", "_");
                     string formDisplayName = formData.Properties().First().Name;
+                    // PERFORMANCE FIX: Use proper name sanitization to match SmartObject names
+                    string formName = K2SmartObjectGenerator.Utilities.NameSanitizer.SanitizeSmartObjectName(formDisplayName);
                     // Normalize path to use forward slashes for K2 category paths
                     string targetFolder = _config.Form.TargetFolder.Replace("\\", "/");
                     string targetCategory = $"{targetFolder}/{formDisplayName}";

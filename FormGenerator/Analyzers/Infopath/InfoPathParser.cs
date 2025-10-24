@@ -219,13 +219,19 @@ namespace FormGenerator.Analyzers.Infopath
     {
         private DebugInfo debugInfo = new DebugInfo();
 
+        // Configurable timeout constants for large file handling
+        // NOTE: These are set lower initially for faster failure detection during testing
+        private const int EXTRAC32_TIMEOUT_MS = 60000;       // 1 minute for extrac32.exe (increase if needed)
+        private const int EXPAND_TIMEOUT_MS = 90000;         // 1.5 minutes for expand.exe (increase if needed)
+        private const int ZIP_EXTRACTION_TIMEOUT_MS = 120000; // 2 minutes for ZIP extraction (increase if needed)
+        private const int MAX_PARSE_TIME_SECONDS = 120;      // Extended from 30 to 120 seconds for large forms
+
         // Recursion protection
         private int currentRecursionDepth = 0;
         private const int MAX_RECURSION_DEPTH = 500;
         private int elementCount = 0;
         private const int MAX_ELEMENT_COUNT = 100000;
         private DateTime parseStartTime;
-        private const int MAX_PARSE_TIME_SECONDS = 30;
 
         private void Log(string message)
         {
@@ -235,29 +241,62 @@ namespace FormGenerator.Analyzers.Infopath
 
         public InfoPathFormDefinition ParseXsnFile(string xsnFilePath)
         {
-            // Check if the path is actually a directory (pre-extracted folder)
-            if (Directory.Exists(xsnFilePath))
-            {
-                Console.WriteLine("========================================");
-                Console.WriteLine($"Analyzing pre-extracted folder: {xsnFilePath}");
-                Console.WriteLine("========================================\n");
-                return ParseExtractedFolder(xsnFilePath);
-            }
-
-            string tempDir = Path.Combine(
-                Path.GetTempPath(),
-                Path.GetFileNameWithoutExtension(xsnFilePath) + "_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(tempDir);
+            Log($"[ParseXsnFile] Entry point - analyzing: {xsnFilePath}");
+            Debug.WriteLine($"[ParseXsnFile] ======== STARTING ANALYSIS ========");
 
             try
             {
-                Console.WriteLine("========================================");
-                Console.WriteLine($"Starting analysis of {xsnFilePath}");
-                Console.WriteLine("========================================\n");
+                // Check if the path is actually a directory (pre-extracted folder)
+                if (Directory.Exists(xsnFilePath))
+                {
+                    Log("========================================");
+                    Log($"Analyzing pre-extracted folder: {xsnFilePath}");
+                    Log("========================================\n");
+                    return ParseExtractedFolder(xsnFilePath);
+                }
 
-                // Extract XSN file
-                if (!ExtractXsn(xsnFilePath, tempDir))
-                    throw new Exception("Failed to extract XSN file using all available methods.");
+                Log($"[ParseXsnFile] File exists: {File.Exists(xsnFilePath)}");
+
+                string tempDir = Path.Combine(
+                    Path.GetTempPath(),
+                    Path.GetFileNameWithoutExtension(xsnFilePath) + "_" + Guid.NewGuid().ToString("N"));
+
+                Log($"[ParseXsnFile] Creating temp directory: {tempDir}");
+                Directory.CreateDirectory(tempDir);
+                Log($"[ParseXsnFile] Temp directory created successfully");
+
+                try
+                {
+                    var fileInfo = new FileInfo(xsnFilePath);
+                    var fileSizeMB = fileInfo.Length / (1024.0 * 1024.0);
+
+                    Log("========================================");
+                    Log($"Starting analysis of {xsnFilePath}");
+                    Log($"File size: {fileSizeMB:F2} MB");
+                    Log($"Temp directory: {tempDir}");
+                    Log("========================================\n");
+
+                    // Extract XSN/CAB file
+                    Log($"[ParseXsnFile] Starting extraction (file size: {fileSizeMB:F2} MB)...");
+                    var extractStartTime = DateTime.Now;
+
+                    if (!ExtractXsn(xsnFilePath, tempDir))
+                    {
+                        throw new Exception(
+                            "Failed to extract file using all available methods (extrac32.exe, expand.exe, and ZIP).\n\n" +
+                            "WORKAROUND:\n" +
+                            "1. Manually extract the CAB/XSN file:\n" +
+                            "   - Rename the file to .cab or .zip if needed\n" +
+                            "   - Extract using Windows Explorer or 7-Zip\n" +
+                            "2. Run this tool again and select the extracted FOLDER instead of the XSN/CAB file\n\n" +
+                            $"This typically occurs with very large files (yours is {fileSizeMB:F2} MB) or " +
+                            "files that cause Windows extraction tools to hang.");
+                    }
+
+                    Log($"[ParseXsnFile] Extraction completed successfully");
+
+                var extractDuration = (DateTime.Now - extractStartTime).TotalSeconds;
+                Log($"Extraction completed in {extractDuration:F1} seconds");
 
                 var formDef = new InfoPathFormDefinition();
                 formDef.DebugInfo = debugInfo;
@@ -323,8 +362,8 @@ namespace FormGenerator.Analyzers.Infopath
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error parsing XSN: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                Log($"Error parsing XSN: {ex.Message}");
+                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
                 throw;
             }
             finally
@@ -332,12 +371,26 @@ namespace FormGenerator.Analyzers.Infopath
                 try
                 {
                     Directory.Delete(tempDir, true);
-                    Console.WriteLine("\nCleanup completed successfully.");
+                    Log("\nCleanup completed successfully.");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Warning: Cleanup failed: {ex.Message}");
+                    Log($"Warning: Cleanup failed: {ex.Message}");
                 }
+            }
+            }
+            catch (Exception outerEx)
+            {
+                Log($"\n[ParseXsnFile] FATAL ERROR:");
+                Log($"Message: {outerEx.Message}");
+                Log($"Type: {outerEx.GetType().Name}");
+                Debug.WriteLine($"[ParseXsnFile] Stack Trace:\n{outerEx.StackTrace}");
+                if (outerEx.InnerException != null)
+                {
+                    Log($"\nInner Exception: {outerEx.InnerException.Message}");
+                    Debug.WriteLine($"Inner Stack Trace:\n{outerEx.InnerException.StackTrace}");
+                }
+                throw;
             }
         }
 
@@ -611,37 +664,149 @@ namespace FormGenerator.Analyzers.Infopath
 
         private bool ExtractXsn(string xsnFilePath, string tempDir)
         {
-            // Try PowerShell first - it uses Shell.Application COM (same as Windows Explorer)
+            Log("\n=== EXTRACTION PHASE ===");
+            Log("Attempting multiple extraction methods in sequence...");
+            Log("Note: Large XSN files may take several minutes to extract.");
+            Log("If extraction hangs repeatedly, try:");
+            Log("  1. Manually extract the XSN file using Windows Explorer (rename to .cab or .zip)");
+            Log("  2. Point this tool to the extracted folder instead of the XSN file\n");
+
+            // Try extrac32.exe first - it's typically fastest for standard CAB files
             // This works best for complex CAB files with many files
             try
             {
+                Log("[ExtractXsn] Attempting method 1: extrac32.exe");
                 ExtractUsingPowerShell(xsnFilePath, tempDir);
-                Console.WriteLine("Successfully extracted using PowerShell");
+                Log("Successfully extracted using extrac32.exe");
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine("PowerShell extraction failed: " + ex.Message);
+                Log("extrac32.exe extraction failed: " + ex.Message);
+                if (ex is TimeoutException)
+                {
+                    Log("Note: The extraction tool hung or timed out. Trying alternate method...");
+                }
             }
 
             // Fall back to expand.exe (native Windows CAB extractor)
             try
             {
+                Log("[ExtractXsn] Attempting method 2: expand.exe");
                 ExtractUsingExpandExe(xsnFilePath, tempDir);
-                Console.WriteLine("Successfully extracted using expand.exe");
+                Log("Successfully extracted using expand.exe");
                 return true;
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Expand.exe extraction failed: " + ex.Message);
+                Log("expand.exe extraction failed: " + ex.Message);
+                if (ex is TimeoutException)
+                {
+                    Log("Note: The extraction tool hung or timed out. Trying final method...");
+                }
             }
 
-            // Last resort: try treating it as a ZIP file
+            // Last resort: try treating it as a ZIP file with timeout protection and progress monitoring
             try
             {
-                ZipFile.ExtractToDirectory(xsnFilePath, tempDir);
+                Console.WriteLine($"Attempting ZIP extraction with {ZIP_EXTRACTION_TIMEOUT_MS/1000} second timeout...");
+                var startTime = DateTime.Now;
+                var lastProgressTime = DateTime.Now;
+                var lastFileCount = 0;
+                bool extractionCompleted = false;
+
+                // Run extraction in background
+                var zipExtractionTask = Task.Run(() =>
+                {
+                    try
+                    {
+                        // Use custom extraction with progress tracking
+                        using (var archive = ZipFile.OpenRead(xsnFilePath))
+                        {
+                            Console.WriteLine($"ZIP archive opened. Total entries: {archive.Entries.Count}");
+                            int processedCount = 0;
+
+                            foreach (var entry in archive.Entries)
+                            {
+                                var destinationPath = Path.Combine(tempDir, entry.FullName);
+
+                                // Create directory if needed
+                                if (entry.FullName.EndsWith("/") || entry.FullName.EndsWith("\\"))
+                                {
+                                    Directory.CreateDirectory(destinationPath);
+                                }
+                                else
+                                {
+                                    Directory.CreateDirectory(Path.GetDirectoryName(destinationPath));
+                                    entry.ExtractToFile(destinationPath, overwrite: true);
+                                }
+
+                                processedCount++;
+                                if (processedCount % 10 == 0 || processedCount == archive.Entries.Count)
+                                {
+                                    Console.WriteLine($"ZIP extraction progress: {processedCount}/{archive.Entries.Count} files");
+                                }
+                            }
+                        }
+                        extractionCompleted = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"ZIP extraction error: {ex.Message}");
+                        throw;
+                    }
+                });
+
+                // Monitor progress with timeout
+                while (!extractionCompleted && !zipExtractionTask.IsCompleted)
+                {
+                    var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
+
+                    // Check for overall timeout
+                    if (elapsed > ZIP_EXTRACTION_TIMEOUT_MS)
+                    {
+                        Console.WriteLine($"ZIP extraction timed out after {ZIP_EXTRACTION_TIMEOUT_MS/1000} seconds");
+                        throw new TimeoutException(
+                            $"ZIP extraction timed out after {ZIP_EXTRACTION_TIMEOUT_MS/1000} seconds. " +
+                            "The XSN file may be too large or complex. Consider extracting it manually.");
+                    }
+
+                    // Check for progress (file count increasing)
+                    if ((DateTime.Now - lastProgressTime).TotalSeconds >= 5)
+                    {
+                        try
+                        {
+                            var currentFileCount = Directory.Exists(tempDir) ? Directory.GetFiles(tempDir, "*", SearchOption.AllDirectories).Length : 0;
+                            if (currentFileCount > lastFileCount)
+                            {
+                                lastProgressTime = DateTime.Now;
+                                lastFileCount = currentFileCount;
+                            }
+                            else if (lastFileCount > 0 && (DateTime.Now - lastProgressTime).TotalSeconds > 60)
+                            {
+                                // No progress for 60 seconds
+                                Console.WriteLine("ZIP extraction appears to have hung (no progress for 60 seconds)");
+                                throw new TimeoutException("ZIP extraction appears to have hung. The XSN file may be corrupted or too complex.");
+                            }
+                        }
+                        catch (Exception ex) when (!(ex is TimeoutException))
+                        {
+                            // Ignore file system errors during monitoring
+                        }
+                    }
+
+                    Thread.Sleep(1000);
+                }
+
+                // Wait for task to complete and check for exceptions
+                zipExtractionTask.Wait();
+
                 Console.WriteLine("Successfully extracted as ZIP");
                 return true;
+            }
+            catch (TimeoutException)
+            {
+                throw; // Re-throw timeout exceptions
             }
             catch (Exception ex)
             {
@@ -939,6 +1104,8 @@ namespace FormGenerator.Analyzers.Infopath
 
         private void ExtractUsingExpandExe(string cabFile, string destFolder)
         {
+            Console.WriteLine("Attempting extraction with expand.exe...");
+
             var startInfo = new ProcessStartInfo
             {
                 FileName = "expand.exe",
@@ -951,63 +1118,211 @@ namespace FormGenerator.Analyzers.Infopath
 
             using (var process = Process.Start(startInfo))
             {
-                // Set timeout to 180 seconds (3 minutes) for complex forms with many files
-                const int timeoutMs = 180000;
-                if (!process.WaitForExit(timeoutMs))
+                // Improved timeout with polling and progress detection
+                var startTime = DateTime.Now;
+                var lastOutputTime = DateTime.Now;
+                bool hasOutput = false;
+                const int pollIntervalMs = 1000; // Check every second
+                const int noOutputTimeoutSeconds = 30; // Kill if no output for 30 seconds
+
+                // Read output asynchronously to detect progress
+                var outputBuilder = new System.Text.StringBuilder();
+                process.OutputDataReceived += (sender, e) =>
                 {
-                    // Process timed out, kill it
-                    try
+                    if (!string.IsNullOrEmpty(e.Data))
                     {
-                        process.Kill();
-                        Console.WriteLine($"Expand.exe timed out after {timeoutMs/1000} seconds and was terminated");
+                        lastOutputTime = DateTime.Now;
+                        hasOutput = true;
+                        outputBuilder.AppendLine(e.Data);
                     }
-                    catch { }
-                    throw new TimeoutException($"Expand.exe extraction timed out after {timeoutMs/1000} seconds. The XSN file may be too large or complex.");
+                };
+                process.BeginOutputReadLine();
+
+                // Poll until timeout or completion
+                while (!process.HasExited)
+                {
+                    var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
+                    var timeSinceOutput = (DateTime.Now - lastOutputTime).TotalSeconds;
+
+                    // Check for overall timeout
+                    if (elapsed > EXPAND_TIMEOUT_MS)
+                    {
+                        try
+                        {
+                            process.Kill();
+                            Console.WriteLine($"expand.exe timed out after {EXPAND_TIMEOUT_MS/1000} seconds and was terminated");
+                        }
+                        catch { }
+                        throw new TimeoutException($"expand.exe extraction timed out after {EXPAND_TIMEOUT_MS/1000} seconds. The XSN file may be too large or complex.");
+                    }
+
+                    // Check if process has hung (no output for too long)
+                    if (hasOutput && timeSinceOutput > noOutputTimeoutSeconds)
+                    {
+                        try
+                        {
+                            process.Kill();
+                            Console.WriteLine($"expand.exe appears to have hung (no output for {noOutputTimeoutSeconds} seconds) and was terminated");
+                        }
+                        catch { }
+                        throw new TimeoutException($"expand.exe appears to have hung during extraction. The XSN file may have caused the extraction tool to become unresponsive.");
+                    }
+
+                    // Report progress
+                    if (elapsed % 10000 < pollIntervalMs) // Every 10 seconds
+                    {
+                        Console.WriteLine($"expand.exe still running... ({elapsed/1000:F0}s elapsed)");
+                    }
+
+                    Thread.Sleep(pollIntervalMs);
                 }
+
+                process.WaitForExit(); // Ensure all output is read
 
                 if (process.ExitCode != 0)
                 {
                     string error = process.StandardError.ReadToEnd();
-                    throw new Exception($"Expand.exe failed with exit code {process.ExitCode}: {error}");
+                    throw new Exception($"expand.exe failed with exit code {process.ExitCode}: {error}");
                 }
+
+                Console.WriteLine("expand.exe completed successfully");
             }
         }
 
         private void ExtractUsingPowerShell(string cabFile, string destFolder)
         {
-            // First try: Use makecab.exe to extract (Microsoft's CAB utility)
-            var makeCABStartInfo = new ProcessStartInfo
-            {
-                FileName = "extrac32.exe",
-                Arguments = $"/Y /E \"{cabFile}\" /L \"{destFolder}\"",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
+            Log("Attempting extraction with extrac32.exe...");
+            Debug.WriteLine($"[extrac32] Input file: {cabFile}");
+            Debug.WriteLine($"[extrac32] Output folder: {destFolder}");
+            Process process = null;
 
-            using (var process = Process.Start(makeCABStartInfo))
+            try
             {
-                if (!process.WaitForExit(120000))
+                // Use extrac32.exe (Microsoft's CAB utility)
+                var makeCABStartInfo = new ProcessStartInfo
                 {
-                    try
-                    {
-                        process.Kill();
-                        Console.WriteLine("extrac32.exe timed out after 120 seconds");
-                    }
-                    catch { }
-                    throw new TimeoutException("extrac32.exe extraction timed out after 120 seconds.");
+                    FileName = "extrac32.exe",
+                    Arguments = $"/Y /E \"{cabFile}\" /L \"{destFolder}\"",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                Debug.WriteLine($"[extrac32] Starting process...");
+                process = Process.Start(makeCABStartInfo);
+                if (process == null)
+                {
+                    throw new Exception("Failed to start extrac32.exe process");
                 }
+
+                // Improved timeout with polling and hang detection
+                var startTime = DateTime.Now;
+                var lastCheckTime = DateTime.Now;
+                var lastFileCount = 0;
+                const int pollIntervalMs = 2000; // Check every 2 seconds
+                const int noProgressTimeoutSeconds = 30; // Kill if no file progress for 30 seconds
+
+                Log($"extrac32.exe started (PID: {process.Id})");
+
+                // Poll until timeout or completion
+                while (!process.HasExited)
+                {
+                    var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
+
+                    // Check for overall timeout
+                    if (elapsed > EXTRAC32_TIMEOUT_MS)
+                    {
+                        try
+                        {
+                            process.Kill();
+                            Log($"extrac32.exe timed out after {EXTRAC32_TIMEOUT_MS/1000} seconds and was terminated");
+                        }
+                        catch { }
+                        throw new TimeoutException($"extrac32.exe extraction timed out after {EXTRAC32_TIMEOUT_MS/1000} seconds.");
+                    }
+
+                    // Check if process has hung by monitoring extracted file count
+                    if ((DateTime.Now - lastCheckTime).TotalSeconds >= 5) // Check every 5 seconds
+                    {
+                        try
+                        {
+                            var currentFileCount = Directory.Exists(destFolder) ? Directory.GetFiles(destFolder, "*", SearchOption.AllDirectories).Length : 0;
+
+                            if (currentFileCount > lastFileCount)
+                            {
+                                // Progress is being made
+                                lastCheckTime = DateTime.Now;
+                                lastFileCount = currentFileCount;
+                                Log($"extrac32.exe progress: {currentFileCount} files extracted...");
+                            }
+                            else if (lastFileCount > 0 && (DateTime.Now - lastCheckTime).TotalSeconds > noProgressTimeoutSeconds)
+                            {
+                                // No progress for too long, process may be hung
+                                try
+                                {
+                                    process.Kill();
+                                    Log($"extrac32.exe appears to have hung (no progress for {noProgressTimeoutSeconds} seconds) and was terminated");
+                                }
+                                catch { }
+                                throw new TimeoutException($"extrac32.exe appears to have hung during extraction. The XSN file may have caused the extraction tool to become unresponsive.");
+                            }
+                        }
+                        catch (Exception ex) when (!(ex is TimeoutException))
+                        {
+                            // Ignore file system access errors during monitoring
+                        }
+                    }
+
+                    // Report overall progress
+                    if (elapsed % 10000 < pollIntervalMs) // Every 10 seconds
+                    {
+                        Log($"extrac32.exe still running... ({elapsed/1000:F0}s elapsed)");
+                    }
+
+                    Thread.Sleep(pollIntervalMs);
+                }
+
+                process.WaitForExit(); // Ensure process is fully complete
+                Debug.WriteLine($"[extrac32] Process exited with code: {process.ExitCode}");
 
                 // extrac32 returns 0 on success
                 if (process.ExitCode == 0)
                 {
+                    Log("extrac32.exe completed successfully");
                     return;
                 }
 
                 string error = process.StandardError.ReadToEnd();
-                Console.WriteLine($"extrac32.exe failed with exit code {process.ExitCode}: {error}");
+                Log($"extrac32.exe failed with exit code {process.ExitCode}: {error}");
                 throw new Exception($"extrac32.exe failed with exit code {process.ExitCode}: {error}");
+            }
+            catch (Exception ex)
+            {
+                Log($"extrac32.exe exception: {ex.Message}");
+                Debug.WriteLine($"[extrac32] Stack trace: {ex.StackTrace}");
+
+                // Ensure process is killed if it's still running
+                if (process != null && !process.HasExited)
+                {
+                    try
+                    {
+                        Log($"Killing hung extrac32.exe process (PID: {process.Id})");
+                        process.Kill();
+                        process.WaitForExit(5000); // Wait up to 5 seconds for clean exit
+                    }
+                    catch (Exception killEx)
+                    {
+                        Log($"Failed to kill process: {killEx.Message}");
+                    }
+                }
+
+                throw; // Re-throw the original exception
+            }
+            finally
+            {
+                // Clean up process resources
+                process?.Dispose();
             }
         }
     }
@@ -1046,13 +1361,15 @@ namespace FormGenerator.Analyzers.Infopath
         // Map template modes to their repeating contexts (for conditional sections)
         private Dictionary<string, RepeatingContext> templateModeToRepeatingContext = new Dictionary<string, RepeatingContext>();
 
-        // Recursion protection
+        // Recursion protection and timeout configuration
         private int currentRecursionDepth = 0;
         private const int MAX_RECURSION_DEPTH = 500;
         private int elementCount = 0;
         private const int MAX_ELEMENT_COUNT = 100000;
         private DateTime parseStartTime;
-        private const int MAX_PARSE_TIME_SECONDS = 30;
+        private DateTime lastProgressReport;
+        private const int MAX_PARSE_TIME_SECONDS = 120; // Extended from 30 to 120 seconds for large forms
+        private const int PROGRESS_REPORT_INTERVAL_SECONDS = 10; // Report progress every 10 seconds
 
         public class LabelInfo
         {
@@ -1112,9 +1429,13 @@ namespace FormGenerator.Analyzers.Infopath
 
             ResetParserState();
             parseStartTime = DateTime.Now;
+            lastProgressReport = DateTime.Now;
             currentRecursionDepth = 0;
             elementCount = 0;
+
+            Console.WriteLine($"Loading XML document: {viewFile}");
             XDocument doc = XDocument.Load(viewFile);
+            Console.WriteLine($"XML document loaded successfully. Starting recursive processing...");
 
             // Start the recursive processing
             try
@@ -1168,65 +1489,80 @@ namespace FormGenerator.Analyzers.Infopath
 
             Debug.WriteLine($"========================================\n");
 
-            // Deduplicate controls by CtrlId and Label+Binding
+            // Optimized deduplication with single-pass approach to reduce memory usage
             // Strategy:
             // 1. For controls with CtrlId, keep only one instance (prefer repeating section context)
             // 2. For controls without CtrlId (labels), deduplicate by Label+Type+Binding
             //    - Prefer the instance in a repeating section (more specific context)
             //    - This handles duplicate labels appearing both inside and outside repeating sections
 
-            var controlsWithCtrlId = allControls
-                .Where(c => c.Properties.ContainsKey("CtrlId") && !string.IsNullOrEmpty(c.Properties["CtrlId"] as string))
-                .GroupBy(c => c.Properties["CtrlId"] as string)
-                .Select(g =>
+            Console.WriteLine($"Starting deduplication of {allControls.Count} controls...");
+            var dedupStartTime = DateTime.Now;
+
+            // Single-pass deduplication using dictionaries for better memory efficiency
+            var ctrlIdDict = new Dictionary<string, ControlDefinition>();
+            var labelBindingDict = new Dictionary<(string, string, string), ControlDefinition>();
+            var controlsWithoutKey = new List<ControlDefinition>();
+
+            foreach (var ctrl in allControls)
+            {
+                var hasCtrlId = ctrl.Properties.ContainsKey("CtrlId") && !string.IsNullOrEmpty(ctrl.Properties["CtrlId"] as string);
+
+                if (hasCtrlId)
                 {
-                    // Prefer controls in repeating sections over those outside
-                    var inRepeating = g.FirstOrDefault(c => c.IsInRepeatingSection);
-                    if (inRepeating != null)
+                    var ctrlId = ctrl.Properties["CtrlId"] as string;
+                    if (!ctrlIdDict.ContainsKey(ctrlId))
                     {
-                        Debug.WriteLine($"[DEDUP] Keeping {inRepeating.Name} (CtrlId: {g.Key}) from repeating section, discarding {g.Count() - 1} duplicate(s)");
-                        return inRepeating;
+                        ctrlIdDict[ctrlId] = ctrl;
                     }
-
-                    // Otherwise just take the first one
-                    Debug.WriteLine($"[DEDUP] Keeping first instance of {g.First().Name} (CtrlId: {g.Key}), discarding {g.Count() - 1} duplicate(s)");
-                    return g.First();
-                })
-                .ToList();
-
-            // For controls without CtrlId (mostly labels), deduplicate by Label+Type+Binding
-            var controlsWithoutCtrlId = allControls
-                .Where(c => !c.Properties.ContainsKey("CtrlId") || string.IsNullOrEmpty(c.Properties["CtrlId"] as string))
-                .GroupBy(c => new { c.Label, c.Type, c.Binding })
-                .Select(g =>
-                {
-                    // If there are duplicates, prefer the one in a repeating section
-                    if (g.Count() > 1)
+                    else
                     {
-                        var inRepeating = g.FirstOrDefault(c => c.IsInRepeatingSection);
-                        if (inRepeating != null)
+                        // Prefer repeating section context
+                        if (ctrl.IsInRepeatingSection && !ctrlIdDict[ctrlId].IsInRepeatingSection)
                         {
-                            Debug.WriteLine($"[DEDUP] Keeping label '{g.Key.Label}' ({g.Key.Type}) from repeating section, discarding {g.Count() - 1} duplicate(s)");
-                            return inRepeating;
+                            Debug.WriteLine($"[DEDUP] Replacing {ctrlIdDict[ctrlId].Name} with repeating section version (CtrlId: {ctrlId})");
+                            ctrlIdDict[ctrlId] = ctrl;
                         }
-
-                        // Otherwise keep the first one
-                        Debug.WriteLine($"[DEDUP] Keeping first instance of label '{g.Key.Label}' ({g.Key.Type}), discarding {g.Count() - 1} duplicate(s)");
-                        return g.First();
                     }
+                }
+                else
+                {
+                    // Use Label+Type+Binding as key
+                    var key = (ctrl.Label ?? "", ctrl.Type ?? "", ctrl.Binding ?? "");
+                    if (!labelBindingDict.ContainsKey(key))
+                    {
+                        labelBindingDict[key] = ctrl;
+                    }
+                    else
+                    {
+                        // Prefer repeating section context
+                        if (ctrl.IsInRepeatingSection && !labelBindingDict[key].IsInRepeatingSection)
+                        {
+                            Debug.WriteLine($"[DEDUP] Replacing label '{key.Item1}' ({key.Item2}) with repeating section version");
+                            labelBindingDict[key] = ctrl;
+                        }
+                    }
+                }
+            }
 
-                    // No duplicates, keep as is
-                    return g.First();
-                })
-                .ToList();
+            var controlsWithCtrlId = ctrlIdDict.Values.ToList();
+            var controlsWithoutCtrlId = labelBindingDict.Values.ToList();
 
             var deduplicatedControls = controlsWithCtrlId.Concat(controlsWithoutCtrlId)
                 .OrderBy(c => c.DocIndex) // Maintain document order
                 .ToList();
 
+            var dedupDuration = (DateTime.Now - dedupStartTime).TotalSeconds;
+            Console.WriteLine($"Deduplication completed in {dedupDuration:F2} seconds");
+            Console.WriteLine($"Controls before: {allControls.Count}, after: {deduplicatedControls.Count}, removed: {allControls.Count - deduplicatedControls.Count}");
+
             Debug.WriteLine($"[DEDUP] Total controls before deduplication: {allControls.Count}");
             Debug.WriteLine($"[DEDUP] Total controls after deduplication: {deduplicatedControls.Count}");
             Debug.WriteLine($"[DEDUP] Removed {allControls.Count - deduplicatedControls.Count} duplicate controls");
+
+            // Clear intermediate collections to free memory
+            ctrlIdDict.Clear();
+            labelBindingDict.Clear();
 
             debugInfo.ControlsExtracted = deduplicatedControls.Count;
             return deduplicatedControls;
@@ -1282,15 +1618,24 @@ namespace FormGenerator.Analyzers.Infopath
                 }
 
                 // Check timeout
-                if ((DateTime.Now - parseStartTime).TotalSeconds > MAX_PARSE_TIME_SECONDS)
+                var elapsedSeconds = (DateTime.Now - parseStartTime).TotalSeconds;
+                if (elapsedSeconds > MAX_PARSE_TIME_SECONDS)
                 {
                     throw new TimeoutException($"Parsing terminated: Exceeded {MAX_PARSE_TIME_SECONDS} seconds timeout. This form may be too complex or contain circular references.");
                 }
 
-                // Log progress every 1000 elements
-                if (elementCount % 1000 == 0)
+                // Log progress every 1000 elements OR every 10 seconds (whichever comes first)
+                bool elementThreshold = elementCount % 1000 == 0;
+                bool timeThreshold = (DateTime.Now - lastProgressReport).TotalSeconds >= PROGRESS_REPORT_INTERVAL_SECONDS;
+
+                if (elementThreshold || timeThreshold)
                 {
-                    Console.WriteLine($"Progress: {elementCount} elements processed, depth: {currentRecursionDepth}, controls found: {allControls.Count}");
+                    var memoryMB = GC.GetTotalMemory(false) / (1024.0 * 1024.0);
+                    var percentComplete = (elapsedSeconds / MAX_PARSE_TIME_SECONDS) * 100;
+                    Console.WriteLine($"Progress: {elementCount} elements processed, {allControls.Count} controls found, " +
+                                    $"depth: {currentRecursionDepth}, elapsed: {elapsedSeconds:F1}s ({percentComplete:F0}%), " +
+                                    $"memory: {memoryMB:F1}MB");
+                    lastProgressReport = DateTime.Now;
                 }
 
                 debugInfo.TotalElementsExamined++;

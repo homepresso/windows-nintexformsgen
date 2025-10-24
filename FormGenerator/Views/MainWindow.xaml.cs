@@ -460,7 +460,7 @@ namespace FormGenerator.Views
             var dialog = new OpenFileDialog
             {
                 Title = "Select InfoPath Forms (or pre-extracted folders)",
-                Filter = "InfoPath Forms (*.xsn)|*.xsn|All Files (*.*)|*.*",
+                Filter = "InfoPath Forms (*.xsn;*.cab)|*.xsn;*.cab|XSN Files (*.xsn)|*.xsn|CAB Files (*.cab)|*.cab|All Files (*.*)|*.*",
                 Multiselect = true,
                 CheckFileExists = false,
                 CheckPathExists = true

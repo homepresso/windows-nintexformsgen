@@ -69,7 +69,7 @@ namespace K2SmartObjectGenerator
         {
             JObject formData = JObject.Parse(jsonContent);
             string formDisplayName = formData.Properties().First().Name; // Keep original with spaces
-            string formName = formDisplayName.Replace(" ", "_"); // Use underscores for object names
+            string formName = NameSanitizer.SanitizeSmartObjectName(formDisplayName); // Sanitize name to match SmartObject naming
 
             JObject formDefinition = formData[formDisplayName] as JObject;
             JObject formDefObject = formDefinition["FormDefinition"] as JObject;
@@ -97,9 +97,9 @@ namespace K2SmartObjectGenerator
             }
 
             // Define base category paths - respect TargetFolder from configuration
-            // STRUCTURE: {TargetFolder}\{formDisplayName}\Views
+            // STRUCTURE: {TargetFolder}\{formName}\Views (using sanitized name to match SmartObjects)
             string targetFolder = _config.Form.TargetFolder ?? "Generated";
-            string baseCategory = $"{targetFolder}\\{formDisplayName}";
+            string baseCategory = $"{targetFolder}\\{formName}";
 
             Console.WriteLine($"  View base category: {baseCategory}");
 
@@ -244,8 +244,8 @@ namespace K2SmartObjectGenerator
 
                         // IMPORTANT: Create view names that are unique per InfoPath view context
                         // This allows multiple view pairs for the same SmartObject
-                        // Normalize section name to replace spaces with underscores to match FormGenerator expectations
-                        string normalizedSectionName = sectionName.Replace(" ", "_");
+                        // Sanitize section name to match FormGenerator expectations and SmartObject naming
+                        string normalizedSectionName = NameSanitizer.SanitizeSmartObjectName(sectionName);
                         string itemViewName = $"{formName}_{viewName}_{normalizedSectionName}_Item";
                         string listViewName = $"{formName}_{viewName}_{normalizedSectionName}_List";
 
@@ -348,19 +348,22 @@ namespace K2SmartObjectGenerator
         // Helper method to construct SmartObject name consistently
         private string ConstructSmartObjectName(string formName, string sectionName)
         {
-            if (sectionName.StartsWith("TABLECTRL", StringComparison.OrdinalIgnoreCase))
+            // Sanitize section name to match SmartObjectGenerator naming
+            string sanitizedSectionName = NameSanitizer.SanitizeSmartObjectName(sectionName);
+
+            if (sanitizedSectionName.StartsWith("TABLECTRL", StringComparison.OrdinalIgnoreCase))
             {
                 // Convert TABLECTRL338 to Table_CTRL338
-                string ctrlNumber = sectionName.Substring("TABLECTRL".Length);
+                string ctrlNumber = sanitizedSectionName.Substring("TABLECTRL".Length);
                 return $"{formName}_Table_CTRL{ctrlNumber}";
             }
-            else if (sectionName.StartsWith("Table_CTRL", StringComparison.OrdinalIgnoreCase))
+            else if (sanitizedSectionName.StartsWith("Table_CTRL", StringComparison.OrdinalIgnoreCase))
             {
-                return $"{formName}_{sectionName}";
+                return $"{formName}_{sanitizedSectionName}";
             }
             else
             {
-                return $"{formName}_{sectionName.Replace(" ", "_")}";
+                return $"{formName}_{sanitizedSectionName}";
             }
         }
 
@@ -3011,7 +3014,7 @@ public bool TryCleanupExistingViews(string jsonContent)
             bool allCleaned = true;
 
             JObject formData = JObject.Parse(jsonContent);
-            string formName = formData.Properties().First().Name.Replace(" ", "_");
+            string formName = NameSanitizer.SanitizeSmartObjectName(formData.Properties().First().Name);
             JObject formDefinition = formData[formData.Properties().First().Name] as JObject;
 
             // Get all view names

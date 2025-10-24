@@ -57,7 +57,7 @@ namespace K2SmartObjectGenerator
             _originalJsonData = formData;
 
             string rootName = formData.Properties().First().Name;
-            string baseFormName = rootName.Replace(" ", "_");
+            string baseFormName = NameSanitizer.SanitizeSmartObjectName(rootName);
             string baseFormDisplayName = rootName; // Keep original name with spaces for display
             JObject formDefinition = formData[rootName] as JObject;
 
@@ -87,8 +87,8 @@ namespace K2SmartObjectGenerator
                 targetFolder = configTargetFolder;
             }
 
-            // STRUCTURE: {TargetFolder}\{formDisplayName}
-            string formCategory = $"{targetFolder}\\{baseFormDisplayName}";
+            // STRUCTURE: {TargetFolder}\{formName} (using sanitized name to match SmartObjects)
+            string formCategory = $"{targetFolder}\\{baseFormName}";
 
             Console.WriteLine($"  Form category: {formCategory}");
 
@@ -3533,7 +3533,7 @@ namespace K2SmartObjectGenerator
 
             JObject formData = JObject.Parse(jsonContent);
             string rootName = formData.Properties().First().Name;
-            string baseFormName = rootName.Replace(" ", "_");
+            string baseFormName = NameSanitizer.SanitizeSmartObjectName(rootName);
             JObject formDefinition = formData[rootName] as JObject;
 
             JArray viewsArray = formDefinition?["FormDefinition"]?["Views"] as JArray;

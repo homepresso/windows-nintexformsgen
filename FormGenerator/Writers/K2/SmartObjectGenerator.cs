@@ -30,93 +30,121 @@ namespace K2SmartObjectGenerator
 
         public void GenerateSmartObjectsFromJson(string jsonContent)
         {
-            JObject formData = JObject.Parse(jsonContent);
-            string formDisplayName = formData.Properties().First().Name; // Keep original name with spaces
-            string formName = formDisplayName.Replace(" ", "_"); // Use underscores for object names
-            JObject formDefinition = formData[formDisplayName] as JObject;
-
-            Console.WriteLine($"\nProcessing form: {formName}");
-
-            // Extract TargetFolder from JSON (injected by K2GenerationService)
-            JObject formDefJson = formDefinition?["FormDefinition"] as JObject;
-            string targetFolder = formDefJson?["TargetFolder"]?.Value<string>();
-            if (string.IsNullOrEmpty(targetFolder))
+            // PERFORMANCE FIX: Open connection once for entire generation process
+            try
             {
-                targetFolder = _config?.Form?.TargetFolder ?? "Generated";
-            }
-            Console.WriteLine($"  SmartObject target folder: {targetFolder}");
+                _connectionManager.Connect();
+                Console.WriteLine("✓ Connected to K2 server - Connection will be reused for all operations");
 
-            JArray dataArray = formDefinition["FormDefinition"]["Data"] as JArray;
-            if (dataArray == null)
-            {
-                Console.WriteLine("No data columns found in JSON");
-                return;
-            }
+                JObject formData = JObject.Parse(jsonContent);
+                string formDisplayName = formData.Properties().First().Name; // Keep original name with spaces
+                // PERFORMANCE FIX: Use proper name sanitization to match K2's internal rules
+                // This prevents name mismatches when deleting/creating SmartObjects
+                string formName = NameSanitizer.SanitizeSmartObjectName(formDisplayName);
+                JObject formDefinition = formData[formDisplayName] as JObject;
 
-            // Generate lookup SmartObjects first
-            GenerateLookupSmartObjects(formName, formDisplayName, dataArray, targetFolder);
+                Console.WriteLine($"\nProcessing form: {formName}");
 
-            // Separate main fields and repeating sections
-            var mainFields = new List<JObject>();
-            var repeatingSections = new Dictionary<string, List<JObject>>();
-
-            foreach (JObject dataItem in dataArray)
-            {
-                bool isRepeating = dataItem["IsRepeating"]?.Value<bool>() ?? false;
-                string sectionName = dataItem["RepeatingSectionName"]?.Value<string>();
-
-                if (isRepeating && !string.IsNullOrEmpty(sectionName))
+                // Extract TargetFolder from JSON (injected by K2GenerationService)
+                JObject formDefJson = formDefinition?["FormDefinition"] as JObject;
+                string targetFolder = formDefJson?["TargetFolder"]?.Value<string>();
+                if (string.IsNullOrEmpty(targetFolder))
                 {
-                    if (!repeatingSections.ContainsKey(sectionName))
+                    targetFolder = _config?.Form?.TargetFolder ?? "Generated";
+                }
+                Console.WriteLine($"  SmartObject target folder: {targetFolder}");
+
+                JArray dataArray = formDefinition["FormDefinition"]["Data"] as JArray;
+                if (dataArray == null)
+                {
+                    Console.WriteLine("No data columns found in JSON");
+                    return;
+                }
+
+                // Generate lookup SmartObjects first
+                GenerateLookupSmartObjects(formName, formDisplayName, dataArray, targetFolder);
+
+                // Separate main fields and repeating sections
+                var mainFields = new List<JObject>();
+                var repeatingSections = new Dictionary<string, List<JObject>>();
+
+                foreach (JObject dataItem in dataArray)
+                {
+                    bool isRepeating = dataItem["IsRepeating"]?.Value<bool>() ?? false;
+                    string sectionName = dataItem["RepeatingSectionName"]?.Value<string>();
+
+                    if (isRepeating && !string.IsNullOrEmpty(sectionName))
                     {
-                        repeatingSections[sectionName] = new List<JObject>();
+                        if (!repeatingSections.ContainsKey(sectionName))
+                        {
+                            repeatingSections[sectionName] = new List<JObject>();
+                        }
+                        repeatingSections[sectionName].Add(dataItem);
                     }
-                    repeatingSections[sectionName].Add(dataItem);
+                    else if (!isRepeating)
+                    {
+                        mainFields.Add(dataItem);
+                    }
                 }
-                else if (!isRepeating)
-                {
-                    mainFields.Add(dataItem);
-                }
-            }
 
-            SmartObjectDefinitionsPublish publishSmo = new SmartObjectDefinitionsPublish();
+                SmartObjectDefinitionsPublish publishSmo = new SmartObjectDefinitionsPublish();
 
-            // Create main SmartObject and track its fields
-            Console.WriteLine($"\nCreating main SmartObject: {formName}");
-            SmartObjectDefinition mainSmo = CreateMainSmartObject(formName, mainFields, formDisplayName, targetFolder);
-            publishSmo.SmartObjects.Add(mainSmo);
+                // Create main SmartObject and track its fields
+                Console.WriteLine($"\nCreating main SmartObject: {formName}");
+                SmartObjectDefinition mainSmo = CreateMainSmartObject(formName, mainFields, formDisplayName, targetFolder);
+                publishSmo.SmartObjects.Add(mainSmo);
 
-            // Create child SmartObjects for repeating sections
-            foreach (var section in repeatingSections)
-            {
-                string childSmoName = $"{formName}_{section.Key.Replace(" ", "_")}";
-                Console.WriteLine($"Creating child SmartObject: {childSmoName}");
-                SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, section.Value, formName, formDisplayName, targetFolder);
-                publishSmo.SmartObjects.Add(childSmo);
-            }
-
-            // Publish SmartObjects first
-            Console.WriteLine("\nPublishing SmartObjects...");
-            PublishSmartObjects(publishSmo);
-
-            // Create associations
-            if (repeatingSections.Count > 0)
-            {
-                Console.WriteLine("\nCreating associations...");
-                publishSmo.Dispose();
-                publishSmo = new SmartObjectDefinitionsPublish();
-
+                // Create child SmartObjects for repeating sections
                 foreach (var section in repeatingSections)
                 {
-                    string childSmoName = $"{formName}_{section.Key.Replace(" ", "_")}";
-                    Console.WriteLine($"Creating association: {formName} -> {childSmoName}");
-                    SmartObjectDefinition association = CreateAssociation(formName, childSmoName,
-                        SourceCode.SmartObjects.Authoring.AssociationType.OneToMany, formDisplayName, targetFolder);
-                    publishSmo.SmartObjects.Add(association);
+                    // PERFORMANCE FIX: Sanitize section names to match K2's rules
+                    string sectionName = NameSanitizer.SanitizeSmartObjectName(section.Key);
+                    string childSmoName = $"{formName}_{sectionName}";
+                    Console.WriteLine($"Creating child SmartObject: {childSmoName}");
+                    SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, section.Value, formName, formDisplayName, targetFolder);
+                    publishSmo.SmartObjects.Add(childSmo);
                 }
 
-                // Publish associations
+                // Publish SmartObjects first
+                Console.WriteLine("\nPublishing SmartObjects...");
                 PublishSmartObjects(publishSmo);
+
+                // PERFORMANCE FIX: Give K2 server time to index published SmartObjects
+                // This is necessary before retrieving them for association creation
+                if (repeatingSections.Count > 0)
+                {
+                    // Scale delay with form complexity: base 5s + 500ms per section, max 15s
+                    int indexingDelay = Math.Min(5000 + (repeatingSections.Count * 500), 15000);
+                    Console.WriteLine($"Waiting {indexingDelay}ms for K2 server to index {repeatingSections.Count + 2} SmartObjects before creating associations...");
+                    System.Threading.Thread.Sleep(indexingDelay);
+                }
+
+                // Create associations
+                if (repeatingSections.Count > 0)
+                {
+                    Console.WriteLine("\nCreating associations...");
+                    publishSmo.Dispose();
+                    publishSmo = new SmartObjectDefinitionsPublish();
+
+                    foreach (var section in repeatingSections)
+                    {
+                        // PERFORMANCE FIX: Sanitize section names to match K2's rules (must match child SmartObject creation)
+                        string sectionName = NameSanitizer.SanitizeSmartObjectName(section.Key);
+                        string childSmoName = $"{formName}_{sectionName}";
+                        Console.WriteLine($"Creating association: {formName} -> {childSmoName}");
+                        SmartObjectDefinition association = CreateAssociation(formName, childSmoName,
+                            SourceCode.SmartObjects.Authoring.AssociationType.OneToMany, formDisplayName, targetFolder);
+                        publishSmo.SmartObjects.Add(association);
+                    }
+
+                    // Publish associations
+                    PublishSmartObjects(publishSmo);
+                }
+            }
+            finally
+            {
+                _connectionManager.Disconnect();
+                Console.WriteLine("✓ Disconnected from K2 server");
             }
         }
 
@@ -172,304 +200,280 @@ namespace K2SmartObjectGenerator
 
         private SmartObjectDefinition CreateConsolidatedLookupSmartObject(string smoName, string formName = null, string targetFolder = null)
         {
-            try
+            // PERFORMANCE FIX: Reuses existing connection instead of creating new one
+            DeleteSmartObject(smoName);
+
+            ServiceInstance serviceInstance = ServiceInstance.Create(
+                _connectionManager.ManagementServer.GetServiceInstanceForExtend(new Guid(_config.K2.SmartBoxGuid), string.Empty));
+            ExtendObject extendObject = serviceInstance.GetCreateExtender();
+
+            extendObject.Name = smoName;
+            extendObject.Metadata.DisplayName = smoName.Replace("_", " ");
+
+            // Add ID property (autonumber)
+            ExtendObjectProperty idProperty = new ExtendObjectProperty();
+            idProperty.Name = "ID";
+            idProperty.Metadata.DisplayName = "ID";
+            idProperty.Type = PropertyDefinitionType.Autonumber;
+            idProperty.ExtendType = ExtendPropertyType.UniqueIdAuto;
+            extendObject.Properties.Add(idProperty);
+
+            // Add LookupType property
+            ExtendObjectProperty lookupTypeProperty = new ExtendObjectProperty();
+            lookupTypeProperty.Name = "LookupType";
+            lookupTypeProperty.Metadata.DisplayName = "Lookup Type";
+            lookupTypeProperty.Type = PropertyDefinitionType.Text;
+            extendObject.Properties.Add(lookupTypeProperty);
+
+            // Add Value property
+            ExtendObjectProperty valueProperty = new ExtendObjectProperty();
+            valueProperty.Name = "Value";
+            valueProperty.Metadata.DisplayName = "Value";
+            valueProperty.Type = PropertyDefinitionType.Text;
+            extendObject.Properties.Add(valueProperty);
+
+            // Add DisplayText property
+            ExtendObjectProperty displayProperty = new ExtendObjectProperty();
+            displayProperty.Name = "DisplayText";
+            displayProperty.Metadata.DisplayName = "Display Text";
+            displayProperty.Type = PropertyDefinitionType.Text;
+            extendObject.Properties.Add(displayProperty);
+
+            // Add IsDefault property
+            ExtendObjectProperty defaultProperty = new ExtendObjectProperty();
+            defaultProperty.Name = "IsDefault";
+            defaultProperty.Metadata.DisplayName = "Is Default";
+            defaultProperty.Type = PropertyDefinitionType.YesNo;
+            extendObject.Properties.Add(defaultProperty);
+
+            // Add Order property
+            ExtendObjectProperty orderProperty = new ExtendObjectProperty();
+            orderProperty.Name = "Order";
+            orderProperty.Metadata.DisplayName = "Order";
+            orderProperty.Type = PropertyDefinitionType.Number;
+            extendObject.Properties.Add(orderProperty);
+
+            SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
+            smoDefinition.Create(extendObject);
+            // STRUCTURE: {TargetFolder}\{formName}\Lookups
+            string category;
+            if (string.IsNullOrEmpty(targetFolder))
             {
-                DeleteSmartObject(smoName);
-
-                _connectionManager.Connect();
-
-                ServiceInstance serviceInstance = ServiceInstance.Create(
-                    _connectionManager.ManagementServer.GetServiceInstanceForExtend(new Guid(_config.K2.SmartBoxGuid), string.Empty));
-                ExtendObject extendObject = serviceInstance.GetCreateExtender();
-
-                extendObject.Name = smoName;
-                extendObject.Metadata.DisplayName = smoName.Replace("_", " ");
-
-                // Add ID property (autonumber)
-                ExtendObjectProperty idProperty = new ExtendObjectProperty();
-                idProperty.Name = "ID";
-                idProperty.Metadata.DisplayName = "ID";
-                idProperty.Type = PropertyDefinitionType.Autonumber;
-                idProperty.ExtendType = ExtendPropertyType.UniqueIdAuto;
-                extendObject.Properties.Add(idProperty);
-
-                // Add LookupType property
-                ExtendObjectProperty lookupTypeProperty = new ExtendObjectProperty();
-                lookupTypeProperty.Name = "LookupType";
-                lookupTypeProperty.Metadata.DisplayName = "Lookup Type";
-                lookupTypeProperty.Type = PropertyDefinitionType.Text;
-                extendObject.Properties.Add(lookupTypeProperty);
-
-                // Add Value property
-                ExtendObjectProperty valueProperty = new ExtendObjectProperty();
-                valueProperty.Name = "Value";
-                valueProperty.Metadata.DisplayName = "Value";
-                valueProperty.Type = PropertyDefinitionType.Text;
-                extendObject.Properties.Add(valueProperty);
-
-                // Add DisplayText property
-                ExtendObjectProperty displayProperty = new ExtendObjectProperty();
-                displayProperty.Name = "DisplayText";
-                displayProperty.Metadata.DisplayName = "Display Text";
-                displayProperty.Type = PropertyDefinitionType.Text;
-                extendObject.Properties.Add(displayProperty);
-
-                // Add IsDefault property
-                ExtendObjectProperty defaultProperty = new ExtendObjectProperty();
-                defaultProperty.Name = "IsDefault";
-                defaultProperty.Metadata.DisplayName = "Is Default";
-                defaultProperty.Type = PropertyDefinitionType.YesNo;
-                extendObject.Properties.Add(defaultProperty);
-
-                // Add Order property
-                ExtendObjectProperty orderProperty = new ExtendObjectProperty();
-                orderProperty.Name = "Order";
-                orderProperty.Metadata.DisplayName = "Order";
-                orderProperty.Type = PropertyDefinitionType.Number;
-                extendObject.Properties.Add(orderProperty);
-
-                SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
-                smoDefinition.Create(extendObject);
-                // STRUCTURE: {TargetFolder}\{formName}\Lookups
-                string category;
-                if (string.IsNullOrEmpty(targetFolder))
-                {
-                    category = string.IsNullOrEmpty(formName) ? "Generated Lookups" : $"{formName}\\Lookups";
-                }
-                else
-                {
-                    category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\Lookups" : $"{targetFolder}\\{formName}\\Lookups";
-                }
-                smoDefinition.AddDeploymentCategory(category);
-                smoDefinition.Build();
-
-                string smoGuid = smoDefinition.Guid.ToString();
-                _createdSmartObjectGuids[smoName] = smoGuid;
-
-                // REGISTER WITH THE REGISTRY
-                SmartObjectViewRegistry.RegisterSmartObject(
-                    smoName,
-                    smoGuid,
-                    SmartObjectViewRegistry.SmartObjectType.Consolidated
-                );
-
-                Console.WriteLine($"  Created Consolidated Lookup SmartObject {smoName} with GUID: {smoGuid}");
-
-                return smoDefinition;
+                category = string.IsNullOrEmpty(formName) ? "Generated Lookups" : $"{formName}\\Lookups";
             }
-            finally
+            else
             {
-                _connectionManager.Disconnect();
+                category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\Lookups" : $"{targetFolder}\\{formName}\\Lookups";
             }
+            smoDefinition.AddDeploymentCategory(category);
+            smoDefinition.Build();
+
+            string smoGuid = smoDefinition.Guid.ToString();
+            _createdSmartObjectGuids[smoName] = smoGuid;
+
+            // REGISTER WITH THE REGISTRY
+            SmartObjectViewRegistry.RegisterSmartObject(
+                smoName,
+                smoGuid,
+                SmartObjectViewRegistry.SmartObjectType.Consolidated
+            );
+
+            Console.WriteLine($"  Created Consolidated Lookup SmartObject {smoName} with GUID: {smoGuid}");
+
+            return smoDefinition;
         }
 
         private SmartObjectDefinition CreateMainSmartObject(string smoName, List<JObject> fields, string formName = null, string targetFolder = null)
         {
-            try
+            // PERFORMANCE FIX: Reuses existing connection instead of creating new one
+            DeleteSmartObject(smoName);
+
+            ServiceInstance serviceInstance = ServiceInstance.Create(
+                _connectionManager.ManagementServer.GetServiceInstanceForExtend(new Guid(_config.K2.SmartBoxGuid), string.Empty));
+            ExtendObject extendObject = serviceInstance.GetCreateExtender();
+
+            extendObject.Name = smoName;
+            extendObject.Metadata.DisplayName = smoName.Replace("_", " ");
+
+            _smoFieldMappings[smoName] = new Dictionary<string, FieldInfo>();
+
+            HashSet<string> usedPropertyNames = new HashSet<string>();
+            HashSet<string> usedDisplayNames = new HashSet<string>();
+
+            // Add ID property
+            ExtendObjectProperty idProperty = new ExtendObjectProperty();
+            idProperty.Name = "ID";
+            idProperty.Metadata.DisplayName = "ID";
+            idProperty.Type = PropertyDefinitionType.Autonumber;
+            idProperty.ExtendType = ExtendPropertyType.UniqueIdAuto;
+            extendObject.Properties.Add(idProperty);
+            usedPropertyNames.Add("ID");
+            usedDisplayNames.Add("ID");
+
+            _smoFieldMappings[smoName]["ID"] = new FieldInfo
             {
-                DeleteSmartObject(smoName);
+                FieldGuid = Guid.NewGuid().ToString(),
+                FieldName = "ID",
+                DisplayName = "ID",
+                DataType = "autonumber"
+            };
 
-                _connectionManager.Connect();
+            // Add properties from JSON
+            Console.WriteLine($"\n=== Processing {fields.Count} fields for SmartObject '{smoName}' ===");
+            foreach (var field in fields)
+            {
+                string columnName = field["ColumnName"]?.Value<string>();
+                string displayName = field["DisplayName"]?.Value<string>();
+                Console.WriteLine($"  Processing field: ColumnName='{columnName}', DisplayName='{displayName}'");
 
-                ServiceInstance serviceInstance = ServiceInstance.Create(
-                    _connectionManager.ManagementServer.GetServiceInstanceForExtend(new Guid(_config.K2.SmartBoxGuid), string.Empty));
-                ExtendObject extendObject = serviceInstance.GetCreateExtender();
-
-                extendObject.Name = smoName;
-                extendObject.Metadata.DisplayName = smoName.Replace("_", " ");
-
-                _smoFieldMappings[smoName] = new Dictionary<string, FieldInfo>();
-
-                HashSet<string> usedPropertyNames = new HashSet<string>();
-                HashSet<string> usedDisplayNames = new HashSet<string>();
-
-                // Add ID property
-                ExtendObjectProperty idProperty = new ExtendObjectProperty();
-                idProperty.Name = "ID";
-                idProperty.Metadata.DisplayName = "ID";
-                idProperty.Type = PropertyDefinitionType.Autonumber;
-                idProperty.ExtendType = ExtendPropertyType.UniqueIdAuto;
-                extendObject.Properties.Add(idProperty);
-                usedPropertyNames.Add("ID");
-                usedDisplayNames.Add("ID");
-
-                _smoFieldMappings[smoName]["ID"] = new FieldInfo
+                ExtendObjectProperty property = CreatePropertyFromJson(field, usedPropertyNames, usedDisplayNames);
+                if (property != null)
                 {
-                    FieldGuid = Guid.NewGuid().ToString(),
-                    FieldName = "ID",
-                    DisplayName = "ID",
-                    DataType = "autonumber"
-                };
+                    extendObject.Properties.Add(property);
+                    Console.WriteLine($"  ✓ Added property: Name='{property.Name}' | DisplayName='{property.Metadata.DisplayName}' ({property.Type})");
 
-                // Add properties from JSON
-                Console.WriteLine($"\n=== Processing {fields.Count} fields for SmartObject '{smoName}' ===");
-                foreach (var field in fields)
-                {
-                    string columnName = field["ColumnName"]?.Value<string>();
-                    string displayName = field["DisplayName"]?.Value<string>();
-                    Console.WriteLine($"  Processing field: ColumnName='{columnName}', DisplayName='{displayName}'");
-
-                    ExtendObjectProperty property = CreatePropertyFromJson(field, usedPropertyNames, usedDisplayNames);
-                    if (property != null)
+                    _smoFieldMappings[smoName][property.Name] = new FieldInfo
                     {
-                        extendObject.Properties.Add(property);
-                        Console.WriteLine($"  ✓ Added property: Name='{property.Name}' | DisplayName='{property.Metadata.DisplayName}' ({property.Type})");
-
-                        _smoFieldMappings[smoName][property.Name] = new FieldInfo
-                        {
-                            FieldGuid = Guid.NewGuid().ToString(),
-                            FieldName = property.Name.ToUpper().Replace(" ", ""),
-                            DisplayName = property.Metadata.DisplayName.Replace("_", " "),
-                            DataType = GetDataTypeString(property.Type)
-                        };
-                    }
+                        FieldGuid = Guid.NewGuid().ToString(),
+                        FieldName = property.Name.ToUpper().Replace(" ", ""),
+                        DisplayName = property.Metadata.DisplayName.Replace("_", " "),
+                        DataType = GetDataTypeString(property.Type)
+                    };
                 }
-                Console.WriteLine($"=== Finished processing fields. Total properties in ExtendObject: {extendObject.Properties.Count} ===\n");
-
-                SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
-                smoDefinition.Create(extendObject);
-                // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
-                string category;
-                if (string.IsNullOrEmpty(targetFolder))
-                {
-                    category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
-                }
-                else
-                {
-                    category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
-                }
-                smoDefinition.AddDeploymentCategory(category);
-                smoDefinition.Build();
-
-                string smoGuid = smoDefinition.Guid.ToString();
-                _createdSmartObjectGuids[smoName] = smoGuid;
-
-                // REGISTER WITH THE REGISTRY
-                SmartObjectViewRegistry.RegisterSmartObject(
-                    smoName,
-                    smoGuid,
-                    SmartObjectViewRegistry.SmartObjectType.Main
-                );
-
-                Console.WriteLine($"  Created SmartObject {smoName} with GUID: {smoGuid}");
-
-                return smoDefinition;
             }
-            finally
+            Console.WriteLine($"=== Finished processing fields. Total properties in ExtendObject: {extendObject.Properties.Count} ===\n");
+
+            SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
+            smoDefinition.Create(extendObject);
+            // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
+            string category;
+            if (string.IsNullOrEmpty(targetFolder))
             {
-                _connectionManager.Disconnect();
+                category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
             }
+            else
+            {
+                category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
+            }
+            smoDefinition.AddDeploymentCategory(category);
+            smoDefinition.Build();
+
+            string smoGuid = smoDefinition.Guid.ToString();
+            _createdSmartObjectGuids[smoName] = smoGuid;
+
+            // REGISTER WITH THE REGISTRY
+            SmartObjectViewRegistry.RegisterSmartObject(
+                smoName,
+                smoGuid,
+                SmartObjectViewRegistry.SmartObjectType.Main
+            );
+
+            Console.WriteLine($"  Created SmartObject {smoName} with GUID: {smoGuid}");
+
+            return smoDefinition;
         }
 
         private SmartObjectDefinition CreateChildSmartObject(string smoName, List<JObject> fields, string parentSmoName, string formName = null, string targetFolder = null)
         {
-            try
+            // PERFORMANCE FIX: Reuses existing connection instead of creating new one
+            DeleteSmartObject(smoName);
+
+            ServiceInstance serviceInstance = ServiceInstance.Create(
+                _connectionManager.ManagementServer.GetServiceInstanceForExtend(new Guid(_config.K2.SmartBoxGuid), string.Empty));
+            ExtendObject extendObject = serviceInstance.GetCreateExtender();
+
+            extendObject.Name = smoName;
+            extendObject.Metadata.DisplayName = smoName.Replace("_", " ");
+
+            _smoFieldMappings[smoName] = new Dictionary<string, FieldInfo>();
+
+            HashSet<string> usedPropertyNames = new HashSet<string>();
+            HashSet<string> usedDisplayNames = new HashSet<string>();
+
+            // Add ID property
+            ExtendObjectProperty idProperty = new ExtendObjectProperty();
+            idProperty.Name = "ID";
+            idProperty.Metadata.DisplayName = "ID";
+            idProperty.Type = PropertyDefinitionType.Autonumber;
+            idProperty.ExtendType = ExtendPropertyType.UniqueIdAuto;
+            extendObject.Properties.Add(idProperty);
+            usedPropertyNames.Add("ID");
+            usedDisplayNames.Add("ID");
+
+            _smoFieldMappings[smoName]["ID"] = new FieldInfo
             {
-                DeleteSmartObject(smoName);
+                FieldGuid = Guid.NewGuid().ToString(),
+                FieldName = "ID",
+                DisplayName = "ID",
+                DataType = "autonumber"
+            };
 
-                _connectionManager.Connect();
+            // Add ParentID property for foreign key
+            ExtendObjectProperty parentIdProperty = new ExtendObjectProperty();
+            parentIdProperty.Name = "ParentID";
+            parentIdProperty.Metadata.DisplayName = "Parent ID";
+            parentIdProperty.Type = PropertyDefinitionType.Number;
+            extendObject.Properties.Add(parentIdProperty);
+            usedPropertyNames.Add("ParentID");
+            usedDisplayNames.Add("Parent ID");
 
-                ServiceInstance serviceInstance = ServiceInstance.Create(
-                    _connectionManager.ManagementServer.GetServiceInstanceForExtend(new Guid(_config.K2.SmartBoxGuid), string.Empty));
-                ExtendObject extendObject = serviceInstance.GetCreateExtender();
+            _smoFieldMappings[smoName]["ParentID"] = new FieldInfo
+            {
+                FieldGuid = Guid.NewGuid().ToString(),
+                FieldName = "PARENTID",
+                DisplayName = "Parent ID",
+                DataType = "number"
+            };
 
-                extendObject.Name = smoName;
-                extendObject.Metadata.DisplayName = smoName.Replace("_", " ");
-
-                _smoFieldMappings[smoName] = new Dictionary<string, FieldInfo>();
-
-                HashSet<string> usedPropertyNames = new HashSet<string>();
-                HashSet<string> usedDisplayNames = new HashSet<string>();
-
-                // Add ID property
-                ExtendObjectProperty idProperty = new ExtendObjectProperty();
-                idProperty.Name = "ID";
-                idProperty.Metadata.DisplayName = "ID";
-                idProperty.Type = PropertyDefinitionType.Autonumber;
-                idProperty.ExtendType = ExtendPropertyType.UniqueIdAuto;
-                extendObject.Properties.Add(idProperty);
-                usedPropertyNames.Add("ID");
-                usedDisplayNames.Add("ID");
-
-                _smoFieldMappings[smoName]["ID"] = new FieldInfo
+            // Add properties from JSON
+            foreach (var field in fields)
+            {
+                ExtendObjectProperty property = CreatePropertyFromJson(field, usedPropertyNames, usedDisplayNames);
+                if (property != null)
                 {
-                    FieldGuid = Guid.NewGuid().ToString(),
-                    FieldName = "ID",
-                    DisplayName = "ID",
-                    DataType = "autonumber"
-                };
+                    extendObject.Properties.Add(property);
+                    Console.WriteLine($"  Added property: {property.Name} | DisplayName: {property.Metadata.DisplayName} ({property.Type})");
 
-                // Add ParentID property for foreign key
-                ExtendObjectProperty parentIdProperty = new ExtendObjectProperty();
-                parentIdProperty.Name = "ParentID";
-                parentIdProperty.Metadata.DisplayName = "Parent ID";
-                parentIdProperty.Type = PropertyDefinitionType.Number;
-                extendObject.Properties.Add(parentIdProperty);
-                usedPropertyNames.Add("ParentID");
-                usedDisplayNames.Add("Parent ID");
-
-                _smoFieldMappings[smoName]["ParentID"] = new FieldInfo
-                {
-                    FieldGuid = Guid.NewGuid().ToString(),
-                    FieldName = "PARENTID",
-                    DisplayName = "Parent ID",
-                    DataType = "number"
-                };
-
-                // Add properties from JSON
-                foreach (var field in fields)
-                {
-                    ExtendObjectProperty property = CreatePropertyFromJson(field, usedPropertyNames, usedDisplayNames);
-                    if (property != null)
+                    _smoFieldMappings[smoName][property.Name] = new FieldInfo
                     {
-                        extendObject.Properties.Add(property);
-                        Console.WriteLine($"  Added property: {property.Name} | DisplayName: {property.Metadata.DisplayName} ({property.Type})");
-
-                        _smoFieldMappings[smoName][property.Name] = new FieldInfo
-                        {
-                            FieldGuid = Guid.NewGuid().ToString(),
-                            FieldName = property.Name.ToUpper().Replace(" ", ""),
-                            DisplayName = property.Metadata.DisplayName.Replace("_", " "),
-                            DataType = GetDataTypeString(property.Type)
-                        };
-                    }
+                        FieldGuid = Guid.NewGuid().ToString(),
+                        FieldName = property.Name.ToUpper().Replace(" ", ""),
+                        DisplayName = property.Metadata.DisplayName.Replace("_", " "),
+                        DataType = GetDataTypeString(property.Type)
+                    };
                 }
-
-                SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
-                smoDefinition.Create(extendObject);
-                // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
-                string category;
-                if (string.IsNullOrEmpty(targetFolder))
-                {
-                    category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
-                }
-                else
-                {
-                    category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
-                }
-                smoDefinition.AddDeploymentCategory(category);
-                smoDefinition.Build();
-
-                string smoGuid = smoDefinition.Guid.ToString();
-                _createdSmartObjectGuids[smoName] = smoGuid;
-
-                // REGISTER WITH THE REGISTRY
-                SmartObjectViewRegistry.RegisterSmartObject(
-                    smoName,
-                    smoGuid,
-                    SmartObjectViewRegistry.SmartObjectType.Child,
-                    parentSmoName
-                );
-
-                Console.WriteLine($"  Created Child SmartObject {smoName} with GUID: {smoGuid}");
-                Console.WriteLine($"  Parent SmartObject: {parentSmoName}");
-
-                return smoDefinition;
             }
-            finally
+
+            SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
+            smoDefinition.Create(extendObject);
+            // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
+            string category;
+            if (string.IsNullOrEmpty(targetFolder))
             {
-                _connectionManager.Disconnect();
+                category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
             }
+            else
+            {
+                category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
+            }
+            smoDefinition.AddDeploymentCategory(category);
+            smoDefinition.Build();
+
+            string smoGuid = smoDefinition.Guid.ToString();
+            _createdSmartObjectGuids[smoName] = smoGuid;
+
+            // REGISTER WITH THE REGISTRY
+            SmartObjectViewRegistry.RegisterSmartObject(
+                smoName,
+                smoGuid,
+                SmartObjectViewRegistry.SmartObjectType.Child,
+                parentSmoName
+            );
+
+            Console.WriteLine($"  Created Child SmartObject {smoName} with GUID: {smoGuid}");
+            Console.WriteLine($"  Parent SmartObject: {parentSmoName}");
+
+            return smoDefinition;
         }
 
         private void PopulateConsolidatedLookupData(string smoName, Dictionary<string, JArray> allLookupData)
@@ -651,50 +655,174 @@ namespace K2SmartObjectGenerator
             return property;
         }
 
+        /// <summary>
+        /// Retrieves SmartObject definition with retry logic to handle K2 server indexing delays
+        /// Validates that the SmartObject has the expected properties before considering it successful
+        /// </summary>
+        private string GetSmartObjectWithRetry(string smoName, string smoType, int maxRetries = 8, int delayMs = 3000)
+        {
+            Exception lastException = null;
+
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] Attempting to get {smoType} SmartObject: {smoName}");
+                    string xml = _connectionManager.ManagementServer.GetSmartObjectDefinition(smoName);
+
+                    // PERFORMANCE FIX: Validate the SmartObject has properties before returning
+                    // K2 server may return XML before properties are fully indexed
+                    try
+                    {
+                        SmartObjectDefinition testObj = SmartObjectDefinition.Create(xml);
+                        if (testObj.Properties.Count < 1)
+                        {
+                            throw new Exception($"SmartObject retrieved but has no properties. Server may still be indexing.");
+                        }
+                    }
+                    catch (Exception validateEx)
+                    {
+                        if (attempt < maxRetries)
+                        {
+                            // Exponential backoff: delay increases with each attempt
+                            int actualDelay = delayMs * attempt;
+                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Validation failed for {smoType} SmartObject '{smoName}': {validateEx.Message}");
+                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
+                            System.Threading.Thread.Sleep(actualDelay);
+                            continue;
+                        }
+                        throw;
+                    }
+
+                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✓ Successfully retrieved and validated {smoType} SmartObject: {smoName}");
+                    return xml;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Failed to get {smoType} SmartObject '{smoName}': {ex.Message}");
+
+                    if (attempt < maxRetries)
+                    {
+                        // Exponential backoff: delay increases with each attempt
+                        int actualDelay = delayMs * attempt;
+                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
+                        System.Threading.Thread.Sleep(actualDelay);
+                    }
+                }
+            }
+
+            throw new Exception($"Failed to retrieve {smoType} SmartObject '{smoName}' after {maxRetries} attempts. Last error: {lastException?.Message}", lastException);
+        }
+
+        /// <summary>
+        /// Retrieves Association SmartObject with retry logic to handle K2 server indexing delays
+        /// Validates that the SmartObject has the expected properties before considering it successful
+        /// </summary>
+        private string GetAssociationSmartObjectWithRetry(string smoName, string smoType, int maxRetries = 8, int delayMs = 3000)
+        {
+            Exception lastException = null;
+
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] Attempting to get {smoType} Association SmartObject: {smoName}");
+                    string xml = _connectionManager.ManagementServer.GetAssociationSmartObject(smoName);
+
+                    // PERFORMANCE FIX: Validate the SmartObject has properties before returning
+                    // K2 server may return XML before properties are fully indexed
+                    try
+                    {
+                        AssociationSmartObject testObj = AssociationSmartObject.Create(xml);
+                        if (testObj.Properties.Count < 2)
+                        {
+                            throw new Exception($"SmartObject retrieved but only has {testObj.Properties.Count} properties (expected at least 2). Server may still be indexing.");
+                        }
+                    }
+                    catch (Exception validateEx)
+                    {
+                        if (attempt < maxRetries)
+                        {
+                            // Exponential backoff: delay increases with each attempt
+                            int actualDelay = delayMs * attempt;
+                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Validation failed for {smoType} Association SmartObject '{smoName}': {validateEx.Message}");
+                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
+                            System.Threading.Thread.Sleep(actualDelay);
+                            continue;
+                        }
+                        throw;
+                    }
+
+                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✓ Successfully retrieved and validated {smoType} Association SmartObject: {smoName}");
+                    return xml;
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Failed to get {smoType} Association SmartObject '{smoName}': {ex.Message}");
+
+                    if (attempt < maxRetries)
+                    {
+                        // Exponential backoff: delay increases with each attempt
+                        int actualDelay = delayMs * attempt;
+                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
+                        System.Threading.Thread.Sleep(actualDelay);
+                    }
+                }
+            }
+
+            throw new Exception($"Failed to retrieve {smoType} Association SmartObject '{smoName}' after {maxRetries} attempts. Last error: {lastException?.Message}", lastException);
+        }
+
         private SmartObjectDefinition CreateAssociation(string parentSmo, string childSmo,
             SourceCode.SmartObjects.Authoring.AssociationType associationType, string formName = null, string targetFolder = null)
         {
-            try
+            // PERFORMANCE FIX: Reuses existing connection instead of creating new one
+
+            // Retry logic for SmartObject retrieval (K2 server needs time to index after publish)
+            string parentXml = GetSmartObjectWithRetry(parentSmo, "parent");
+            SmartObjectDefinition parentDefinition = SmartObjectDefinition.Create(parentXml);
+
+            string childXml = GetAssociationSmartObjectWithRetry(childSmo, "child");
+            AssociationSmartObject childDefinition = AssociationSmartObject.Create(childXml);
+
+            // SAFETY CHECK: Verify properties exist before accessing by index
+            if (parentDefinition.Properties.Count < 1)
             {
-                _connectionManager.Connect();
-
-                string parentXml = _connectionManager.ManagementServer.GetSmartObjectDefinition(parentSmo);
-                SmartObjectDefinition parentDefinition = SmartObjectDefinition.Create(parentXml);
-
-                string childXml = _connectionManager.ManagementServer.GetAssociationSmartObject(childSmo);
-                AssociationSmartObject childDefinition = AssociationSmartObject.Create(childXml);
-
-                var parentIdProperty = childDefinition.Properties[1]; // ParentID
-                var parentPrimaryKey = parentDefinition.Properties[0]; // ID
-
-                parentDefinition.AddAssociation(childDefinition, parentIdProperty, parentPrimaryKey,
-                    associationType, $"{parentSmo} to {childSmo} association");
-                // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
-                string category;
-                if (string.IsNullOrEmpty(targetFolder))
-                {
-                    category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
-                }
-                else
-                {
-                    category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
-                }
-                parentDefinition.AddDeploymentCategory(category);
-                parentDefinition.Build();
-
-                return parentDefinition;
+                throw new Exception($"Parent SmartObject '{parentSmo}' does not have expected properties. Properties count: {parentDefinition.Properties.Count}");
             }
-            finally
+            if (childDefinition.Properties.Count < 2)
             {
-                _connectionManager.Disconnect();
+                throw new Exception($"Child SmartObject '{childSmo}' does not have expected properties. Properties count: {childDefinition.Properties.Count}. Expected at least 2 properties (ID and ParentID).");
             }
+
+            var parentIdProperty = childDefinition.Properties[1]; // ParentID
+            var parentPrimaryKey = parentDefinition.Properties[0]; // ID
+
+            parentDefinition.AddAssociation(childDefinition, parentIdProperty, parentPrimaryKey,
+                associationType, $"{parentSmo} to {childSmo} association");
+            // STRUCTURE: {TargetFolder}\{formName}\SmartObjects
+            string category;
+            if (string.IsNullOrEmpty(targetFolder))
+            {
+                category = string.IsNullOrEmpty(formName) ? "Generated SmartObjects" : $"{formName}\\SmartObjects";
+            }
+            else
+            {
+                category = string.IsNullOrEmpty(formName) ? $"{targetFolder}\\SmartObjects" : $"{targetFolder}\\{formName}\\SmartObjects";
+            }
+            parentDefinition.AddDeploymentCategory(category);
+            parentDefinition.Build();
+
+            return parentDefinition;
         }
 
         public void DeleteSmartObject(string smoName)
         {
+            // PERFORMANCE FIX: Reuses existing connection instead of creating new one
             try
             {
-                _connectionManager.Connect();
                 SmartObjectExplorer checkSmartObjectExist = _connectionManager.ManagementServer.GetSmartObjects(smoName);
 
                 if (checkSmartObjectExist.SmartObjects.Count > 0)
@@ -709,10 +837,6 @@ namespace K2SmartObjectGenerator
             catch (Exception ex)
             {
                 Console.WriteLine($"  Note: Could not delete SmartObject {smoName}: {ex.Message}");
-            }
-            finally
-            {
-                _connectionManager.Disconnect();
             }
         }
 
@@ -764,19 +888,15 @@ namespace K2SmartObjectGenerator
 
         private void PublishSmartObjects(SmartObjectDefinitionsPublish publishSmo)
         {
+            // PERFORMANCE FIX: Reuses existing connection instead of creating new one
             try
             {
-                _connectionManager.Connect();
                 _connectionManager.ManagementServer.PublishSmartObjects(publishSmo.ToPublishXml());
                 Console.WriteLine("SmartObjects published successfully");
             }
             catch (Exception ex)
             {
                 throw new Exception($"Failed to publish SmartObjects: {ex.Message}", ex);
-            }
-            finally
-            {
-                _connectionManager.Disconnect();
             }
         }
 
