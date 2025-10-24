@@ -131,7 +131,9 @@ namespace K2SmartObjectGenerator
             view.AppendChild(parameters);
 
             XmlHelper.AddElement(doc, view, "Description", "");
-            XmlHelper.AddElement(doc, view, "DisplayName", viewName);
+            // Use extracted view title if available, otherwise fall back to technical view name
+            string displayName = !string.IsNullOrEmpty(viewTitle) ? viewTitle : viewName;
+            XmlHelper.AddElement(doc, view, "DisplayName", displayName);
 
             return doc;
         }
@@ -1137,7 +1139,9 @@ namespace K2SmartObjectGenerator
             view.AppendChild(parameters);
 
             XmlHelper.AddElement(doc, view, "Description", "");
-            XmlHelper.AddElement(doc, view, "DisplayName", viewName);
+            // Use extracted view title if available, otherwise fall back to technical view name
+            string displayName = !string.IsNullOrEmpty(viewTitle) ? viewTitle : viewName;
+            XmlHelper.AddElement(doc, view, "DisplayName", displayName);
 
             return doc;
         }
