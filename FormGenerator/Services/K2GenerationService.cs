@@ -170,13 +170,19 @@ namespace FormGenerator.Services
         /// </summary>
         public async Task<K2GenerationResult> GenerateK2ArtifactsAsync(K2GenerationRequest request)
         {
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
-                // Capture Console.WriteLine output and redirect to status updates
+                // PERFORMANCE: Only capture console output when verbose logging is enabled
+                // This prevents console I/O overhead from halting the app with large forms
                 var originalConsoleOut = Console.Out;
                 var consoleWriter = new System.IO.StringWriter();
                 System.Threading.Timer? consoleFlushTimer = null;
-                Console.SetOut(consoleWriter);
+
+                // Only redirect console if verbose logging is enabled
+                if (EnableVerboseLogging)
+                {
+                    Console.SetOut(consoleWriter);
+                }
 
                 try
                 {
@@ -184,29 +190,33 @@ namespace FormGenerator.Services
                     if (EnableVerboseLogging)
                     {
                         K2LoggingConfiguration.EnableDebug();
+                        _logger = new K2Logger(OnStatusUpdate, "K2Gen");
+
+                        // ONLY create console flush timer when verbose logging is enabled
+                        // Create a background task to flush console output periodically
+                        consoleFlushTimer = new System.Threading.Timer(_ =>
+                        {
+                            var output = consoleWriter.ToString();
+                            if (!string.IsNullOrEmpty(output))
+                            {
+                                // Split by lines and send each line
+                                var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                                foreach (var line in lines)
+                                {
+                                    OnStatusUpdate($"[Console] {line}");
+                                }
+                                consoleWriter.GetStringBuilder().Clear();
+                            }
+                        }, null, 500, 500); // Flush every 500ms
                     }
                     else
                     {
-                        K2LoggingConfiguration.SetNormal();
+                        // PERFORMANCE: Disable all logging when verbose is off
+                        // Set to Error-only (which effectively silences Info/Debug/Verbose logs)
+                        K2LoggingConfiguration.CurrentLogLevel = K2LogLevel.Error;
+                        // Create a null logger that does nothing
+                        _logger = new K2Logger((msg) => { }, "K2Gen");
                     }
-
-                    _logger = new K2Logger(OnStatusUpdate, "K2Gen");
-
-                    // Create a background task to flush console output periodically
-                    consoleFlushTimer = new System.Threading.Timer(_ =>
-                    {
-                        var output = consoleWriter.ToString();
-                        if (!string.IsNullOrEmpty(output))
-                        {
-                            // Split by lines and send each line
-                            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                            foreach (var line in lines)
-                            {
-                                OnStatusUpdate($"[Console] {line}");
-                            }
-                            consoleWriter.GetStringBuilder().Clear();
-                        }
-                    }, null, 500, 500); // Flush every 500ms
 
                     var result = new K2GenerationResult
                     {
@@ -320,8 +330,8 @@ namespace FormGenerator.Services
                     _logger.Debug($"Passing configuration and connection to SmartObjectGenerator");
 
                     var smoGenerator = new SmartObjectGenerator(_connectionManager, _config);
-                    _logger.Verbose("Calling GenerateSmartObjectsFromJson...");
-                    smoGenerator.GenerateSmartObjectsFromJson(jsonContent);
+                    _logger.Verbose("Calling GenerateSmartObjectsFromJsonAsync...");
+                    await smoGenerator.GenerateSmartObjectsFromJsonAsync(jsonContent);
 
                     result.SmartObjectsCreated = SmartObjectViewRegistry.GetSmartObjectCount();
                     _logger.Info($"✓ Created {result.SmartObjectsCreated} SmartObjects");
@@ -453,15 +463,18 @@ namespace FormGenerator.Services
                         }
                     }
 
-                    // Dispose timer and flush any remaining console output
+                    // Dispose timer and flush any remaining console output (only if verbose logging enabled)
                     consoleFlushTimer?.Dispose();
-                    var finalOutput = consoleWriter.ToString();
-                    if (!string.IsNullOrEmpty(finalOutput))
+                    if (EnableVerboseLogging)
                     {
-                        var lines = finalOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                        foreach (var line in lines)
+                        var finalOutput = consoleWriter.ToString();
+                        if (!string.IsNullOrEmpty(finalOutput))
                         {
-                            OnStatusUpdate($"[Console] {line}");
+                            var lines = finalOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                            foreach (var line in lines)
+                            {
+                                OnStatusUpdate($"[Console] {line}");
+                            }
                         }
                     }
 
@@ -469,15 +482,18 @@ namespace FormGenerator.Services
                 }
                 catch (Exception ex)
                 {
-                    // Dispose timer and flush any remaining console output
+                    // Dispose timer and flush any remaining console output (only if verbose logging enabled)
                     consoleFlushTimer?.Dispose();
-                    var finalOutput = consoleWriter.ToString();
-                    if (!string.IsNullOrEmpty(finalOutput))
+                    if (EnableVerboseLogging)
                     {
-                        var lines = finalOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                        foreach (var line in lines)
+                        var finalOutput = consoleWriter.ToString();
+                        if (!string.IsNullOrEmpty(finalOutput))
                         {
-                            OnStatusUpdate($"[Console] {line}");
+                            var lines = finalOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                            foreach (var line in lines)
+                            {
+                                OnStatusUpdate($"[Console] {line}");
+                            }
                         }
                     }
 
@@ -528,6 +544,11 @@ namespace FormGenerator.Services
             config.Form.Theme = request.FormTheme;
             config.Form.UseTimestamp = request.UseTimestamp;
             config.Form.ForceCleanup = request.ForceCleanup;
+
+            // CRITICAL: Use the EnableVerboseLogging property set from the UI checkbox
+            // When unchecked, all logging is disabled for maximum performance
+            config.Logging.VerboseLogging = EnableVerboseLogging;
+            config.Logging.ShowProgress = EnableVerboseLogging;
 
             // Normalize target folder path - remove leading/trailing slashes and convert to backslash
             var targetFolder = request.TargetFolder ?? "TestForms";

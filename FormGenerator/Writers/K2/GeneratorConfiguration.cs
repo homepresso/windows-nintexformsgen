@@ -11,6 +11,7 @@ namespace K2SmartObjectGenerator.Config
         public K2Configuration K2 { get; set; }
         public FormConfiguration Form { get; set; }
         public ViewConfiguration View { get; set; }
+        public LoggingConfiguration Logging { get; set; }
 
         public GeneratorConfiguration()
         {
@@ -19,6 +20,7 @@ namespace K2SmartObjectGenerator.Config
             K2 = new K2Configuration();
             Form = new FormConfiguration();
             View = new ViewConfiguration();
+            Logging = new LoggingConfiguration();
         }
 
         public static GeneratorConfiguration CreateDefault()
@@ -165,5 +167,21 @@ namespace K2SmartObjectGenerator.Config
             return ViewTypesToExcludeFromFormRules?.Any(type =>
                 viewName?.IndexOf(type, StringComparison.OrdinalIgnoreCase) >= 0) ?? false;
         }
+    }
+
+    public class LoggingConfiguration
+    {
+        /// <summary>
+        /// Enable verbose logging (detailed retry messages, validation steps, etc.)
+        /// Controlled by "Enable Verbose Logging" checkbox in UI
+        /// </summary>
+        public bool VerboseLogging { get; set; } = false;
+
+        /// <summary>
+        /// Show progress indicators for major operations
+        /// Controlled by "Enable Verbose Logging" checkbox in UI
+        /// When false, all logging is disabled for maximum performance with large forms
+        /// </summary>
+        public bool ShowProgress { get; set; } = false;
     }
 }

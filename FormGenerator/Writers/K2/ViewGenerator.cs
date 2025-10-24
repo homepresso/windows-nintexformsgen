@@ -77,7 +77,8 @@ namespace K2SmartObjectGenerator
 
             if (viewsArray == null)
             {
-                Console.WriteLine("No views found in JSON");
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine("No views found in JSON");
                 return;
             }
 
@@ -87,13 +88,16 @@ namespace K2SmartObjectGenerator
             JArray dynamicSections = formDefObject?["DynamicSections"] as JArray ?? new JArray();
             JObject conditionalVisibility = formDefObject?["ConditionalVisibility"] as JObject ?? new JObject();
 
-            if (dynamicSections.Count > 0)
+            if (_config.Logging.VerboseLogging)
             {
-                Console.WriteLine($"  Found {dynamicSections.Count} dynamic section(s) with visibility rules at form level");
-            }
-            if (conditionalVisibility.Properties().Any())
-            {
-                Console.WriteLine($"  Found conditional visibility rules for {conditionalVisibility.Properties().Count()} field(s) at form level");
+                if (dynamicSections.Count > 0)
+                {
+                    Console.WriteLine($"  Found {dynamicSections.Count} dynamic section(s) with visibility rules at form level");
+                }
+                if (conditionalVisibility.Properties().Any())
+                {
+                    Console.WriteLine($"  Found conditional visibility rules for {conditionalVisibility.Properties().Count()} field(s) at form level");
+                }
             }
 
             // Define base category paths - respect TargetFolder from configuration
@@ -101,7 +105,8 @@ namespace K2SmartObjectGenerator
             string targetFolder = _config.Form.TargetFolder ?? "Generated";
             string baseCategory = $"{targetFolder}\\{formName}";
 
-            Console.WriteLine($"  View base category: {baseCategory}");
+            if (_config.Logging.VerboseLogging)
+                Console.WriteLine($"  View base category: {baseCategory}");
 
             // Process each InfoPath view independently
             foreach (JObject viewDef in viewsArray)
@@ -109,11 +114,13 @@ namespace K2SmartObjectGenerator
                 string viewName = viewDef["ViewName"]?.Value<string>()?.Replace(".xsl", "");
                 if (string.IsNullOrEmpty(viewName))
                 {
+                    // Always show warnings
                     Console.WriteLine("    WARNING: Found view with empty name, skipping...");
                     continue;
                 }
 
-                Console.WriteLine($"\n=== Processing InfoPath View: {viewName} ===");
+                if (_config.Logging.ShowProgress)
+                    Console.WriteLine($"\n=== Processing InfoPath View: {viewName} ===");
 
                 // Create a subfolder for views under the form
                 string viewCategory = $"{baseCategory}\\Views";
@@ -122,29 +129,34 @@ namespace K2SmartObjectGenerator
                 JArray viewControls = viewDef["Controls"] as JArray;
                 if (viewControls == null || viewControls.Count == 0)
                 {
-                    Console.WriteLine($"    No controls found for view: {viewName}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"    No controls found for view: {viewName}");
                     continue;
                 }
 
                 // Use form-wide DynamicSections and ConditionalVisibility (already extracted above)
 
-                if (dynamicSections.Count > 0)
+                if (_config.Logging.VerboseLogging)
                 {
-                    Console.WriteLine($"    Found {dynamicSections.Count} dynamic section(s) with visibility rules");
-                }
-                if (conditionalVisibility.Properties().Any())
-                {
-                    Console.WriteLine($"    Found conditional visibility rules for {conditionalVisibility.Properties().Count()} field(s)");
+                    if (dynamicSections.Count > 0)
+                    {
+                        Console.WriteLine($"    Found {dynamicSections.Count} dynamic section(s) with visibility rules");
+                    }
+                    if (conditionalVisibility.Properties().Any())
+                    {
+                        Console.WriteLine($"    Found conditional visibility rules for {conditionalVisibility.Properties().Count()} field(s)");
+                    }
+
+                    // Process nested tables and auto-generate "Add Item" buttons BEFORE segmentation
+                    Console.WriteLine("    Checking for nested RepeatingTables to auto-generate buttons...");
                 }
 
-                // Process nested tables and auto-generate "Add Item" buttons BEFORE segmentation
-                Console.WriteLine("    Checking for nested RepeatingTables to auto-generate buttons...");
                 var processedControls = NestedTableHandler.ProcessControlsWithNestedTableButtons(viewControls);
                 var processedControlsArray = new JArray(processedControls);
 
                 // Log nested table information
                 var nestedTableInfo = NestedTableHandler.GetNestedTableInfo(viewControls);
-                if (nestedTableInfo.Count > 0)
+                if (_config.Logging.VerboseLogging && nestedTableInfo.Count > 0)
                 {
                     Console.WriteLine($"    Found {nestedTableInfo.Count} nested table(s) with auto-generated buttons:");
                     foreach (var table in nestedTableInfo.Values)
@@ -197,13 +209,16 @@ namespace K2SmartObjectGenerator
                             segmentViewName = $"{formName}_{viewName}_Part{regularSegmentIndex}";
                         }
 
-                        Console.WriteLine($"\nGenerating Regular View (Segment {regularSegmentIndex}): {segmentViewName}");
-                        Console.WriteLine($"    Category: {viewCategory}");
-                        Console.WriteLine($"    Contains {segment.Controls.Count} controls");
+                        if (_config.Logging.VerboseLogging)
+                        {
+                            Console.WriteLine($"\nGenerating Regular View (Segment {regularSegmentIndex}): {segmentViewName}");
+                            Console.WriteLine($"    Category: {viewCategory}");
+                            Console.WriteLine($"    Contains {segment.Controls.Count} controls");
 
-                        // Check the position of this segment relative to repeating sections
-                        string positionInfo = DetermineSegmentPosition(segment, viewSegments);
-                        Console.WriteLine($"    Position: {positionInfo}");
+                            // Check the position of this segment relative to repeating sections
+                            string positionInfo = DetermineSegmentPosition(segment, viewSegments);
+                            Console.WriteLine($"    Position: {positionInfo}");
+                        }
 
                         JArray segmentControlsArray = new JArray(segment.Controls);
 
@@ -223,10 +238,13 @@ namespace K2SmartObjectGenerator
                         // Construct the SmartObject name consistently
                         string childSmoName = ConstructSmartObjectName(formName, sectionName);
 
-                        Console.WriteLine($"\n=== Processing Repeating Section: {sectionName} ===");
-                        Console.WriteLine($"    InfoPath View: {viewName}");
-                        Console.WriteLine($"    SmartObject: {childSmoName}");
-                        Console.WriteLine($"    Controls in section: {segment.Controls.Count}");
+                        if (_config.Logging.VerboseLogging)
+                        {
+                            Console.WriteLine($"\n=== Processing Repeating Section: {sectionName} ===");
+                            Console.WriteLine($"    InfoPath View: {viewName}");
+                            Console.WriteLine($"    SmartObject: {childSmoName}");
+                            Console.WriteLine($"    Controls in section: {segment.Controls.Count}");
+                        }
 
                         // Verify the SmartObject exists - CHECK REGISTRY FIRST
                         bool smoExists = SmartObjectViewRegistry.SmartObjectExists(childSmoName);
@@ -238,6 +256,7 @@ namespace K2SmartObjectGenerator
 
                         if (!smoExists)
                         {
+                            // Always show errors
                             Console.WriteLine($"    ERROR: SmartObject {childSmoName} not found, skipping view generation");
                             continue;
                         }
@@ -256,10 +275,13 @@ namespace K2SmartObjectGenerator
                             listViewName += $"_{repeatingSectionCounts[sectionName]}";
                         }
 
-                        Console.WriteLine($"\nGenerating Repeating Section Views:");
-                        Console.WriteLine($"    Item View: {itemViewName}");
-                        Console.WriteLine($"    List View: {listViewName}");
-                        Console.WriteLine($"    Category: {viewCategory}");
+                        if (_config.Logging.VerboseLogging)
+                        {
+                            Console.WriteLine($"\nGenerating Repeating Section Views:");
+                            Console.WriteLine($"    Item View: {itemViewName}");
+                            Console.WriteLine($"    List View: {listViewName}");
+                            Console.WriteLine($"    Category: {viewCategory}");
+                        }
 
                         JArray sectionControlsArray = new JArray(segment.Controls);
 

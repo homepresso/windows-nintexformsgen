@@ -22,19 +22,33 @@ namespace K2SmartObjectGenerator
         {
             _connectionManager = connectionManager;
             _config = config ?? GeneratorConfiguration.CreateDefault();
+
+            // CRITICAL: Ensure logging config is initialized and disabled for performance
+            if (_config.Logging == null)
+                _config.Logging = new LoggingConfiguration();
+
             _smoFieldMappings = new Dictionary<string, Dictionary<string, FieldInfo>>();
         }
 
         public Dictionary<string, Dictionary<string, FieldInfo>> FieldMappings => _smoFieldMappings;
         public Dictionary<string, string> CreatedSmartObjectGuids => _createdSmartObjectGuids;
 
+        /// <summary>
+        /// Synchronous wrapper for GenerateSmartObjectsFromJsonAsync - for backward compatibility
+        /// </summary>
         public void GenerateSmartObjectsFromJson(string jsonContent)
+        {
+            GenerateSmartObjectsFromJsonAsync(jsonContent).GetAwaiter().GetResult();
+        }
+
+        public async Task GenerateSmartObjectsFromJsonAsync(string jsonContent)
         {
             // PERFORMANCE FIX: Open connection once for entire generation process
             try
             {
                 _connectionManager.Connect();
-                Console.WriteLine("✓ Connected to K2 server - Connection will be reused for all operations");
+                if (_config.Logging.ShowProgress)
+                    Console.WriteLine("✓ Connected to K2 server - Connection will be reused for all operations");
 
                 JObject formData = JObject.Parse(jsonContent);
                 string formDisplayName = formData.Properties().First().Name; // Keep original name with spaces
@@ -43,7 +57,8 @@ namespace K2SmartObjectGenerator
                 string formName = NameSanitizer.SanitizeSmartObjectName(formDisplayName);
                 JObject formDefinition = formData[formDisplayName] as JObject;
 
-                Console.WriteLine($"\nProcessing form: {formName}");
+                if (_config.Logging.ShowProgress)
+                    Console.WriteLine($"\nProcessing form: {formName}");
 
                 // Extract TargetFolder from JSON (injected by K2GenerationService)
                 JObject formDefJson = formDefinition?["FormDefinition"] as JObject;
@@ -52,6 +67,7 @@ namespace K2SmartObjectGenerator
                 {
                     targetFolder = _config?.Form?.TargetFolder ?? "Generated";
                 }
+                if (_config.Logging.VerboseLogging)
                 Console.WriteLine($"  SmartObject target folder: {targetFolder}");
 
                 JArray dataArray = formDefinition["FormDefinition"]["Data"] as JArray;
@@ -62,7 +78,7 @@ namespace K2SmartObjectGenerator
                 }
 
                 // Generate lookup SmartObjects first
-                GenerateLookupSmartObjects(formName, formDisplayName, dataArray, targetFolder);
+                await GenerateLookupSmartObjectsAsync(formName, formDisplayName, dataArray, targetFolder);
 
                 // Separate main fields and repeating sections
                 var mainFields = new List<JObject>();
@@ -90,7 +106,8 @@ namespace K2SmartObjectGenerator
                 SmartObjectDefinitionsPublish publishSmo = new SmartObjectDefinitionsPublish();
 
                 // Create main SmartObject and track its fields
-                Console.WriteLine($"\nCreating main SmartObject: {formName}");
+                if (_config.Logging.ShowProgress)
+                    Console.WriteLine($"\nCreating main SmartObject: {formName}");
                 SmartObjectDefinition mainSmo = CreateMainSmartObject(formName, mainFields, formDisplayName, targetFolder);
                 publishSmo.SmartObjects.Add(mainSmo);
 
@@ -100,29 +117,35 @@ namespace K2SmartObjectGenerator
                     // PERFORMANCE FIX: Sanitize section names to match K2's rules
                     string sectionName = NameSanitizer.SanitizeSmartObjectName(section.Key);
                     string childSmoName = $"{formName}_{sectionName}";
-                    Console.WriteLine($"Creating child SmartObject: {childSmoName}");
+                    if (_config.Logging.ShowProgress)
+                        Console.WriteLine($"Creating child SmartObject: {childSmoName}");
                     SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, section.Value, formName, formDisplayName, targetFolder);
                     publishSmo.SmartObjects.Add(childSmo);
                 }
 
                 // Publish SmartObjects first
-                Console.WriteLine("\nPublishing SmartObjects...");
-                PublishSmartObjects(publishSmo);
+                if (_config.Logging.ShowProgress)
+                    Console.WriteLine("\nPublishing SmartObjects...");
+                await PublishSmartObjectsAsync(publishSmo);
 
                 // PERFORMANCE FIX: Give K2 server time to index published SmartObjects
                 // This is necessary before retrieving them for association creation
                 if (repeatingSections.Count > 0)
                 {
-                    // Scale delay with form complexity: base 5s + 500ms per section, max 15s
-                    int indexingDelay = Math.Min(5000 + (repeatingSections.Count * 500), 15000);
-                    Console.WriteLine($"Waiting {indexingDelay}ms for K2 server to index {repeatingSections.Count + 2} SmartObjects before creating associations...");
-                    System.Threading.Thread.Sleep(indexingDelay);
+                    // CRITICAL: Scale delay aggressively with form complexity
+                    // Large forms need significantly more time for K2 server indexing
+                    // Base 10s + 1s per section, max 30s
+                    int indexingDelay = Math.Min(10000 + (repeatingSections.Count * 1000), 30000);
+                    if (_config.Logging.ShowProgress)
+                        Console.WriteLine($"Waiting {indexingDelay / 1000}s for K2 server indexing ({repeatingSections.Count + 2} SmartObjects)...");
+                    await Task.Delay(indexingDelay);
                 }
 
                 // Create associations
                 if (repeatingSections.Count > 0)
                 {
-                    Console.WriteLine("\nCreating associations...");
+                    if (_config.Logging.ShowProgress)
+                        Console.WriteLine("\nCreating associations...");
                     publishSmo.Dispose();
                     publishSmo = new SmartObjectDefinitionsPublish();
 
@@ -131,24 +154,26 @@ namespace K2SmartObjectGenerator
                         // PERFORMANCE FIX: Sanitize section names to match K2's rules (must match child SmartObject creation)
                         string sectionName = NameSanitizer.SanitizeSmartObjectName(section.Key);
                         string childSmoName = $"{formName}_{sectionName}";
-                        Console.WriteLine($"Creating association: {formName} -> {childSmoName}");
-                        SmartObjectDefinition association = CreateAssociation(formName, childSmoName,
+                        if (_config.Logging.VerboseLogging)
+                            Console.WriteLine($"Creating association: {formName} -> {childSmoName}");
+                        SmartObjectDefinition association = await CreateAssociationAsync(formName, childSmoName,
                             SourceCode.SmartObjects.Authoring.AssociationType.OneToMany, formDisplayName, targetFolder);
                         publishSmo.SmartObjects.Add(association);
                     }
 
                     // Publish associations
-                    PublishSmartObjects(publishSmo);
+                    await PublishSmartObjectsAsync(publishSmo);
                 }
             }
             finally
             {
                 _connectionManager.Disconnect();
-                Console.WriteLine("✓ Disconnected from K2 server");
+                if (_config.Logging.ShowProgress)
+                    Console.WriteLine("✓ Disconnected from K2 server");
             }
         }
 
-        private void GenerateLookupSmartObjects(string formName, string formDisplayName, JArray dataArray, string targetFolder)
+        private async Task GenerateLookupSmartObjectsAsync(string formName, string formDisplayName, JArray dataArray, string targetFolder)
         {
             // Collect all dropdown fields and their values
             Dictionary<string, JArray> allLookupData = new Dictionary<string, JArray>();
@@ -177,7 +202,8 @@ namespace K2SmartObjectGenerator
 
             // Create a single consolidated lookup SmartObject
             string consolidatedLookupName = $"{formName}_Lookups";
-            Console.WriteLine($"Creating consolidated lookup SmartObject: {consolidatedLookupName}");
+            if (_config.Logging.ShowProgress)
+                Console.WriteLine($"Creating consolidated lookup SmartObject: {consolidatedLookupName}");
 
             SmartObjectDefinitionsPublish publishSmo = new SmartObjectDefinitionsPublish();
             SmartObjectDefinition lookupSmo = CreateConsolidatedLookupSmartObject(consolidatedLookupName, formDisplayName, targetFolder);
@@ -187,15 +213,17 @@ namespace K2SmartObjectGenerator
             string lookupGuid = lookupSmo.Guid.ToString();
             _createdSmartObjectGuids[consolidatedLookupName] = lookupGuid;
 
-            Console.WriteLine($"Publishing consolidated lookup SmartObject...");
-            PublishSmartObjects(publishSmo);
+            if (_config.Logging.VerboseLogging)
+                Console.WriteLine($"Publishing consolidated lookup SmartObject...");
+            await PublishSmartObjectsAsync(publishSmo);
 
             // Add a small delay to ensure server synchronization
-            System.Threading.Thread.Sleep(1000);
+            await Task.Delay(1000);
 
             // Populate the consolidated lookup with all data
-            Console.WriteLine($"Populating consolidated lookup SmartObject with data...");
-            PopulateConsolidatedLookupData(consolidatedLookupName, allLookupData);
+            if (_config.Logging.ShowProgress)
+                Console.WriteLine($"Populating consolidated lookup SmartObject with data...");
+            await PopulateConsolidatedLookupDataAsync(consolidatedLookupName, allLookupData);
         }
 
         private SmartObjectDefinition CreateConsolidatedLookupSmartObject(string smoName, string formName = null, string targetFolder = null)
@@ -278,7 +306,8 @@ namespace K2SmartObjectGenerator
                 SmartObjectViewRegistry.SmartObjectType.Consolidated
             );
 
-            Console.WriteLine($"  Created Consolidated Lookup SmartObject {smoName} with GUID: {smoGuid}");
+            if (_config.Logging.VerboseLogging)
+                Console.WriteLine($"  Created Consolidated Lookup SmartObject {smoName} with GUID: {smoGuid}");
 
             return smoDefinition;
         }
@@ -319,18 +348,24 @@ namespace K2SmartObjectGenerator
             };
 
             // Add properties from JSON
-            Console.WriteLine($"\n=== Processing {fields.Count} fields for SmartObject '{smoName}' ===");
+            if (_config.Logging.VerboseLogging)
+                Console.WriteLine($"\n=== Processing {fields.Count} fields for SmartObject '{smoName}' ===");
+
             foreach (var field in fields)
             {
                 string columnName = field["ColumnName"]?.Value<string>();
                 string displayName = field["DisplayName"]?.Value<string>();
-                Console.WriteLine($"  Processing field: ColumnName='{columnName}', DisplayName='{displayName}'");
+
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine($"  Processing field: ColumnName='{columnName}', DisplayName='{displayName}'");
 
                 ExtendObjectProperty property = CreatePropertyFromJson(field, usedPropertyNames, usedDisplayNames);
                 if (property != null)
                 {
                     extendObject.Properties.Add(property);
-                    Console.WriteLine($"  ✓ Added property: Name='{property.Name}' | DisplayName='{property.Metadata.DisplayName}' ({property.Type})");
+
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"  ✓ Added property: Name='{property.Name}' | DisplayName='{property.Metadata.DisplayName}' ({property.Type})");
 
                     _smoFieldMappings[smoName][property.Name] = new FieldInfo
                     {
@@ -341,7 +376,9 @@ namespace K2SmartObjectGenerator
                     };
                 }
             }
-            Console.WriteLine($"=== Finished processing fields. Total properties in ExtendObject: {extendObject.Properties.Count} ===\n");
+
+            if (_config.Logging.VerboseLogging)
+                Console.WriteLine($"=== Finished processing fields. Total properties in ExtendObject: {extendObject.Properties.Count} ===\n");
 
             SmartObjectDefinition smoDefinition = new SmartObjectDefinition();
             smoDefinition.Create(extendObject);
@@ -368,7 +405,8 @@ namespace K2SmartObjectGenerator
                 SmartObjectViewRegistry.SmartObjectType.Main
             );
 
-            Console.WriteLine($"  Created SmartObject {smoName} with GUID: {smoGuid}");
+            if (_config.Logging.VerboseLogging)
+                Console.WriteLine($"  Created SmartObject {smoName} with GUID: {smoGuid}");
 
             return smoDefinition;
         }
@@ -432,7 +470,8 @@ namespace K2SmartObjectGenerator
                 if (property != null)
                 {
                     extendObject.Properties.Add(property);
-                    Console.WriteLine($"  Added property: {property.Name} | DisplayName: {property.Metadata.DisplayName} ({property.Type})");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"  Added property: {property.Name} | DisplayName: {property.Metadata.DisplayName} ({property.Type})");
 
                     _smoFieldMappings[smoName][property.Name] = new FieldInfo
                     {
@@ -470,18 +509,21 @@ namespace K2SmartObjectGenerator
                 parentSmoName
             );
 
-            Console.WriteLine($"  Created Child SmartObject {smoName} with GUID: {smoGuid}");
-            Console.WriteLine($"  Parent SmartObject: {parentSmoName}");
+            if (_config.Logging.VerboseLogging)
+            {
+                Console.WriteLine($"  Created Child SmartObject {smoName} with GUID: {smoGuid}");
+                Console.WriteLine($"  Parent SmartObject: {parentSmoName}");
+            }
 
             return smoDefinition;
         }
 
-        private void PopulateConsolidatedLookupData(string smoName, Dictionary<string, JArray> allLookupData)
+        private async Task PopulateConsolidatedLookupDataAsync(string smoName, Dictionary<string, JArray> allLookupData)
         {
             SmartObjectClientServer smoClient = null;
             try
             {
-                System.Threading.Thread.Sleep(500);
+                await Task.Delay(500);
 
                 smoClient = new SmartObjectClientServer();
                 smoClient.CreateConnection();
@@ -536,15 +578,18 @@ namespace K2SmartObjectGenerator
                         }
 
                         smoClient.ExecuteScalar(smo);
-                        Console.WriteLine($"    Added to {lookupType}: '{displayText}' = '{itemValue}' (Order: {order}, Default: {isDefault})");
+                        if (_config.Logging.VerboseLogging)
+                            Console.WriteLine($"    Added to {lookupType}: '{displayText}' = '{itemValue}' (Order: {order}, Default: {isDefault})");
                         order++;
                     }
                 }
 
-                Console.WriteLine($"  Successfully populated consolidated lookup with data for {allLookupData.Count} fields");
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine($"  Successfully populated consolidated lookup with data for {allLookupData.Count} fields");
             }
             catch (Exception ex)
             {
+                // Always show errors
                 Console.WriteLine($"    ERROR: Could not populate consolidated lookup data: {ex.Message}");
             }
             finally
@@ -659,7 +704,7 @@ namespace K2SmartObjectGenerator
         /// Retrieves SmartObject definition with retry logic to handle K2 server indexing delays
         /// Validates that the SmartObject has the expected properties before considering it successful
         /// </summary>
-        private string GetSmartObjectWithRetry(string smoName, string smoType, int maxRetries = 8, int delayMs = 3000)
+        private async Task<string> GetSmartObjectWithRetryAsync(string smoName, string smoType, int maxRetries = 8, int delayMs = 3000)
         {
             Exception lastException = null;
 
@@ -667,7 +712,9 @@ namespace K2SmartObjectGenerator
             {
                 try
                 {
-                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] Attempting to get {smoType} SmartObject: {smoName}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] Attempting to get {smoType} SmartObject: {smoName}");
+
                     string xml = _connectionManager.ManagementServer.GetSmartObjectDefinition(smoName);
 
                     // PERFORMANCE FIX: Validate the SmartObject has properties before returning
@@ -686,28 +733,34 @@ namespace K2SmartObjectGenerator
                         {
                             // Exponential backoff: delay increases with each attempt
                             int actualDelay = delayMs * attempt;
-                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Validation failed for {smoType} SmartObject '{smoName}': {validateEx.Message}");
-                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
-                            System.Threading.Thread.Sleep(actualDelay);
+                            if (_config.Logging.VerboseLogging)
+                            {
+                                Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Validation failed for {smoType} SmartObject '{smoName}': {validateEx.Message}");
+                                Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
+                            }
+                            await Task.Delay(actualDelay);
                             continue;
                         }
                         throw;
                     }
 
-                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✓ Successfully retrieved and validated {smoType} SmartObject: {smoName}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✓ Successfully retrieved and validated {smoType} SmartObject: {smoName}");
                     return xml;
                 }
                 catch (Exception ex)
                 {
                     lastException = ex;
-                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Failed to get {smoType} SmartObject '{smoName}': {ex.Message}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Failed to get {smoType} SmartObject '{smoName}': {ex.Message}");
 
                     if (attempt < maxRetries)
                     {
                         // Exponential backoff: delay increases with each attempt
                         int actualDelay = delayMs * attempt;
-                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
-                        System.Threading.Thread.Sleep(actualDelay);
+                        if (_config.Logging.VerboseLogging)
+                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
+                        await Task.Delay(actualDelay);
                     }
                 }
             }
@@ -719,7 +772,7 @@ namespace K2SmartObjectGenerator
         /// Retrieves Association SmartObject with retry logic to handle K2 server indexing delays
         /// Validates that the SmartObject has the expected properties before considering it successful
         /// </summary>
-        private string GetAssociationSmartObjectWithRetry(string smoName, string smoType, int maxRetries = 8, int delayMs = 3000)
+        private async Task<string> GetAssociationSmartObjectWithRetryAsync(string smoName, string smoType, int maxRetries = 8, int delayMs = 3000)
         {
             Exception lastException = null;
 
@@ -727,7 +780,9 @@ namespace K2SmartObjectGenerator
             {
                 try
                 {
-                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] Attempting to get {smoType} Association SmartObject: {smoName}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] Attempting to get {smoType} Association SmartObject: {smoName}");
+
                     string xml = _connectionManager.ManagementServer.GetAssociationSmartObject(smoName);
 
                     // PERFORMANCE FIX: Validate the SmartObject has properties before returning
@@ -746,28 +801,34 @@ namespace K2SmartObjectGenerator
                         {
                             // Exponential backoff: delay increases with each attempt
                             int actualDelay = delayMs * attempt;
-                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Validation failed for {smoType} Association SmartObject '{smoName}': {validateEx.Message}");
-                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
-                            System.Threading.Thread.Sleep(actualDelay);
+                            if (_config.Logging.VerboseLogging)
+                            {
+                                Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Validation failed for {smoType} Association SmartObject '{smoName}': {validateEx.Message}");
+                                Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
+                            }
+                            await Task.Delay(actualDelay);
                             continue;
                         }
                         throw;
                     }
 
-                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✓ Successfully retrieved and validated {smoType} Association SmartObject: {smoName}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✓ Successfully retrieved and validated {smoType} Association SmartObject: {smoName}");
                     return xml;
                 }
                 catch (Exception ex)
                 {
                     lastException = ex;
-                    Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Failed to get {smoType} Association SmartObject '{smoName}': {ex.Message}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] ✗ Failed to get {smoType} Association SmartObject '{smoName}': {ex.Message}");
 
                     if (attempt < maxRetries)
                     {
                         // Exponential backoff: delay increases with each attempt
                         int actualDelay = delayMs * attempt;
-                        Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
-                        System.Threading.Thread.Sleep(actualDelay);
+                        if (_config.Logging.VerboseLogging)
+                            Console.WriteLine($"[Retry {attempt}/{maxRetries}] Waiting {actualDelay}ms before retry (exponential backoff)...");
+                        await Task.Delay(actualDelay);
                     }
                 }
             }
@@ -775,16 +836,16 @@ namespace K2SmartObjectGenerator
             throw new Exception($"Failed to retrieve {smoType} Association SmartObject '{smoName}' after {maxRetries} attempts. Last error: {lastException?.Message}", lastException);
         }
 
-        private SmartObjectDefinition CreateAssociation(string parentSmo, string childSmo,
+        private async Task<SmartObjectDefinition> CreateAssociationAsync(string parentSmo, string childSmo,
             SourceCode.SmartObjects.Authoring.AssociationType associationType, string formName = null, string targetFolder = null)
         {
             // PERFORMANCE FIX: Reuses existing connection instead of creating new one
 
             // Retry logic for SmartObject retrieval (K2 server needs time to index after publish)
-            string parentXml = GetSmartObjectWithRetry(parentSmo, "parent");
+            string parentXml = await GetSmartObjectWithRetryAsync(parentSmo, "parent");
             SmartObjectDefinition parentDefinition = SmartObjectDefinition.Create(parentXml);
 
-            string childXml = GetAssociationSmartObjectWithRetry(childSmo, "child");
+            string childXml = await GetAssociationSmartObjectWithRetryAsync(childSmo, "child");
             AssociationSmartObject childDefinition = AssociationSmartObject.Create(childXml);
 
             // SAFETY CHECK: Verify properties exist before accessing by index
@@ -828,7 +889,8 @@ namespace K2SmartObjectGenerator
                 if (checkSmartObjectExist.SmartObjects.Count > 0)
                 {
                     _connectionManager.ManagementServer.DeleteSmartObject(smoName, true);
-                    Console.WriteLine($"  Deleted existing SmartObject: {smoName}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"  Deleted existing SmartObject: {smoName}");
 
                     // REMOVE FROM REGISTRY
                     SmartObjectViewRegistry.RemoveSmartObject(smoName);
@@ -836,7 +898,8 @@ namespace K2SmartObjectGenerator
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  Note: Could not delete SmartObject {smoName}: {ex.Message}");
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine($"  Note: Could not delete SmartObject {smoName}: {ex.Message}");
             }
         }
 
@@ -845,7 +908,8 @@ namespace K2SmartObjectGenerator
             try
             {
                 _connectionManager.ManagementServer.DeleteSmartObject(smoName, true);
-                Console.WriteLine($"  Cleaned up SmartObject: {smoName}");
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine($"  Cleaned up SmartObject: {smoName}");
 
                 // REMOVE FROM REGISTRY
                 SmartObjectViewRegistry.RemoveSmartObject(smoName);
@@ -856,11 +920,13 @@ namespace K2SmartObjectGenerator
             {
                 if (ex1.Message.Contains("does not exist"))
                 {
-                    Console.WriteLine($"  SmartObject {smoName} does not exist (nothing to clean up)");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"  SmartObject {smoName} does not exist (nothing to clean up)");
                     return true;
                 }
 
-                Console.WriteLine($"  First delete attempt failed for {smoName}: {ex1.Message}");
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine($"  First delete attempt failed for {smoName}: {ex1.Message}");
 
                 try
                 {
@@ -869,7 +935,8 @@ namespace K2SmartObjectGenerator
                     {
                         var smoGuid = smoExplorer.SmartObjects[0].Guid;
                         _connectionManager.ManagementServer.DeleteSmartObject(smoGuid, true);
-                        Console.WriteLine($"  Cleaned up SmartObject by GUID: {smoName}");
+                        if (_config.Logging.VerboseLogging)
+                            Console.WriteLine($"  Cleaned up SmartObject by GUID: {smoName}");
 
                         // REMOVE FROM REGISTRY
                         SmartObjectViewRegistry.RemoveSmartObject(smoName);
@@ -879,20 +946,22 @@ namespace K2SmartObjectGenerator
                 }
                 catch (Exception ex2)
                 {
-                    Console.WriteLine($"  Second delete attempt failed for {smoName}: {ex2.Message}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"  Second delete attempt failed for {smoName}: {ex2.Message}");
                 }
 
                 return false;
             }
         }
 
-        private void PublishSmartObjects(SmartObjectDefinitionsPublish publishSmo)
+        private async Task PublishSmartObjectsAsync(SmartObjectDefinitionsPublish publishSmo)
         {
             // PERFORMANCE FIX: Reuses existing connection instead of creating new one
             try
             {
                 _connectionManager.ManagementServer.PublishSmartObjects(publishSmo.ToPublishXml());
-                Console.WriteLine("SmartObjects published successfully");
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine("SmartObjects published successfully");
             }
             catch (Exception ex)
             {
@@ -961,23 +1030,34 @@ namespace K2SmartObjectGenerator
         public void ClearGuidCache()
         {
             _createdSmartObjectGuids.Clear();
-            Console.WriteLine("  Cleared SmartObject GUID cache");
+            if (_config.Logging.VerboseLogging)
+                Console.WriteLine("  Cleared SmartObject GUID cache");
         }
 
+        /// <summary>
+        /// Synchronous wrapper for GetSmartObjectGuidAsync - for backward compatibility
+        /// </summary>
         public string GetSmartObjectGuid(string smoName)
+        {
+            return GetSmartObjectGuidAsync(smoName).GetAwaiter().GetResult();
+        }
+
+        public async Task<string> GetSmartObjectGuidAsync(string smoName)
         {
             // CHECK REGISTRY FIRST
             var smoInfo = SmartObjectViewRegistry.GetSmartObjectInfo(smoName);
             if (smoInfo != null && !string.IsNullOrEmpty(smoInfo.Guid))
             {
-                Console.WriteLine($"  Retrieved GUID from registry for {smoName}: {smoInfo.Guid}");
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine($"  Retrieved GUID from registry for {smoName}: {smoInfo.Guid}");
                 return smoInfo.Guid;
             }
 
             // First check if we created this SmartObject in this session
             if (_createdSmartObjectGuids.ContainsKey(smoName))
             {
-                Console.WriteLine($"  Retrieved GUID from cache for {smoName}: {_createdSmartObjectGuids[smoName]}");
+                if (_config.Logging.VerboseLogging)
+                    Console.WriteLine($"  Retrieved GUID from cache for {smoName}: {_createdSmartObjectGuids[smoName]}");
                 return _createdSmartObjectGuids[smoName];
             }
 
@@ -991,7 +1071,7 @@ namespace K2SmartObjectGenerator
                 {
                     if (i > 0)
                     {
-                        System.Threading.Thread.Sleep(500); // Wait before retry
+                        await Task.Delay(500); // Wait before retry
                     }
 
                     _connectionManager.Connect();
@@ -1010,7 +1090,8 @@ namespace K2SmartObjectGenerator
                             SmartObjectViewRegistry.SmartObjectType.Main
                         );
 
-                        Console.WriteLine($"  Retrieved GUID from server for {smoName}: {guid}");
+                        if (_config.Logging.VerboseLogging)
+                            Console.WriteLine($"  Retrieved GUID from server for {smoName}: {guid}");
                         return guid;
                     }
 
@@ -1027,13 +1108,15 @@ namespace K2SmartObjectGenerator
                         SmartObjectViewRegistry.SmartObjectType.Main
                     );
 
-                    Console.WriteLine($"  Retrieved GUID from definition for {smoName}: {defGuid}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"  Retrieved GUID from definition for {smoName}: {defGuid}");
                     return defGuid;
                 }
                 catch (Exception ex)
                 {
                     lastException = ex;
-                    Console.WriteLine($"  Attempt {i + 1} failed to retrieve GUID for {smoName}: {ex.Message}");
+                    if (_config.Logging.VerboseLogging)
+                        Console.WriteLine($"  Attempt {i + 1} failed to retrieve GUID for {smoName}: {ex.Message}");
                 }
                 finally
                 {

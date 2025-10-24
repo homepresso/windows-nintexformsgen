@@ -1823,14 +1823,14 @@
                                                 </Grid.RowDefinitions>
 
                                                 <!-- K2 Server -->
-                                                <TextBlock Grid.Row="0" Grid.Column="0" 
-                                          Text="K2 Server:" 
+                                                <TextBlock Grid.Row="0" Grid.Column="0"
+                                          Text="K2 Server:"
                                           VerticalAlignment="Center"
                                           Foreground="{StaticResource TextSecondary}"/>
-                                                <TextBox Grid.Row="0" Grid.Column="1" 
+                                                <TextBox Grid.Row="0" Grid.Column="1"
                                         Name="K2ServerTextBox"
                                         Style="{StaticResource ModernTextBox}"
-                                        Text="https://k2.company.com"
+                                        Text="https://k2trial.safalo.com"
                                         Margin="5,2"/>
 
                                                 <!-- Port -->

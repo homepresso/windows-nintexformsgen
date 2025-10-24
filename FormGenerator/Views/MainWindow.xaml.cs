@@ -56,6 +56,9 @@ namespace FormGenerator.Views
             // Set version
             VersionText.Text = $"v{System.Reflection.Assembly.GetExecutingAssembly().GetName().Version}";
 
+            // Set default K2 password
+            K2PasswordBox.Password = "K2pass!!K2pass!!";
+
             // Wire up SQL Auth radio button events
             SqlAuthRadio.Checked += SqlAuth_Changed;
             WindowsAuthRadio.Checked += SqlAuth_Changed;
