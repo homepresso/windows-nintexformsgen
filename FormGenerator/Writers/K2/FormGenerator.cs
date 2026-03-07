@@ -9,6 +9,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Xml;
+using FormGenerator.Analyzers.Infopath;
+using FormGenerator.Writers.K2.RuleBuilders;
 using static K2SmartObjectGenerator.ViewGenerator;
 using XmlHelper = K2SmartObjectGenerator.Utilities.XmlHelper;
 
@@ -26,6 +28,7 @@ namespace K2SmartObjectGenerator
         private readonly SmartObjectGenerator _smoGenerator;
 
         private JObject _originalJsonData;
+        private readonly InfoPathFormDefinition _infoPathFormDef;
 
         // NEW: Add field to store repeating section positions
         private Dictionary<string, Dictionary<string, RepeatingSectionPosition>> _repeatingSectionPositions;
@@ -34,13 +37,15 @@ namespace K2SmartObjectGenerator
         private Dictionary<string, int> _viewGridPositions;
 
 
-        public FormGenerator(ServerConnectionManager connectionManager, string formTheme = "Lithium", SmartObjectGenerator smoGenerator = null)
+        public FormGenerator(ServerConnectionManager connectionManager, string formTheme = "Lithium",
+            SmartObjectGenerator smoGenerator = null, InfoPathFormDefinition infoPathFormDef = null)
         {
             _connectionManager = connectionManager;
             _formViewMappings = new Dictionary<string, List<string>>();
             _formTheme = formTheme;
             _rulesBuilder = new FormRulesBuilder();
             _smoGenerator = smoGenerator;
+            _infoPathFormDef = infoPathFormDef;
             _repeatingSectionPositions = new Dictionary<string, Dictionary<string, RepeatingSectionPosition>>();
             _viewGridPositions = new Dictionary<string, int>();
         }
@@ -1385,8 +1390,47 @@ namespace K2SmartObjectGenerator
             // ADD CALCULATION RULES for dynamic expressions after all views and rules are fully integrated
             Console.WriteLine("\n    === Adding Calculation Rules (After All Views and Rules Added) ===");
             _rulesBuilder.ApplyCalculationRules(doc, _originalJsonData);
+
+            // ADD CROSS-VIEW RULES from InfoPath conditional rules
+            AddCrossViewInfoPathRules(doc);
         }
 
+
+        /// <summary>
+        /// Adds cross-view rules from InfoPath conditional rules to the form-level Events section.
+        /// Wrapped in try/catch so it cannot break form generation.
+        /// </summary>
+        private void AddCrossViewInfoPathRules(XmlDocument doc)
+        {
+            if (_infoPathFormDef == null) return;
+
+            try
+            {
+                Console.WriteLine("\n    === Adding Cross-View InfoPath Rules ===");
+
+                // Find or create the Events element in the base state
+                var stateNode = doc.SelectSingleNode("//States/State[@IsBase='True']")
+                    ?? doc.SelectSingleNode("//States/State");
+                if (stateNode == null)
+                {
+                    Console.WriteLine("      No base state found, skipping cross-view rules");
+                    return;
+                }
+
+                var eventsEl = stateNode.SelectSingleNode("Events") as XmlElement;
+                if (eventsEl == null)
+                {
+                    eventsEl = doc.CreateElement("Events");
+                    stateNode.AppendChild(eventsEl);
+                }
+
+                K2CrossViewRuleBuilder.AddCrossViewRules(doc, eventsEl, _infoPathFormDef);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    WARNING: Cross-view rule generation failed (form generation continues): {ex.Message}");
+            }
+        }
 
         private void AddInitialHideFormActionTableHandler(XmlDocument doc,
          string areaItemId, string areaItemName)
@@ -3514,6 +3558,9 @@ namespace K2SmartObjectGenerator
                             var emptyViewPairs = new Dictionary<string, ViewPairInfo>();
                             _rulesBuilder.AddFormLevelRules(formDoc, formId, formDef.FormName, emptyViewPairs);
                             Console.WriteLine("      Form-level rules added to simple form");
+
+                            // Add cross-view rules from InfoPath conditional rules
+                            AddCrossViewInfoPathRules(formDoc);
                         }
 
                         // Create a new form object from the modified XML

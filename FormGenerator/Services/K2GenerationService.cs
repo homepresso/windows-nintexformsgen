@@ -384,7 +384,7 @@ namespace FormGenerator.Services
                     _logger.Verbose($"Initializing FormGenerator with theme: {request.FormTheme}");
                     _logger.Debug($"Passing {viewGenerator.ViewTitles.Count} view titles to form generator");
 
-                    var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, request.FormTheme, smoGenerator);
+                    var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, request.FormTheme, smoGenerator, infoPathFormDef);
 
                     // Form name was already extracted earlier for category creation
                     _logger.Verbose("Calling GenerateFormsFromJson...");

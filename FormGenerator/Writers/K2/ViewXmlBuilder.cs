@@ -10,6 +10,7 @@ using K2SmartObjectGenerator.Config;
 using FormGenerator.Analyzers.Infopath;
 using FormGenerator.Core.Models;
 using FormGenerator.Services;
+using FormGenerator.Writers.K2.RuleBuilders;
 using static K2SmartObjectGenerator.ViewGenerator;
 
 namespace K2SmartObjectGenerator
@@ -133,8 +134,10 @@ namespace K2SmartObjectGenerator
 
             view.AppendChild(events);
 
-            // Add empty but required sections
-            view.AppendChild(doc.CreateElement("Expressions"));
+            // Create Expressions section and populate with calculated fields
+            XmlElement expressions = doc.CreateElement("Expressions");
+            AddCalculationExpressions(doc, expressions, viewGuid, viewName, controlIdMap, controlToFieldMap);
+            view.AppendChild(expressions);
 
             // Create Parameters section with ID parameter
             XmlElement parameters = CreateParametersSection(doc);
@@ -182,6 +185,42 @@ namespace K2SmartObjectGenerator
             catch (Exception ex)
             {
                 Console.WriteLine($"WARNING: InfoPath rule generation failed (form generation continues): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Adds calculated field expressions to the Expressions section.
+        /// K2 handles calculations via Expressions (NOT rule events).
+        /// Wrapped in try/catch so it cannot break form generation.
+        /// </summary>
+        private void AddCalculationExpressions(XmlDocument doc, XmlElement expressions,
+            string viewGuid, string viewName,
+            Dictionary<string, string> controlIdMap,
+            Dictionary<string, string> controlToFieldMap)
+        {
+            if (_infoPathFormDef == null) return;
+
+            try
+            {
+                var context = new K2RuleContext
+                {
+                    ViewGuid = viewGuid,
+                    ViewName = viewName,
+                    ControlIdMap = controlIdMap ?? new Dictionary<string, string>(),
+                    ControlToFieldMap = controlToFieldMap ?? new Dictionary<string, string>(),
+                    JsonToK2ControlIdMap = _jsonToK2ControlIdMap ?? new Dictionary<string, string>()
+                };
+
+                context.ControlResolver = new K2ControlResolver(
+                    context.ControlIdMap,
+                    context.ControlToFieldMap,
+                    context.JsonToK2ControlIdMap);
+
+                K2ExpressionBuilder.AddCalculationExpressions(doc, expressions, _infoPathFormDef, context);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"WARNING: Calculation expression generation failed (form generation continues): {ex.Message}");
             }
         }
 
@@ -1182,8 +1221,10 @@ namespace K2SmartObjectGenerator
 
             view.AppendChild(events);
 
-            // Add empty but required sections
-            view.AppendChild(doc.CreateElement("Expressions"));
+            // Create Expressions section and populate with calculated fields
+            XmlElement expressions = doc.CreateElement("Expressions");
+            AddCalculationExpressions(doc, expressions, viewGuid, viewName, controlIdMap, controlToFieldMap);
+            view.AppendChild(expressions);
 
             // Create Parameters section with ID parameter
             XmlElement parameters = CreateParametersSection(doc);
