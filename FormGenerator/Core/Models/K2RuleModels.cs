@@ -278,7 +278,7 @@ namespace FormGenerator.Core.Models
         public string ViewId { get; set; }  // Parent view GUID
         public string ViewName { get; set; }
         public string InstanceId { get; set; }  // For view instances
-        public bool IsExtended { get; set; } = false;
+        public bool IsExtended { get; set; } = true; // Reference: K2 Designer exports use IsExtended="True" for User events
         public string Type { get; set; } = "User"; // System or User
     }
 

@@ -45,7 +45,9 @@ namespace FormGenerator.Writers.K2.RuleBuilders
 
             var calcRules = formDef.ConditionalRules
                 .Where(r => r != null &&
-                       string.Equals(r.Type, "Calculation", StringComparison.OrdinalIgnoreCase))
+                       string.Equals(r.Type, "Calculation", StringComparison.OrdinalIgnoreCase) &&
+                       !IsFormattingExpression(r.Condition) &&
+                       !IsFormattingExpression(r.Value))
                 .ToList();
 
             if (calcRules.Count == 0) return;
@@ -447,6 +449,27 @@ namespace FormGenerator.Writers.K2.RuleBuilders
         }
 
         #endregion
+
+        /// <summary>
+        /// Detects formatting expressions that should NOT be treated as calculations.
+        /// These are InfoPath formatting directives (xdFormatting, formatString, etc.)
+        /// that K2 handles natively via control properties.
+        /// </summary>
+        private static bool IsFormattingExpression(string expression)
+        {
+            if (string.IsNullOrWhiteSpace(expression)) return false;
+
+            return expression.Contains("xdFormatting:") ||
+                   expression.Contains("formatString(") ||
+                   expression.Contains("xdDate:") ||
+                   expression.Contains("format-date(") ||
+                   expression.Contains("format-number(") ||
+                   expression.Contains("format-time(") ||
+                   expression.Contains("xdMath:") ||
+                   expression.Contains("xdXDocument:") ||
+                   expression.Contains("xdImage:") ||
+                   expression.Contains("xdEnvironment:");
+        }
 
         private class ParsedExpression
         {

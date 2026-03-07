@@ -985,6 +985,16 @@ namespace FormGenerator.Views
             _rulesMappingHandlers?.SaveRuleMapping();
         }
 
+        private void CopyRuleDetails_Click(object sender, RoutedEventArgs e)
+        {
+            _rulesMappingHandlers?.CopyRuleDetailsToClipboard();
+        }
+
+        private void CopyAllFilteredRules_Click(object sender, RoutedEventArgs e)
+        {
+            _rulesMappingHandlers?.CopyAllFilteredRulesToClipboard();
+        }
+
         #endregion
 
         #region Helper Methods

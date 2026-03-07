@@ -1389,7 +1389,7 @@ namespace K2SmartObjectGenerator
 
             // ADD CALCULATION RULES for dynamic expressions after all views and rules are fully integrated
             Console.WriteLine("\n    === Adding Calculation Rules (After All Views and Rules Added) ===");
-            _rulesBuilder.ApplyCalculationRules(doc, _originalJsonData);
+            _rulesBuilder.ApplyCalculationRules(doc, _originalJsonData, _infoPathFormDef);
 
             // ADD CROSS-VIEW RULES from InfoPath conditional rules
             AddCrossViewInfoPathRules(doc);

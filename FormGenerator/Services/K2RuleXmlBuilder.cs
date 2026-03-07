@@ -122,6 +122,9 @@ namespace FormGenerator.Services
             var propertiesElement = doc.CreateElement("Properties");
             conditionElement.AppendChild(propertiesElement);
 
+            // Location property - reference: "View" (uppercase) on conditions
+            AddPropertyElement(doc, propertiesElement, "Location", "View", null, null);
+
             AddPropertyElement(doc, propertiesElement, "Name", condition.Name ?? GetConditionTypeName(condition.ConditionType), null, null);
 
             // Build expression based on condition type
@@ -465,6 +468,13 @@ namespace FormGenerator.Services
 
         #endregion
 
+        private string GetOppositeValue(string value)
+        {
+            if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)) return "false";
+            if (string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)) return "true";
+            return value; // For non-boolean, NotEquals handles the opposite
+        }
+
         #region Helper Methods
 
         private void AddChildElement(XmlDocument doc, XmlElement parent, string name, string value)
@@ -498,9 +508,10 @@ namespace FormGenerator.Services
             switch (handlerType)
             {
                 case K2HandlerType.If:
-                    return "IfLogicalHandler";
                 case K2HandlerType.Else:
-                    return "then";
+                    // Reference: checkbox-visibility.xml - BOTH if and else use IfLogicalHandler
+                    // Each handler has its own condition (true/false). No "then" handler exists in K2.
+                    return "IfLogicalHandler";
                 case K2HandlerType.Error:
                     return "ErrorHandler";
                 case K2HandlerType.ForEach:
@@ -681,12 +692,25 @@ namespace FormGenerator.Services
             rule.Handlers.Add(trueHandler);
 
             // Handler for else case (opposite visibility)
+            // Reference: checkbox-visibility.xml - Both handlers use IfLogicalHandler with their own conditions
             var elseHandler = new K2Handler
             {
                 HandlerType = K2HandlerType.Else,
-                Name = "then",
+                Name = "IfLogicalHandler",
                 Location = "View"
             };
+
+            // Add opposite condition (K2 else handlers need explicit conditions)
+            string oppositeValue = GetOppositeValue(conditionValue);
+            elseHandler.Conditions.Add(new K2Condition
+            {
+                ConditionType = K2ConditionType.SimpleNotEqualControlCondition,
+                ControlId = triggerControlId,
+                ControlName = triggerControlName,
+                ControlDisplayName = triggerControlName,
+                CompareValue = conditionValue,
+                DataType = "Text"
+            });
 
             elseHandler.Actions.Add(new K2Action
             {

@@ -92,7 +92,8 @@ namespace FormGenerator.Services
                 SupportedRules = formMappings.Count(m => m.Status == RuleMappingStatus.Supported),
                 PartialRules = formMappings.Count(m => m.Status == RuleMappingStatus.PartiallySupported),
                 UnsupportedRules = formMappings.Count(m => m.Status == RuleMappingStatus.NotSupported),
-                CustomRequiredRules = formMappings.Count(m => m.Status == RuleMappingStatus.RequiresCustomization)
+                CustomRequiredRules = formMappings.Count(m => m.Status == RuleMappingStatus.RequiresCustomization),
+                K2NativeRules = formMappings.Count(m => m.Status == RuleMappingStatus.K2Native)
             };
 
             // Identify common issues
@@ -246,16 +247,42 @@ namespace FormGenerator.Services
         {
             try
             {
+                // For the orchestrator builders:
+                // - InfoPathAppliesTo is used as the SOURCE/trigger control (what fires the event)
+                // - Target controls come from InfoPathActions or the conditional's TargetField
+                // The SourceField from the condition is the trigger, TargetField is what gets affected
+                var sourceField = conditional?.SourceField;
+
+                // If SourceField is empty, try to extract it from the condition expression
+                if (string.IsNullOrEmpty(sourceField) && !string.IsNullOrEmpty(conditional?.Condition))
+                {
+                    sourceField = ExtractSourceFieldFromCondition(conditional.Condition);
+                }
+
+                // For calculation rules, the "condition" is actually the source value expression
+                // The TargetField is what receives the calculated value
+                var appliesTo = sourceField;
+                if (string.IsNullOrEmpty(appliesTo))
+                    appliesTo = conditional?.TargetField;
+
                 var mapping = new RuleMappingItem
                 {
                     FormName = formName,
                     InfoPathRuleName = conditional?.Name ?? $"Conditional: {conditional?.Type ?? "Unknown"}",
                     InfoPathRuleType = "Conditional",
                     InfoPathCondition = conditional?.Condition,
-                    InfoPathAppliesTo = conditional?.TargetField
+                    InfoPathConditionExpression = conditional?.Value,
+                    InfoPathAppliesTo = appliesTo
                 };
 
                 mapping.K2EventType = "OnChange";
+
+                // Check for K2 Native patterns before type-based classification
+                if (IsK2NativePattern(mapping))
+                {
+                    mapping.Status = RuleMappingStatus.K2Native;
+                    return mapping;
+                }
 
                 switch (conditional?.Type?.ToLower())
                 {
@@ -263,6 +290,34 @@ namespace FormGenerator.Services
                         mapping.Status = RuleMappingStatus.Supported;
                         mapping.K2ActionType = "SetControlVisibility";
                         mapping.K2Xml = GenerateK2VisibilityRuleXml(conditional);
+                        // Add synthetic show/hide actions so the builder knows what to target
+                        if (!string.IsNullOrEmpty(conditional?.TargetField))
+                        {
+                            var targetName = ExtractFieldName(conditional.TargetField);
+                            mapping.InfoPathActions.Add(new RuleActionMapping
+                            {
+                                InfoPathActionType = conditional.Action == "hide" ? "hide" : "show",
+                                InfoPathTarget = targetName ?? conditional.TargetField,
+                                K2ActionType = "Visibility",
+                                IsSupported = true
+                            });
+                        }
+                        // Also add targets from AffectedControls
+                        if (conditional?.AffectedControls != null)
+                        {
+                            foreach (var ctrl in conditional.AffectedControls)
+                            {
+                                if (string.IsNullOrEmpty(ctrl)) continue;
+                                var ctrlName = ExtractFieldName(ctrl);
+                                mapping.InfoPathActions.Add(new RuleActionMapping
+                                {
+                                    InfoPathActionType = conditional.Action == "hide" ? "hide" : "show",
+                                    InfoPathTarget = ctrlName ?? ctrl,
+                                    K2ActionType = "Visibility",
+                                    IsSupported = true
+                                });
+                            }
+                        }
                         break;
                     case "formatting":
                         mapping.Status = RuleMappingStatus.PartiallySupported;
@@ -271,9 +326,11 @@ namespace FormGenerator.Services
                         mapping.Notes = "K2 styling differs from InfoPath - review styling manually";
                         break;
                     case "calculation":
-                        mapping.Status = RuleMappingStatus.Supported;
-                        mapping.K2ActionType = "Calculate";
-                        mapping.K2Xml = GenerateK2CalculationRuleXml(conditional);
+                        // K2 handles calculations via the Expressions section, not rule events.
+                        // K2ExpressionBuilder processes these separately. Skip in rule pipeline.
+                        mapping.Status = RuleMappingStatus.K2Native;
+                        mapping.K2ActionType = "Expression";
+                        mapping.Notes = "Handled by K2 Expressions section (not rule events)";
                         break;
                 default:
                     mapping.Status = RuleMappingStatus.NotMapped;
@@ -298,6 +355,13 @@ namespace FormGenerator.Services
 
         private void DetermineRuleMappingStatus(RuleMappingItem mapping, FormRule rule)
         {
+            // Check for K2 Native patterns first
+            if (IsK2NativePattern(mapping))
+            {
+                mapping.Status = RuleMappingStatus.K2Native;
+                return;
+            }
+
             var supportedActions = mapping.InfoPathActions.Count(a => a.IsSupported);
             var totalActions = mapping.InfoPathActions.Count;
 
@@ -340,6 +404,73 @@ namespace FormGenerator.Services
             }
         }
 
+        /// <summary>
+        /// Detects InfoPath patterns that K2 handles natively through its architecture
+        /// (no explicit rule needed - e.g., formatting, repeating table row selection, List View patterns)
+        /// </summary>
+        private bool IsK2NativePattern(RuleMappingItem mapping)
+        {
+            // Check both condition and action expressions for K2 Native patterns
+            var condition = mapping.InfoPathCondition ?? mapping.InfoPathConditionExpression ?? "";
+
+            // Also check action expressions (e.g., count(preceding-sibling::*) in setValue actions)
+            if (mapping.InfoPathActions != null)
+            {
+                foreach (var action in mapping.InfoPathActions)
+                {
+                    var expr = action.InfoPathExpression ?? "";
+                    if (!string.IsNullOrEmpty(expr))
+                        condition = condition + " " + expr;
+                }
+            }
+            var ruleType = mapping.InfoPathRuleType ?? "";
+            var ruleName = mapping.InfoPathRuleName ?? "";
+
+            // Number/date/currency formatting → K2 control DataType + Format properties
+            if (condition.Contains("xdFormatting:", StringComparison.OrdinalIgnoreCase) ||
+                condition.Contains("formatString(", StringComparison.OrdinalIgnoreCase))
+            {
+                mapping.Notes = "K2 Native: Handled by control DataType and Format properties";
+                return true;
+            }
+
+            // Repeating table row position/selection → K2 List View handles natively
+            if (condition.Contains("preceding-sibling::", StringComparison.OrdinalIgnoreCase) ||
+                condition.Contains("position()", StringComparison.OrdinalIgnoreCase) ||
+                condition.Contains("itemPosition", StringComparison.OrdinalIgnoreCase) ||
+                condition.Contains("last()", StringComparison.OrdinalIgnoreCase))
+            {
+                mapping.Notes = "K2 Native: K2 List View architecture replaces this pattern";
+                return true;
+            }
+
+            // Count-based repeating section logic → K2 List View
+            if (condition.Contains("count(", StringComparison.OrdinalIgnoreCase) &&
+                condition.Contains("sibling", StringComparison.OrdinalIgnoreCase))
+            {
+                mapping.Notes = "K2 Native: K2 List View handles repeating data natively";
+                return true;
+            }
+
+            // InfoPath runtime feature checks → no K2 equivalent needed
+            if (condition.Contains("function-available(", StringComparison.OrdinalIgnoreCase) ||
+                condition.Contains("xdXDocument:GetDOM", StringComparison.OrdinalIgnoreCase))
+            {
+                mapping.Notes = "K2 Native: InfoPath runtime feature check, not applicable in K2";
+                return true;
+            }
+
+            // XPath variable references in repeating context ($val=.) → K2 List View binding
+            if (condition.Contains("$val=", StringComparison.OrdinalIgnoreCase) ||
+                condition.Contains("$val =", StringComparison.OrdinalIgnoreCase))
+            {
+                mapping.Notes = "K2 Native: Repeating context variable binding handled by K2 List View";
+                return true;
+            }
+
+            return false;
+        }
+
         private bool IsComplexCondition(string condition)
         {
             if (string.IsNullOrEmpty(condition)) return false;
@@ -348,7 +479,7 @@ namespace FormGenerator.Services
             // Simple "and"/"or"/"not(" are standard boolean operators that K2 supports.
             var complexIndicators = new[]
             {
-                "count(", "sum(", "position()", "last()",
+                "sum(",
                 "translate(", "substring(", "normalize-space(",
                 "xdDate:", "xdMath:", "xdUser:"
             };
@@ -903,10 +1034,11 @@ namespace FormGenerator.Services
                 k2Rule.Handlers.Add(handler);
 
                 // Add else handler to remove style
+                // Reference: Both handlers use IfLogicalHandler with their own conditions
                 var elseHandler = new K2Handler
                 {
                     HandlerType = K2HandlerType.Else,
-                    Name = "then",
+                    Name = "IfLogicalHandler",
                     Location = "View"
                 };
                 elseHandler.Actions.Add(new K2Action
@@ -1061,22 +1193,47 @@ namespace FormGenerator.Services
         }
 
         /// <summary>
+        /// Extract the source/trigger field name from a condition expression.
+        /// e.g., "my:category='Entertainment'" -> "my:category"
+        ///       "not((../my:category != 'Gifts'))" -> "../my:category"
+        ///       "." -> null (self-reference, not a named field)
+        /// </summary>
+        private string ExtractSourceFieldFromCondition(string condition)
+        {
+            if (string.IsNullOrEmpty(condition)) return null;
+
+            // Match patterns like my:fieldName or ../my:fieldName at the start (before operator)
+            var match = System.Text.RegularExpressions.Regex.Match(condition,
+                @"(?:not\s*\(\s*\(?\s*)?(?:\.\./)?(?:my:[\w/]+:)*(my:[\w]+(?:/my:[\w]+)*)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (match.Success)
+            {
+                // Return the full XPath so the resolver can strip it
+                return match.Groups[1].Value;
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Extract a simple field name from an XPath or field reference
         /// </summary>
         private string ExtractFieldName(string fieldPath)
         {
             if (string.IsNullOrEmpty(fieldPath)) return null;
 
-            // Remove namespace prefixes and path separators
-            var name = fieldPath
-                .Replace("/my:", "")
-                .Replace("my:", "")
-                .Replace("/", "")
-                .Replace("@", "");
+            // Split by / first to get path segments, then take the last one
+            var segments = fieldPath.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0) return null;
 
-            // Take the last segment if it's a path
-            var segments = name.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            return segments.Length > 0 ? segments[segments.Length - 1] : name;
+            // Take the last segment and clean namespace prefixes
+            var lastSegment = segments[segments.Length - 1]
+                .Replace("my:", "")
+                .Replace("@", "")
+                .Trim();
+
+            return string.IsNullOrEmpty(lastSegment) ? null : lastSegment;
         }
 
         /// <summary>

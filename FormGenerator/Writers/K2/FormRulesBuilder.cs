@@ -5,6 +5,7 @@ using System.Xml;
 using Newtonsoft.Json.Linq;
 using K2SmartObjectGenerator.Utilities;
 using static K2SmartObjectGenerator.ViewGenerator;
+using InfoPathFormDefinition = global::FormGenerator.Analyzers.Infopath.InfoPathFormDefinition;
 
 namespace K2SmartObjectGenerator
 {
@@ -14,6 +15,7 @@ namespace K2SmartObjectGenerator
         public string Name { get; set; }
         public string Label { get; set; }
         public string Type { get; set; }
+        public string OperatorType { get; set; } // null=ListSum, "Minus", "Plus", "Multiply", "Divide"
         public List<SourceFieldInfo> SourceFields { get; set; } = new List<SourceFieldInfo>();
     }
 
@@ -37,6 +39,7 @@ namespace K2SmartObjectGenerator
         public string ControlId { get; set; }
         public string ViewInstanceId { get; set; }
         public string ControlName { get; set; }
+        public string ViewName { get; set; }
     }
 
     public class FormRulesBuilder
@@ -237,14 +240,14 @@ namespace K2SmartObjectGenerator
             Console.WriteLine("    ========== FORM RULES BUILDER DEBUG END ==========\n");
         }
 
-        public void ApplyCalculationRules(XmlDocument doc, JObject formData)
+        public void ApplyCalculationRules(XmlDocument doc, JObject formData, InfoPathFormDefinition infoPathFormDef = null)
         {
             Console.WriteLine("\n    ========== CALCULATION RULES GENERATION START ==========");
 
             try
             {
-                // Analyze JSON to identify calculation fields
-                var calculationFields = AnalyzeCalculationFields(formData);
+                // Analyze JSON + InfoPath data to identify calculation fields and their sources
+                var calculationFields = AnalyzeCalculationFields(formData, infoPathFormDef);
 
                 if (calculationFields.Count == 0)
                 {
@@ -258,19 +261,11 @@ namespace K2SmartObjectGenerator
                 XmlElement formElement = (XmlElement)doc.GetElementsByTagName("Form")[0];
                 XmlElement expressionsElement = GetOrCreateExpressionsElement(doc, formElement);
 
-                // Group calculation fields by their source fields to avoid duplicate expressions
-                var sourceFieldGroups = calculationFields
-                    .GroupBy(cf => string.Join(",", cf.SourceFields.Select(sf => sf.Name).OrderBy(n => n)))
-                    .ToList();
-
-                Console.WriteLine($"    Found {sourceFieldGroups.Count} unique source field groups from {calculationFields.Count} calculation fields");
-
-                // Generate one expression per unique source field group
-                foreach (var group in sourceFieldGroups)
+                // Generate one expression per calculation field
+                foreach (var calcField in calculationFields)
                 {
-                    var representativeCalcField = group.First(); // Use first calc field as representative
-                    GenerateCalculationExpressionOnly(doc, expressionsElement, representativeCalcField);
-                    Console.WriteLine($"    Generated expression for source fields: {string.Join(",", representativeCalcField.SourceFields.Select(sf => sf.Name))}");
+                    GenerateCalculationExpressionOnly(doc, expressionsElement, calcField);
+                    Console.WriteLine($"    Generated expression for {calcField.Name} (operator: {calcField.OperatorType ?? "ListSum"}, sources: {string.Join(",", calcField.SourceFields.Select(sf => sf.Name))})");
                 }
 
                 // Debug: Save form XML with expressions to file
@@ -295,15 +290,56 @@ namespace K2SmartObjectGenerator
             Console.WriteLine("    ========== CALCULATION RULES GENERATION END ==========\n");
         }
 
-        private List<CalculationFieldInfo> AnalyzeCalculationFields(JObject formData)
+        private List<CalculationFieldInfo> AnalyzeCalculationFields(JObject formData, InfoPathFormDefinition infoPathFormDef)
         {
             var calculationFields = new List<CalculationFieldInfo>();
 
             try
             {
-                // Parse the JSON structure to find fields
+                // Build a lookup of calculation expressions from InfoPath ConditionalRules (Type="Calculation")
+                var calcExpressions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                Console.WriteLine($"    InfoPathFormDef is {(infoPathFormDef == null ? "NULL" : "available")}");
+                if (infoPathFormDef != null)
+                {
+                    Console.WriteLine($"    InfoPathFormDef.ConditionalRules has {infoPathFormDef.ConditionalRules?.Count ?? 0} rules");
+                    if (infoPathFormDef.ConditionalRules != null)
+                    {
+                        foreach (var rule in infoPathFormDef.ConditionalRules)
+                        {
+                            Console.WriteLine($"    ConditionalRule: Type='{rule.Type}', Target='{rule.TargetField}', Condition='{rule.Condition}', Action='{rule.Action}'");
+                            if (string.Equals(rule.Type, "Calculation", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(rule.TargetField) && !string.IsNullOrEmpty(rule.Condition))
+                            {
+                                // TargetField may be an XPath like "my:subTotal" - extract just the field name
+                                string targetName = ExtractFieldNameFromXPath(rule.TargetField);
+                                if (!string.IsNullOrEmpty(targetName))
+                                {
+                                    calcExpressions[targetName] = rule.Condition;
+                                    Console.WriteLine($"    CalcRule: target='{targetName}' expression='{rule.Condition}'");
+                                }
+                            }
+                        }
+                    }
+                }
+                Console.WriteLine($"    Found {calcExpressions.Count} calculation expressions from InfoPath rules");
+
                 var fields = GetFieldsFromFormData(formData);
                 Console.WriteLine($"    Found {fields?.Count ?? 0} total fields in form data");
+
+                // Collect all field names for reference (needed for dynamic source resolution)
+                var allFieldNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var repeatingFieldNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (fields != null)
+                {
+                    foreach (JObject f in fields)
+                    {
+                        string fn = f["Name"]?.ToString();
+                        if (!string.IsNullOrEmpty(fn)) allFieldNames.Add(fn);
+
+                        var rsi = f["RepeatingSectionInfo"] as JObject;
+                        if (rsi?["IsInRepeatingSection"]?.ToObject<bool>() == true && !string.IsNullOrEmpty(fn))
+                            repeatingFieldNames.Add(fn);
+                    }
+                }
 
                 if (fields != null)
                 {
@@ -314,26 +350,35 @@ namespace K2SmartObjectGenerator
                         var dataOptions = field["DataOptions"] as JObject;
                         bool isDisabled = dataOptions?["disableEditing"]?.ToString() == "yes";
 
-                        Console.WriteLine($"    Checking field: {fieldName} (Type: {fieldType}, Disabled: {isDisabled})");
+                        // Check if this field has a calculation expression in InfoPath DataColumn.DefaultValue
+                        bool hasCalcExpression = !string.IsNullOrEmpty(fieldName) && calcExpressions.ContainsKey(fieldName);
 
-                        // Check if field is a calculation field (has disableEditing=yes and numeric type)
-                        if (IsCalculationField(field))
+                        Console.WriteLine($"    Checking field: {fieldName} (Type: {fieldType}, Disabled: {isDisabled}, HasCalcExpr: {hasCalcExpression})");
+
+                        // A calculation field is a TextField that either has disableEditing=yes OR has a calculation expression
+                        if (fieldType == "TextField" && (isDisabled || hasCalcExpression))
                         {
                             var calcField = new CalculationFieldInfo
                             {
                                 CtrlId = field["CtrlId"]?.ToString(),
-                                Name = field["Name"]?.ToString(),
+                                Name = fieldName,
                                 Label = field["Label"]?.ToString(),
-                                Type = field["Type"]?.ToString()
+                                Type = fieldType
                             };
 
-                            // Find source fields for this calculation
-                            calcField.SourceFields = FindSourceFields(formData, calcField);
+                            // Find source fields dynamically from calculation expressions
+                            calcField.SourceFields = FindSourceFieldsDynamic(
+                                formData, calcField, calcExpressions, allFieldNames, repeatingFieldNames);
 
                             if (calcField.SourceFields.Count > 0)
                             {
                                 calculationFields.Add(calcField);
-                                Console.WriteLine($"    Identified calculation field: {calcField.Name} (ID: {calcField.CtrlId}) with {calcField.SourceFields.Count} source fields");
+                                Console.WriteLine($"    Identified calculation field: {calcField.Name} (ID: {calcField.CtrlId}) " +
+                                    $"operator: {calcField.OperatorType ?? "ListSum"}, sources: {string.Join(", ", calcField.SourceFields.Select(sf => sf.Name))}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"    Skipping calculation field '{fieldName}': no source fields resolved");
                             }
                         }
                     }
@@ -394,25 +439,16 @@ namespace K2SmartObjectGenerator
         {
             try
             {
-                // Check for disableEditing = yes
+                string type = field["Type"]?.ToString();
+
+                // Must be a TextField (data input control)
+                if (type != "TextField") return false;
+
+                // Primary signal: disableEditing = yes (InfoPath marks calculated fields as read-only)
                 var dataOptions = field["DataOptions"] as JObject;
                 bool isDisabled = dataOptions?["disableEditing"]?.ToString() == "yes";
 
-                // Check for numeric field names or types that suggest calculations
-                string name = field["Name"]?.ToString()?.ToUpper();
-                string type = field["Type"]?.ToString();
-
-                bool isCalculationType = name != null && (
-                    name.Contains("TOTAL") ||
-                    name.Contains("SUBTOTAL") ||
-                    name.Contains("SUM") ||
-                    name.Contains("CALC")
-                );
-
-                // Must be a TextField and either disabled or calculation type
-                bool isTextField = type == "TextField";
-
-                return isTextField && (isDisabled || isCalculationType);
+                return isDisabled;
             }
             catch
             {
@@ -420,42 +456,42 @@ namespace K2SmartObjectGenerator
             }
         }
 
-        private List<SourceFieldInfo> FindSourceFields(JObject formData, CalculationFieldInfo calcField)
+        /// <summary>
+        /// Dynamically finds source fields for a calculation by parsing the actual XPath expression
+        /// from the InfoPath DataColumn's DefaultValue. No hardcoded field name patterns.
+        /// </summary>
+        private List<SourceFieldInfo> FindSourceFieldsDynamic(JObject formData, CalculationFieldInfo calcField,
+            Dictionary<string, string> calcExpressions, HashSet<string> allFieldNames, HashSet<string> repeatingFieldNames)
         {
             var sourceFields = new List<SourceFieldInfo>();
 
             try
             {
-                // Look for AMOUNT fields in repeating sections that could be sources for SUBTOTAL/TOTAL calculations
-                if (calcField.Name.ToUpper().Contains("TOTAL") || calcField.Name.ToUpper().Contains("SUBTOTAL"))
+                var fields = GetFieldsFromFormData(formData);
+                if (fields == null) return sourceFields;
+
+                // Build a lookup from field name to JObject for quick access
+                var fieldLookup = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
+                foreach (JObject f in fields)
                 {
-                    var fields = GetFieldsFromFormData(formData);
-                    if (fields != null)
-                    {
-                        foreach (JObject field in fields)
-                        {
-                            string fieldName = field["Name"]?.ToString()?.ToUpper();
-                            string fieldType = field["Type"]?.ToString();
+                    string fn = f["Name"]?.ToString();
+                    if (!string.IsNullOrEmpty(fn) && !fieldLookup.ContainsKey(fn))
+                        fieldLookup[fn] = f;
+                }
 
-                            var repeatingSectionInfo = field["RepeatingSectionInfo"] as JObject;
-                            bool isInRepeating = repeatingSectionInfo?["IsInRepeatingSection"]?.ToObject<bool>() == true;
+                // Try to find the calculation expression from DataColumn DefaultValue
+                string expression = null;
+                if (calcExpressions.TryGetValue(calcField.Name, out var expr))
+                    expression = expr;
 
-                            // Look for AMOUNT fields in repeating sections
-                            if (fieldName == "AMOUNT" && fieldType == "TextField" && isInRepeating)
-                            {
-                                var sourceField = new SourceFieldInfo
-                                {
-                                    CtrlId = field["CtrlId"]?.ToString(),
-                                    Name = field["Name"]?.ToString(),
-                                    Label = field["Label"]?.ToString(),
-                                    RepeatingSectionName = repeatingSectionInfo?["RepeatingSectionName"]?.ToString()
-                                };
-
-                                sourceFields.Add(sourceField);
-                                Console.WriteLine($"      Found source field: {sourceField.Name} (ID: {sourceField.CtrlId}) in section: {sourceField.RepeatingSectionName}");
-                            }
-                        }
-                    }
+                if (!string.IsNullOrEmpty(expression))
+                {
+                    Console.WriteLine($"      Parsing calculation expression for '{calcField.Name}': {expression}");
+                    ParseExpressionForSources(expression, calcField, sourceFields, fieldLookup, repeatingFieldNames);
+                }
+                else
+                {
+                    Console.WriteLine($"      No DefaultValue expression found for '{calcField.Name}'");
                 }
             }
             catch (Exception ex)
@@ -466,78 +502,431 @@ namespace K2SmartObjectGenerator
             return sourceFields;
         }
 
+        /// <summary>
+        /// Parses an XPath calculation expression to extract source field references and operator type.
+        /// Handles: sum(field), field1 + field2, field1 - field2, etc.
+        /// </summary>
+        private void ParseExpressionForSources(string expression, CalculationFieldInfo calcField,
+            List<SourceFieldInfo> sourceFields, Dictionary<string, JObject> fieldLookup,
+            HashSet<string> repeatingFieldNames)
+        {
+            // Strip formatting wrappers: xdFormatting:formatString(expr, 'format') → expr
+            string cleanExpr = StripFormattingWrappers(expression);
+
+            // Detect aggregate functions: sum(...), count(...), avg(...)
+            var aggregateMatch = System.Text.RegularExpressions.Regex.Match(cleanExpr,
+                @"^(sum|count|avg|min|max)\s*\((.+)\)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (aggregateMatch.Success)
+            {
+                // Aggregate function — extract the field being aggregated
+                string innerPath = aggregateMatch.Groups[2].Value;
+                string fieldName = ExtractFieldNameFromXPath(innerPath);
+
+                if (!string.IsNullOrEmpty(fieldName))
+                {
+                    // For aggregates like sum(), find ALL instances of this field in repeating sections
+                    AddSourceFieldByName(fieldName, sourceFields, fieldLookup);
+                    // ListSum is the default operator (no OperatorType set)
+                    Console.WriteLine($"      Aggregate {aggregateMatch.Groups[1].Value}({fieldName}) → ListSum");
+                }
+                return;
+            }
+
+            // Detect arithmetic: field1 op field2
+            // Split by arithmetic operators with whitespace
+            var arithmeticOps = new[] { " + ", " - ", " * ", " div " };
+            string detectedOp = null;
+            string[] parts = null;
+
+            foreach (var op in arithmeticOps)
+            {
+                if (cleanExpr.Contains(op))
+                {
+                    parts = cleanExpr.Split(new[] { op }, StringSplitOptions.RemoveEmptyEntries);
+                    detectedOp = op.Trim();
+                    break;
+                }
+            }
+
+            if (parts != null && parts.Length >= 2)
+            {
+                // Map XPath operators to K2 operator element names
+                calcField.OperatorType = detectedOp switch
+                {
+                    "+" => "Plus",
+                    "-" => "Minus",
+                    "*" => "Multiply",
+                    "div" => "Divide",
+                    _ => "Plus"
+                };
+
+                foreach (var part in parts)
+                {
+                    string fieldName = ExtractFieldNameFromXPath(part.Trim());
+                    if (!string.IsNullOrEmpty(fieldName))
+                    {
+                        AddSourceFieldByName(fieldName, sourceFields, fieldLookup);
+                    }
+                }
+                Console.WriteLine($"      Arithmetic: {string.Join($" {detectedOp} ", parts.Select(p => p.Trim()))} → {calcField.OperatorType}");
+                return;
+            }
+
+            // Single field reference (assignment)
+            string singleField = ExtractFieldNameFromXPath(cleanExpr);
+            if (!string.IsNullOrEmpty(singleField))
+            {
+                AddSourceFieldByName(singleField, sourceFields, fieldLookup);
+                Console.WriteLine($"      Single field reference: {singleField}");
+            }
+        }
+
+        /// <summary>
+        /// Strips formatting wrapper functions to get the core calculation expression.
+        /// e.g., xdFormatting:formatString(sum(amount), '$#,###.00') → sum(amount)
+        /// </summary>
+        private string StripFormattingWrappers(string expression)
+        {
+            var result = expression.Trim();
+
+            // Strip xdFormatting:formatString(expr, 'format')
+            var fmtMatch = System.Text.RegularExpressions.Regex.Match(result,
+                @"xdFormatting:formatString\s*\((.+?)\s*,\s*['""].*?['""]\s*\)$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (fmtMatch.Success)
+                result = fmtMatch.Groups[1].Value.Trim();
+
+            // Strip format-number(expr, 'format')
+            var numFmtMatch = System.Text.RegularExpressions.Regex.Match(result,
+                @"format-number\s*\((.+?)\s*,\s*['""].*?['""]\s*\)$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (numFmtMatch.Success)
+                result = numFmtMatch.Groups[1].Value.Trim();
+
+            // Strip xdMath:Nz() wrappers — replace xdMath:Nz(expr) with just expr
+            // This handles e.g. sum(xdMath:Nz(../my:item/my:amount)) → sum(../my:item/my:amount)
+            // and xdMath:Nz(../my:subTotal) - xdMath:Nz(../my:cashAdvance) → ../my:subTotal - ../my:cashAdvance
+            result = System.Text.RegularExpressions.Regex.Replace(result,
+                @"xdMath:Nz\(([^)]+)\)", "$1");
+
+            return result;
+        }
+
+        /// <summary>
+        /// Extracts the leaf field name from an XPath path.
+        /// ../my:items/my:amount → amount, my:subTotal → subTotal
+        /// </summary>
+        private string ExtractFieldNameFromXPath(string xpath)
+        {
+            if (string.IsNullOrEmpty(xpath)) return null;
+
+            var cleaned = xpath.Trim();
+
+            // Remove quotes
+            cleaned = cleaned.Trim('\'', '"');
+
+            // Skip numeric literals
+            if (double.TryParse(cleaned, out _)) return null;
+
+            // Take the last path segment
+            if (cleaned.Contains("/"))
+            {
+                var segments = cleaned.Split('/');
+                cleaned = segments[segments.Length - 1];
+            }
+
+            // Remove namespace prefix (my:)
+            cleaned = cleaned.Replace("my:", "");
+
+            // Remove predicates like [position()]
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\[.*?\]", "");
+
+            return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned.Trim();
+        }
+
+        /// <summary>
+        /// Adds a source field by name, looking it up in the field data.
+        /// Tries exact match first, then case-insensitive.
+        /// </summary>
+        private void AddSourceFieldByName(string fieldName, List<SourceFieldInfo> sourceFields,
+            Dictionary<string, JObject> fieldLookup)
+        {
+            JObject field = null;
+
+            // Try exact match
+            if (fieldLookup.TryGetValue(fieldName, out field))
+            {
+                // Found
+            }
+            // Try uppercase (K2 convention)
+            else if (fieldLookup.TryGetValue(fieldName.ToUpperInvariant(), out field))
+            {
+                // Found
+            }
+            else
+            {
+                Console.WriteLine($"        Could not find field '{fieldName}' in form data");
+                return;
+            }
+
+            var rsi = field["RepeatingSectionInfo"] as JObject;
+
+            sourceFields.Add(new SourceFieldInfo
+            {
+                CtrlId = field["CtrlId"]?.ToString(),
+                Name = field["Name"]?.ToString(),
+                Label = field["Label"]?.ToString(),
+                RepeatingSectionName = rsi?["RepeatingSectionName"]?.ToString()
+            });
+
+            Console.WriteLine($"      Found source field: {field["Name"]} (ID: {field["CtrlId"]})");
+        }
+
         private void GenerateCalculationExpressionOnly(XmlDocument doc, XmlElement expressionsElement, CalculationFieldInfo calcField)
         {
             try
             {
                 Console.WriteLine($"    Generating calculation expression for: {calcField.Name}");
 
-                // Create expression ID
                 string expressionId = Guid.NewGuid().ToString();
 
-                // Create the expression element
                 XmlElement expression = doc.CreateElement("Expression");
                 expression.SetAttribute("ID", expressionId);
 
-                // Add Name element
-                XmlElement nameElement = doc.CreateElement("Name");
-                nameElement.InnerText = $"Sum of all {calcField.SourceFields[0].Name} fields";
-                expression.AppendChild(nameElement);
-
-                // Add DisplayValue element
-                XmlElement displayValueElement = doc.CreateElement("DisplayValue");
-                displayValueElement.InnerText = $"List Sum( {calcField.SourceFields[0].Label} Text Box )";
-                expression.AppendChild(displayValueElement);
-
-                // Create ListSum element
-                XmlElement listSumElement = doc.CreateElement("ListSum");
-
-                // Add source fields to the ListSum
-                // Group source fields by name to handle multiple instances of the same field (like AMOUNT in different sections)
-                var fieldGroups = calcField.SourceFields.GroupBy(sf => sf.Name).ToList();
-
-                foreach (var fieldGroup in fieldGroups)
+                bool hasOperands;
+                if (!string.IsNullOrEmpty(calcField.OperatorType))
                 {
-                    string fieldName = fieldGroup.Key;
-                    int fieldCount = fieldGroup.Count();
-
-                    // Find ALL controls for this field name
-                    var allControlInfos = FindAllControlsInFormXml(doc, fieldName);
-
-                    if (allControlInfos.Count > 0)
-                    {
-                        // If we have multiple instances of the field, use all controls found
-                        // If we have one instance but multiple controls, use all controls found
-                        int controlsToUse = Math.Max(fieldCount, allControlInfos.Count);
-
-                        for (int i = 0; i < Math.Min(controlsToUse, allControlInfos.Count); i++)
-                        {
-                            var controlInfo = allControlInfos[i];
-                            XmlElement itemElement = doc.CreateElement("Item");
-                            itemElement.SetAttribute("SourceType", "Control");
-                            itemElement.SetAttribute("SourceInstanceID", controlInfo.ViewInstanceId);
-                            itemElement.SetAttribute("SourceID", controlInfo.ControlId);
-                            itemElement.SetAttribute("SourceName", $"{fieldName} Text Box");
-                            itemElement.SetAttribute("DataType", "Text");
-
-                            listSumElement.AppendChild(itemElement);
-                            Console.WriteLine($"        Added ListSum source: {fieldName} (Control ID: {controlInfo.ControlId}, View: {controlInfo.ViewInstanceId})");
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"        WARNING: Could not find any controls for field {fieldName} in form XML");
-                    }
+                    hasOperands = GenerateArithmeticExpression(doc, expression, calcField);
+                }
+                else
+                {
+                    hasOperands = GenerateListSumExpression(doc, expression, calcField);
                 }
 
-                expression.AppendChild(listSumElement);
+                // Only add expression if it has operands — empty operators cause K2 runtime errors
+                if (!hasOperands)
+                {
+                    Console.WriteLine($"      Skipping expression for {calcField.Name}: no operands resolved");
+                    return;
+                }
+
                 expressionsElement.AppendChild(expression);
+
+                // Modify the target control to be a DataLabel with ExpressionID
+                ModifyTargetControlForExpression(doc, calcField, expressionId);
 
                 Console.WriteLine($"      Successfully created expression for {calcField.Name}");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"    ERROR generating calculation expression for {calcField.Name}: {ex.Message}");
+            }
+        }
+
+        /// <summary>Returns true if at least 2 operands were resolved (required for binary operators).</summary>
+        private bool GenerateArithmeticExpression(XmlDocument doc, XmlElement expression, CalculationFieldInfo calcField)
+        {
+            string opSymbol = calcField.OperatorType == "Minus" ? "-" : "+";
+
+            XmlElement nameElement = doc.CreateElement("Name");
+            nameElement.InnerText = $"{string.Join($" {opSymbol} ", calcField.SourceFields.Select(sf => sf.Name))} Calculation";
+            expression.AppendChild(nameElement);
+
+            XmlElement operatorElement = doc.CreateElement(calcField.OperatorType);
+            int operandCount = 0;
+            var resolvedDisplayNames = new List<string>();
+
+            foreach (var sourceField in calcField.SourceFields)
+            {
+                var controlInfo = FindControlByName(doc, sourceField.Name);
+                if (controlInfo != null)
+                {
+                    // Build display name: use ControlName if it's meaningful, otherwise use field name + " TextBox"
+                    string controlDisplayName = controlInfo.ControlName;
+                    if (string.IsNullOrEmpty(controlDisplayName) || controlDisplayName == "ControlName")
+                        controlDisplayName = $"{sourceField.Name} TextBox";
+
+                    XmlElement itemElement = doc.CreateElement("Item");
+                    itemElement.SetAttribute("SourceType", "Control");
+                    itemElement.SetAttribute("SourceID", controlInfo.ControlId);
+                    itemElement.SetAttribute("SourceInstanceID", controlInfo.ViewInstanceId);
+                    itemElement.SetAttribute("Type", "TextBox");
+                    itemElement.SetAttribute("DataType", "Text");
+                    itemElement.SetAttribute("SourceName", controlDisplayName);
+                    itemElement.SetAttribute("SourceDisplayName", controlDisplayName);
+                    itemElement.SetAttribute("DisplayPath", $"{controlInfo.ViewName} - Controls - {controlDisplayName}");
+
+                    var displayChild = doc.CreateElement("Display");
+                    displayChild.InnerText = controlDisplayName;
+                    itemElement.AppendChild(displayChild);
+
+                    operatorElement.AppendChild(itemElement);
+                    operandCount++;
+                    resolvedDisplayNames.Add(controlDisplayName);
+                    Console.WriteLine($"        Added {calcField.OperatorType} source: {controlDisplayName} (Control: {controlInfo.ControlId}, View: {controlInfo.ViewInstanceId})");
+                }
+                else
+                {
+                    Console.WriteLine($"        WARNING: Could not find control for field {sourceField.Name} in form XML");
+                }
+            }
+
+            if (operandCount < 2)
+            {
+                Console.WriteLine($"        ERROR: Binary operator {calcField.OperatorType} needs 2 operands, got {operandCount}");
+                return false;
+            }
+
+            expression.AppendChild(operatorElement);
+
+            var exprDisplay = doc.CreateElement("Display");
+            exprDisplay.InnerText = string.Join($" {opSymbol} ", resolvedDisplayNames);
+            expression.AppendChild(exprDisplay);
+
+            return true;
+        }
+
+        /// <summary>Returns true if at least 1 operand was resolved.</summary>
+        private bool GenerateListSumExpression(XmlDocument doc, XmlElement expression, CalculationFieldInfo calcField)
+        {
+            string fieldLabel = calcField.SourceFields[0].Label ?? calcField.SourceFields[0].Name;
+
+            XmlElement nameElement = doc.CreateElement("Name");
+            nameElement.InnerText = $"Sum of all {calcField.SourceFields[0].Name} fields";
+            expression.AppendChild(nameElement);
+
+            XmlElement listSumElement = doc.CreateElement("ListSum");
+
+            // For ListSum, find all instances of the source field across views
+            var fieldGroups = calcField.SourceFields.GroupBy(sf => sf.Name).ToList();
+
+            foreach (var fieldGroup in fieldGroups)
+            {
+                string fieldName = fieldGroup.Key;
+
+                // First try parameter-based search (existing method)
+                var allControlInfos = FindAllControlsInFormXml(doc, fieldName);
+
+                // Fallback: search by control name directly
+                if (allControlInfos.Count == 0)
+                {
+                    var directControl = FindControlByName(doc, fieldName);
+                    if (directControl != null)
+                    {
+                        allControlInfos.Add(new ControlInfoInForm
+                        {
+                            ControlId = directControl.ControlId,
+                            ViewInstanceId = directControl.ViewInstanceId,
+                            ControlName = fieldName
+                        });
+                    }
+                }
+
+                if (allControlInfos.Count > 0)
+                {
+                    foreach (var controlInfo in allControlInfos)
+                    {
+                        // Use actual display name if available, otherwise construct one
+                        string controlDisplayName = controlInfo.ControlName;
+                        if (string.IsNullOrEmpty(controlDisplayName) || controlDisplayName == "ControlName" || controlDisplayName == fieldName)
+                            controlDisplayName = $"{fieldName} TextBox";
+
+                        XmlElement itemElement = doc.CreateElement("Item");
+                        itemElement.SetAttribute("SourceType", "Control");
+                        itemElement.SetAttribute("SourceInstanceID", controlInfo.ViewInstanceId ?? "");
+                        itemElement.SetAttribute("SourceID", controlInfo.ControlId);
+                        itemElement.SetAttribute("SourceName", controlDisplayName);
+                        itemElement.SetAttribute("SourceDisplayName", controlDisplayName);
+                        itemElement.SetAttribute("Type", "TextBox");
+                        itemElement.SetAttribute("DataType", "Text");
+                        itemElement.SetAttribute("DisplayPath", $"{controlInfo.ViewName ?? ""} - Controls - {controlDisplayName}");
+
+                        var displayChild = doc.CreateElement("Display");
+                        displayChild.InnerText = controlDisplayName;
+                        itemElement.AppendChild(displayChild);
+
+                        listSumElement.AppendChild(itemElement);
+                        Console.WriteLine($"        Added ListSum source: {controlDisplayName} (Control: {controlInfo.ControlId}, View: {controlInfo.ViewName}, ViewInstance: {controlInfo.ViewInstanceId})");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"        WARNING: Could not find any controls for field {fieldName} in form XML");
+                }
+            }
+
+            if (!listSumElement.HasChildNodes)
+            {
+                Console.WriteLine($"        ERROR: ListSum has no operands");
+                return false;
+            }
+
+            expression.AppendChild(listSumElement);
+
+            var exprDisplay = doc.CreateElement("Display");
+            exprDisplay.InnerText = $"List Sum( {fieldLabel} TextBox )";
+            expression.AppendChild(exprDisplay);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Modifies the target control to be a DataLabel with ExpressionID.
+        /// K2 pattern: calculated fields display as DataLabels bound to expressions.
+        /// </summary>
+        private void ModifyTargetControlForExpression(XmlDocument doc, CalculationFieldInfo calcField, string expressionId)
+        {
+            // Find the control via ControlMappingService first, then fallback to parameter search
+            string targetControlId = null;
+            var controlInfo = FindControlByName(doc, calcField.Name);
+            if (controlInfo != null)
+            {
+                targetControlId = controlInfo.ControlId;
+            }
+            else
+            {
+                var controlInfos = FindAllControlsInFormXml(doc, calcField.Name);
+                if (controlInfos.Count > 0)
+                    targetControlId = controlInfos[0].ControlId;
+            }
+
+            if (string.IsNullOrEmpty(targetControlId))
+            {
+                Console.WriteLine($"        WARNING: Could not find target control {calcField.Name} to set ExpressionID");
+                return;
+            }
+
+            // Find the actual Control element and modify it
+            var controlElements = doc.GetElementsByTagName("Control");
+            foreach (XmlElement ctrl in controlElements)
+            {
+                if (ctrl.GetAttribute("ID") == targetControlId)
+                {
+                    ctrl.SetAttribute("Type", "DataLabel");
+                    ctrl.SetAttribute("ExpressionID", expressionId);
+
+                    // Add ControlExpression property
+                    var propsElement = ctrl.SelectSingleNode("Properties") as XmlElement;
+                    if (propsElement == null)
+                    {
+                        propsElement = doc.CreateElement("Properties");
+                        ctrl.AppendChild(propsElement);
+                    }
+
+                    var exprProp = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, exprProp, "Name", "ControlExpression");
+                    XmlHelper.AddElement(doc, exprProp, "Value", expressionId);
+                    propsElement.AppendChild(exprProp);
+
+                    var literalProp = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, literalProp, "Name", "LiteralVal");
+                    XmlHelper.AddElement(doc, literalProp, "Value", "false");
+                    propsElement.AppendChild(literalProp);
+
+                    Console.WriteLine($"        Modified target control {calcField.Name} to DataLabel with ExpressionID");
+                    break;
+                }
             }
         }
 
@@ -2908,6 +3297,18 @@ namespace K2SmartObjectGenerator
         private string FindViewInstanceId(XmlDocument doc, string viewNamePattern)
         {
             XmlNodeList items = doc.GetElementsByTagName("Item");
+
+            // First try exact match
+            foreach (XmlElement item in items)
+            {
+                string viewName = item.SelectSingleNode("Name")?.InnerText ?? "";
+                if (string.Equals(viewName, viewNamePattern, StringComparison.OrdinalIgnoreCase))
+                {
+                    return item.GetAttribute("ID");
+                }
+            }
+
+            // Fallback: partial match (original behavior for _Item views)
             foreach (XmlElement item in items)
             {
                 string viewName = item.SelectSingleNode("Name")?.InnerText ?? "";
@@ -3132,6 +3533,71 @@ namespace K2SmartObjectGenerator
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Finds a control by searching Properties/Property[Name='ControlName'] values in the form XML.
+        /// K2 controls don't have a Name attribute — the name is in Properties.
+        /// Returns control ID, view instance ID, and view name needed for expression Items.
+        /// </summary>
+        private ControlInfoInForm FindControlByName(XmlDocument doc, string fieldName)
+        {
+            try
+            {
+                string upperFieldName = fieldName.ToUpperInvariant();
+
+                // Strategy 1: Use ControlMappingService (has accurate field→control mappings)
+                // Build a flat lookup to avoid repeated GetViewControls calls
+                var registeredViews = ControlMappingService.GetMappedViewNames();
+                foreach (var viewName in registeredViews)
+                {
+                    Dictionary<string, ViewGenerator.ControlMapping> controls;
+                    try
+                    {
+                        controls = ControlMappingService.GetViewControls(viewName);
+                    }
+                    catch { continue; }
+                    if (controls == null) continue;
+
+                    // Look for field name match (case-insensitive)
+                    ViewGenerator.ControlMapping match = null;
+                    foreach (var kvp in controls)
+                    {
+                        if (string.Equals(kvp.Key, fieldName, StringComparison.OrdinalIgnoreCase) &&
+                            kvp.Value.ControlType != "Label")
+                        {
+                            match = kvp.Value;
+                            break;
+                        }
+                    }
+
+                    if (match != null)
+                    {
+                        string controlId = match.ControlId;
+                        string controlDisplayName = match.ControlName ?? fieldName;
+
+                        // Find the view instance ID from the form XML
+                        string viewInstanceId = FindViewInstanceId(doc, viewName) ?? "";
+
+                        Console.WriteLine($"          Found control '{fieldName}' via ControlMappingService: " +
+                            $"Control='{controlDisplayName}', ID={controlId}, View='{viewName}', ViewInstance={viewInstanceId}");
+                        return new ControlInfoInForm
+                        {
+                            ControlId = controlId,
+                            ViewInstanceId = viewInstanceId,
+                            ControlName = controlDisplayName,
+                            ViewName = viewName
+                        };
+                    }
+                }
+
+                Console.WriteLine($"          Could not find control '{fieldName}' in ControlMappingService");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"          Error in FindControlByName for '{fieldName}': {ex.Message}");
+            }
+            return null;
         }
 
         private string FindBestViewInstanceForField(XmlDocument doc, string fieldName)

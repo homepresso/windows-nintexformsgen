@@ -487,6 +487,34 @@ namespace FormGenerator.Analyzers.Infopath
                     formDef.Description = solutionProperties.Attribute("description")?.Value;
                     formDef.Version = solutionProperties.Attribute("version")?.Value;
                 }
+
+                // Extract calculatedField elements (e.g., sum, arithmetic expressions)
+                var calculatedFields = manifest.Descendants(xsf + "calculatedField");
+                foreach (var calcField in calculatedFields)
+                {
+                    var target = calcField.Attribute("target")?.Value;
+                    var expression = calcField.Attribute("expression")?.Value;
+                    if (!string.IsNullOrEmpty(target) && !string.IsNullOrEmpty(expression))
+                    {
+                        // Extract field name from XPath target (e.g., "/my:expenseReport/my:items/my:subTotal" -> "subTotal")
+                        var targetName = target;
+                        if (target.Contains("/"))
+                            targetName = target.Substring(target.LastIndexOf('/') + 1);
+                        if (targetName.Contains(":"))
+                            targetName = targetName.Substring(targetName.IndexOf(':') + 1);
+
+                        var calcRule = new ConditionalRule
+                        {
+                            Name = "ManifestCalc_" + targetName,
+                            Type = "Calculation",
+                            Condition = expression,
+                            TargetField = targetName,
+                            Action = "Calculate"
+                        };
+                        formDef.ConditionalRules.Add(calcRule);
+                        Console.WriteLine($"  Extracted calculatedField: target='{targetName}', expression='{expression}'");
+                    }
+                }
             }
             catch (Exception ex)
             {

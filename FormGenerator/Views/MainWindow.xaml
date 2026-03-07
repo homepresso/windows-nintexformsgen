@@ -1269,6 +1269,7 @@
                                             <ComboBoxItem Content="Partial"/>
                                             <ComboBoxItem Content="Not Supported"/>
                                             <ComboBoxItem Content="Custom Required"/>
+                                            <ComboBoxItem Content="K2 Native"/>
                                         </ComboBox>
                                     </Grid>
 
@@ -1279,6 +1280,12 @@
                                              BorderThickness="0"
                                              SelectionChanged="RulesMappingList_SelectionChanged"
                                              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBox.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Copy Rule Details" Click="CopyRuleDetails_Click"/>
+                                                <MenuItem Header="Copy All Filtered Rules" Click="CopyAllFilteredRules_Click"/>
+                                            </ContextMenu>
+                                        </ListBox.ContextMenu>
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <Border Background="{StaticResource BackgroundMedium}"
@@ -1320,6 +1327,9 @@
                                                                         <DataTrigger Binding="{Binding Status}" Value="RequiresCustomization">
                                                                             <Setter Property="Background" Value="{StaticResource InfoColor}"/>
                                                                         </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="K2Native">
+                                                                            <Setter Property="Background" Value="#8B5CF6"/>
+                                                                        </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
                                                             </Border.Style>
@@ -1354,6 +1364,9 @@
                                                                         <DataTrigger Binding="{Binding Status}" Value="RequiresCustomization">
                                                                             <Setter Property="Background" Value="#1A3B82F6"/>
                                                                         </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="K2Native">
+                                                                            <Setter Property="Background" Value="#1A8B5CF6"/>
+                                                                        </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
                                                             </Border.Style>
@@ -1373,6 +1386,9 @@
                                                                             </DataTrigger>
                                                                             <DataTrigger Binding="{Binding Status}" Value="RequiresCustomization">
                                                                                 <Setter Property="Foreground" Value="{StaticResource InfoColor}"/>
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="K2Native">
+                                                                                <Setter Property="Foreground" Value="#8B5CF6"/>
                                                                             </DataTrigger>
                                                                         </Style.Triggers>
                                                                     </Style>

@@ -1515,26 +1515,9 @@ namespace K2SmartObjectGenerator
                 }
             }
 
-            // Apply read-only property if disableEditing is set
-            if (controlDef != null)
-            {
-                string disableEditing = controlDef["AdditionalProperties"]?["disableEditing"]?.ToString();
-                if (!string.IsNullOrEmpty(disableEditing) && disableEditing.ToLower() == "yes")
-                {
-                    // Find the Properties element and add IsReadOnly property
-                    XmlElement propertiesElement = control.SelectSingleNode("Properties") as XmlElement;
-                    if (propertiesElement != null)
-                    {
-                        XmlElement readOnlyProperty = doc.CreateElement("Property");
-                        XmlHelper.AddElement(doc, readOnlyProperty, "Name", "IsReadOnly");
-                        XmlHelper.AddElement(doc, readOnlyProperty, "Value", "true");
-                        XmlHelper.AddElement(doc, readOnlyProperty, "DisplayValue", "true");
-                        propertiesElement.AppendChild(readOnlyProperty);
-
-                        Console.WriteLine($"        [READ-ONLY] Applied IsReadOnly=true due to disableEditing=yes");
-                    }
-                }
-            }
+            // NOTE: InfoPath disableEditing=yes is NOT applied as IsReadOnly in K2.
+            // Calculated fields become DataLabels (inherently read-only via expression).
+            // All other fields should remain editable in the K2 form.
 
             // Adjust the display name based on control type
             string controlTypeDisplayName = isDataLabel ? "Data Label" : GetControlTypeDisplayName(k2ControlType);

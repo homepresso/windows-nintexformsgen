@@ -59,7 +59,7 @@ namespace FormGenerator.Services
                 return new ResolvedControl { ControlId = controlId, ControlName = fieldNameOrXPath };
             }
 
-            // Strategy 5: Case-insensitive search across all maps
+            // Strategy 5: Case-insensitive search across controlIdMap
             foreach (var kvp in _controlIdMap)
             {
                 if (string.Equals(kvp.Key, fieldNameOrXPath, StringComparison.OrdinalIgnoreCase) ||
@@ -67,6 +67,30 @@ namespace FormGenerator.Services
                     string.Equals(kvp.Key, sanitized, StringComparison.OrdinalIgnoreCase))
                 {
                     return new ResolvedControl { ControlId = kvp.Value, ControlName = kvp.Key };
+                }
+            }
+
+            // Strategy 6: Try UPPERCASE version directly (K2 control names are often uppercase)
+            var upper = stripped.ToUpperInvariant();
+            if (!string.Equals(upper, stripped) && _controlIdMap.TryGetValue(upper, out controlId))
+            {
+                return new ResolvedControl { ControlId = controlId, ControlName = upper };
+            }
+
+            // Strategy 7: Reverse lookup through controlToFieldMap
+            // controlToFieldMap maps ControlName -> FieldName, we need FieldName -> ControlName -> ControlId
+            foreach (var kvp in _controlToFieldMap)
+            {
+                if (string.Equals(kvp.Value, fieldNameOrXPath, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(kvp.Value, stripped, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(kvp.Key, fieldNameOrXPath, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(kvp.Key, stripped, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Found a matching field, now get the control ID
+                    if (_controlIdMap.TryGetValue(kvp.Key, out controlId))
+                    {
+                        return new ResolvedControl { ControlId = controlId, ControlName = kvp.Key };
+                    }
                 }
             }
 

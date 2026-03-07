@@ -27,7 +27,11 @@
       "Bash(Select-String \"error\" -Context 0,1)",
       "Bash(ls:*)",
       "WebSearch",
-      "Bash(git ls-tree:*)"
+      "Bash(git ls-tree:*)",
+      "Read(//tmp/**)",
+      "Bash(powershell.exe:*)",
+      "Bash(\"C:\\\\Windows\\\\System32\\\\expand.exe\":*)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []

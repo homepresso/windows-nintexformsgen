@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using FormGenerator.Analyzers.Infopath;
@@ -233,6 +234,7 @@ namespace FormGenerator.Views
                     2 => RuleMappingStatus.PartiallySupported,
                     3 => RuleMappingStatus.NotSupported,
                     4 => RuleMappingStatus.RequiresCustomization,
+                    5 => RuleMappingStatus.K2Native,
                     _ => (RuleMappingStatus?)null
                 };
 
@@ -331,6 +333,100 @@ namespace FormGenerator.Views
                 _mainWindow.WarningsPanel.ItemsSource = null;
             if (_mainWindow.MissingFeaturesPanel != null)
                 _mainWindow.MissingFeaturesPanel.ItemsSource = null;
+        }
+
+        /// <summary>
+        /// Copies selected rule details to clipboard in a prompt-friendly format
+        /// </summary>
+        public void CopyRuleDetailsToClipboard()
+        {
+            var selected = _mainWindow?.RulesMappingListBox?.SelectedItem as RuleMappingItem;
+            if (selected == null)
+            {
+                MessageBox.Show("No rule selected.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var text = FormatRuleForClipboard(selected);
+            Clipboard.SetText(text);
+        }
+
+        /// <summary>
+        /// Copies all currently filtered rules to clipboard
+        /// </summary>
+        public void CopyAllFilteredRulesToClipboard()
+        {
+            if (_filteredRuleMappings == null || !_filteredRuleMappings.Any())
+            {
+                MessageBox.Show("No rules to copy.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"# InfoPath to K2 Rule Mappings ({_filteredRuleMappings.Count} rules)");
+            sb.AppendLine();
+
+            foreach (var rule in _filteredRuleMappings)
+            {
+                sb.AppendLine(FormatRuleForClipboard(rule));
+                sb.AppendLine("---");
+                sb.AppendLine();
+            }
+
+            Clipboard.SetText(sb.ToString());
+        }
+
+        private string FormatRuleForClipboard(RuleMappingItem rule)
+        {
+            var sb = new StringBuilder();
+
+            sb.AppendLine($"## Rule: {rule.InfoPathRuleName}");
+            sb.AppendLine($"- **Form**: {rule.FormName}");
+            sb.AppendLine($"- **Type**: {rule.InfoPathRuleType}");
+            sb.AppendLine($"- **Status**: {rule.StatusDisplay}");
+
+            if (!string.IsNullOrEmpty(rule.InfoPathCondition))
+                sb.AppendLine($"- **Condition**: `{rule.InfoPathCondition}`");
+
+            if (!string.IsNullOrEmpty(rule.InfoPathConditionExpression))
+                sb.AppendLine($"- **Expression**: `{rule.InfoPathConditionExpression}`");
+
+            if (!string.IsNullOrEmpty(rule.InfoPathAppliesTo))
+                sb.AppendLine($"- **Applies To**: {rule.InfoPathAppliesTo}");
+
+            if (rule.InfoPathActions != null && rule.InfoPathActions.Any())
+            {
+                sb.AppendLine("- **Actions**:");
+                foreach (var action in rule.InfoPathActions)
+                {
+                    sb.Append($"  - {action.InfoPathActionType}");
+                    if (!string.IsNullOrEmpty(action.InfoPathTarget))
+                        sb.Append($" → {action.InfoPathTarget}");
+                    if (!string.IsNullOrEmpty(action.InfoPathExpression))
+                        sb.Append($" = `{action.InfoPathExpression}`");
+                    sb.Append($" (K2: {action.K2ActionType}, {(action.IsSupported ? "Supported" : "Not Supported")})");
+                    sb.AppendLine();
+                }
+            }
+
+            if (!string.IsNullOrEmpty(rule.K2Xml))
+            {
+                sb.AppendLine("- **K2 XML**:");
+                sb.AppendLine("```xml");
+                sb.AppendLine(rule.K2Xml);
+                sb.AppendLine("```");
+            }
+
+            if (!string.IsNullOrEmpty(rule.Notes))
+                sb.AppendLine($"- **Notes**: {rule.Notes}");
+
+            if (rule.Warnings != null && rule.Warnings.Any())
+                sb.AppendLine($"- **Warnings**: {string.Join("; ", rule.Warnings)}");
+
+            if (rule.MissingFeatures != null && rule.MissingFeatures.Any())
+                sb.AppendLine($"- **Missing Features**: {string.Join("; ", rule.MissingFeatures)}");
+
+            return sb.ToString();
         }
 
         private void ExportAsJson(string filePath)

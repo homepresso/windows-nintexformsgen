@@ -29,6 +29,12 @@ namespace K2SmartObjectGenerator
         {
             XmlElement events = doc.CreateElement("Events");
 
+            // Track which control SourceIDs already have events to prevent duplicates
+            // K2 Form.EventInstance has a unique constraint on (ContextID, EventID, ...)
+            // where EventID maps to the event's SourceID. Two events with the same SourceID
+            // will cause a duplicate key error on deploy.
+            var controlEventMap = new Dictionary<string, XmlElement>(StringComparer.OrdinalIgnoreCase);
+
             // Create standard Init event with visibility initialization
             XmlElement initEvent = CreateInitEvent(doc, viewGuid, viewName, controlIdMap,
                 controlToFieldMap, fieldMap, lookupSmartObjects, dynamicSections, controls, jsonToK2ControlIdMap);
@@ -46,6 +52,7 @@ namespace K2SmartObjectGenerator
                     XmlElement changeEvent = CreateOnChangeEvent(doc, controlId, controlName,
                         viewGuid, viewName, fieldId);
                     events.AppendChild(changeEvent);
+                    controlEventMap[controlId] = changeEvent;
                 }
             }
 
@@ -55,7 +62,7 @@ namespace K2SmartObjectGenerator
                 Console.WriteLine($"    Processing {dynamicSections.Count} dynamic sections for visibility rules");
                 FixDynamicSectionControlIds(dynamicSections);
                 AddVisibilityRules(doc, events, dynamicSections, controlIdMap, viewGuid, viewName,
-                    controls, jsonToK2ControlIdMap);
+                    controls, jsonToK2ControlIdMap, controlEventMap);
             }
 
             // Add conditional visibility rules
@@ -63,7 +70,7 @@ namespace K2SmartObjectGenerator
             {
                 Console.WriteLine($"    Processing conditional visibility rules");
                 AddConditionalVisibilityRules(doc, events, conditionalVisibility, controlIdMap,
-                    viewGuid, viewName);
+                    viewGuid, viewName, controlEventMap);
             }
 
             return events;
@@ -551,7 +558,8 @@ namespace K2SmartObjectGenerator
         private void AddVisibilityRules(XmlDocument doc, XmlElement events, JArray dynamicSections,
                                        Dictionary<string, string> controlIdMap, string viewGuid,
                                        string viewName, JArray controls,
-                                       Dictionary<string, string> jsonToK2ControlIdMap)
+                                       Dictionary<string, string> jsonToK2ControlIdMap,
+                                       Dictionary<string, XmlElement> controlEventMap = null)
         {
             Console.WriteLine($"    Adding visibility rules from {dynamicSections.Count} dynamic sections");
 
@@ -655,14 +663,44 @@ namespace K2SmartObjectGenerator
                     expandedControls.Add(controlId);
                 }
 
-                XmlElement visibilityEvent = CreateSectionVisibilityEvent(doc, triggerControlId,
-                    triggerFieldName, expandedControls, controlIdMap, viewGuid, viewName);
-
-                if (visibilityEvent != null)
+                // Check if there's already an event for this control (e.g., OnChange data binding)
+                // K2 Form.EventInstance has a unique constraint that prevents two events with the same SourceID
+                if (controlEventMap != null && controlEventMap.ContainsKey(triggerControlId))
                 {
-                    events.AppendChild(visibilityEvent);
-                    Console.WriteLine($"      Successfully added visibility rule for {triggerFieldName} " +
-                                   $"affecting {allSectionControls.Count} controls");
+                    // Merge visibility handlers into the existing event
+                    XmlElement existingEvent = controlEventMap[triggerControlId];
+                    XmlElement visibilityEvent = CreateSectionVisibilityEvent(doc, triggerControlId,
+                        triggerFieldName, expandedControls, controlIdMap, viewGuid, viewName);
+                    if (visibilityEvent != null)
+                    {
+                        // Copy handlers from visibility event into existing event
+                        var handlersNode = existingEvent.SelectSingleNode("Handlers") as XmlElement;
+                        if (handlersNode == null)
+                        {
+                            handlersNode = doc.CreateElement("Handlers");
+                            existingEvent.AppendChild(handlersNode);
+                        }
+                        foreach (XmlNode handler in visibilityEvent.SelectNodes("Handlers/Handler"))
+                        {
+                            handlersNode.AppendChild(doc.ImportNode(handler, true));
+                        }
+                        Console.WriteLine($"      Merged visibility rule into existing event for {triggerFieldName} " +
+                                       $"affecting {allSectionControls.Count} controls");
+                    }
+                }
+                else
+                {
+                    XmlElement visibilityEvent = CreateSectionVisibilityEvent(doc, triggerControlId,
+                        triggerFieldName, expandedControls, controlIdMap, viewGuid, viewName);
+
+                    if (visibilityEvent != null)
+                    {
+                        events.AppendChild(visibilityEvent);
+                        if (controlEventMap != null)
+                            controlEventMap[triggerControlId] = visibilityEvent;
+                        Console.WriteLine($"      Successfully added visibility rule for {triggerFieldName} " +
+                                       $"affecting {allSectionControls.Count} controls");
+                    }
                 }
             }
         }
@@ -810,7 +848,8 @@ namespace K2SmartObjectGenerator
         private void AddConditionalVisibilityRules(XmlDocument doc, XmlElement events,
                                                   JObject conditionalVisibility,
                                                   Dictionary<string, string> controlIdMap,
-                                                  string viewGuid, string viewName)
+                                                  string viewGuid, string viewName,
+                                                  Dictionary<string, XmlElement> controlEventMap = null)
         {
             foreach (var property in conditionalVisibility.Properties())
             {
@@ -824,47 +863,67 @@ namespace K2SmartObjectGenerator
                 if (string.IsNullOrEmpty(controlId))
                     continue;
 
-                XmlElement changeEvent = doc.CreateElement("Event");
-                changeEvent.SetAttribute("ID", Guid.NewGuid().ToString());
-                changeEvent.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
-                changeEvent.SetAttribute("Type", "User");
-                changeEvent.SetAttribute("SourceID", controlId);
-                changeEvent.SetAttribute("SourceType", "Control");
-                changeEvent.SetAttribute("SourceName", fieldName);
-                changeEvent.SetAttribute("IsExtended", "True");
-
-                XmlHelper.AddElement(doc, changeEvent, "Name", "OnChange");
-
-                XmlElement props = doc.CreateElement("Properties");
-                XmlElement viewIdProp = doc.CreateElement("Property");
-                XmlHelper.AddElement(doc, viewIdProp, "Name", "ViewID");
-                XmlHelper.AddElement(doc, viewIdProp, "Value", viewGuid);
-                XmlHelper.AddElement(doc, viewIdProp, "DisplayValue", viewName);
-                props.AppendChild(viewIdProp);
-
-                XmlElement ruleName = doc.CreateElement("Property");
-                XmlHelper.AddElement(doc, ruleName, "Name", "RuleFriendlyName");
-                XmlHelper.AddElement(doc, ruleName, "Value", $"When {fieldName} is Changed");
-                props.AppendChild(ruleName);
-
-                changeEvent.AppendChild(props);
-
-                XmlElement handlers = doc.CreateElement("Handlers");
-
-                // Create handler for showing controls when field has value
+                // Create the visibility handlers
                 XmlElement showHandler = CreateSimpleVisibilityHandler(doc, controlId, fieldName,
                     affectedControls, controlIdMap, true, viewGuid, viewName);
-                handlers.AppendChild(showHandler);
-
-                // Create handler for hiding controls when field is empty
                 XmlElement hideHandler = CreateSimpleVisibilityHandler(doc, controlId, fieldName,
                     affectedControls, controlIdMap, false, viewGuid, viewName);
-                handlers.AppendChild(hideHandler);
 
-                changeEvent.AppendChild(handlers);
-                events.AppendChild(changeEvent);
+                // Check if there's already an event for this control
+                if (controlEventMap != null && controlEventMap.ContainsKey(controlId))
+                {
+                    // Merge handlers into existing event
+                    XmlElement existingEvent = controlEventMap[controlId];
+                    var handlersNode = existingEvent.SelectSingleNode("Handlers") as XmlElement;
+                    if (handlersNode == null)
+                    {
+                        handlersNode = doc.CreateElement("Handlers");
+                        existingEvent.AppendChild(handlersNode);
+                    }
+                    handlersNode.AppendChild(showHandler);
+                    handlersNode.AppendChild(hideHandler);
+                    Console.WriteLine($"        Merged conditional visibility rule into existing event for field: {fieldName}");
+                }
+                else
+                {
+                    // Create new event
+                    XmlElement changeEvent = doc.CreateElement("Event");
+                    changeEvent.SetAttribute("ID", Guid.NewGuid().ToString());
+                    changeEvent.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
+                    changeEvent.SetAttribute("Type", "User");
+                    changeEvent.SetAttribute("SourceID", controlId);
+                    changeEvent.SetAttribute("SourceType", "Control");
+                    changeEvent.SetAttribute("SourceName", fieldName);
+                    changeEvent.SetAttribute("IsExtended", "True");
 
-                Console.WriteLine($"        Added conditional visibility rule for field: {fieldName}");
+                    XmlHelper.AddElement(doc, changeEvent, "Name", "OnChange");
+
+                    XmlElement props = doc.CreateElement("Properties");
+                    XmlElement viewIdProp = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, viewIdProp, "Name", "ViewID");
+                    XmlHelper.AddElement(doc, viewIdProp, "Value", viewGuid);
+                    XmlHelper.AddElement(doc, viewIdProp, "DisplayValue", viewName);
+                    props.AppendChild(viewIdProp);
+
+                    XmlElement ruleName = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, ruleName, "Name", "RuleFriendlyName");
+                    XmlHelper.AddElement(doc, ruleName, "Value", $"When {fieldName} is Changed");
+                    props.AppendChild(ruleName);
+
+                    changeEvent.AppendChild(props);
+
+                    XmlElement handlers = doc.CreateElement("Handlers");
+                    handlers.AppendChild(showHandler);
+                    handlers.AppendChild(hideHandler);
+
+                    changeEvent.AppendChild(handlers);
+                    events.AppendChild(changeEvent);
+
+                    if (controlEventMap != null)
+                        controlEventMap[controlId] = changeEvent;
+
+                    Console.WriteLine($"        Added conditional visibility rule for field: {fieldName}");
+                }
             }
         }
 

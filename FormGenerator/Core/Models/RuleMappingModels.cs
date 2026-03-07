@@ -62,6 +62,7 @@ namespace FormGenerator.Core.Models
             RuleMappingStatus.NotSupported => "Not Supported",
             RuleMappingStatus.RequiresCustomization => "Custom Required",
             RuleMappingStatus.NotMapped => "Not Mapped",
+            RuleMappingStatus.K2Native => "K2 Native",
             _ => "Unknown"
         };
 
@@ -72,6 +73,7 @@ namespace FormGenerator.Core.Models
             RuleMappingStatus.NotSupported => "#EF4444",
             RuleMappingStatus.RequiresCustomization => "#3B82F6",
             RuleMappingStatus.NotMapped => "#888888",
+            RuleMappingStatus.K2Native => "#8B5CF6",
             _ => "#888888"
         };
 
@@ -127,7 +129,8 @@ namespace FormGenerator.Core.Models
         Supported,
         PartiallySupported,
         NotSupported,
-        RequiresCustomization
+        RequiresCustomization,
+        K2Native
     }
 
     /// <summary>
@@ -141,10 +144,11 @@ namespace FormGenerator.Core.Models
         public int PartialRules { get; set; }
         public int UnsupportedRules { get; set; }
         public int CustomRequiredRules { get; set; }
+        public int K2NativeRules { get; set; }
 
-        public double SupportedPercentage => TotalRules > 0 ? (double)SupportedRules / TotalRules * 100 : 0;
+        public double SupportedPercentage => TotalRules > 0 ? (double)(SupportedRules + K2NativeRules) / TotalRules * 100 : 0;
         public double OverallMappingPercentage => TotalRules > 0
-            ? (double)(SupportedRules + PartialRules) / TotalRules * 100
+            ? (double)(SupportedRules + K2NativeRules + PartialRules) / TotalRules * 100
             : 0;
 
         public List<string> CommonIssues { get; set; } = new List<string>();

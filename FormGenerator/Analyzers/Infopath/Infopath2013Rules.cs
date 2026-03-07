@@ -250,11 +250,15 @@ namespace FormGenerator.Analyzers.Infopath
                 var select = valueOfElem.Attribute("select")?.Value;
                 if (!string.IsNullOrEmpty(select) && IsCalculation(select))
                 {
+                    // Try to determine the target field from the parent element's xd:binding or xd:CtrlId
+                    var targetField = FindTargetFieldFromContext(valueOfElem, xd);
+
                     var calcRule = new ConditionalRule
                     {
                         Name = "Calculation_" + Guid.NewGuid().ToString("N").Substring(0, 8),
                         Type = "Calculation",
                         Condition = select,
+                        TargetField = targetField,
                         Action = "Calculate"
                     };
 
@@ -350,12 +354,54 @@ namespace FormGenerator.Analyzers.Infopath
 
         private bool IsCalculation(string expression)
         {
-            // Check if expression contains calculation operators
-            return expression.Contains("+") || expression.Contains("-") ||
-                   expression.Contains("*") || expression.Contains("/") ||
-                   expression.Contains("sum(") || expression.Contains("count(") ||
-                   expression.Contains("avg(") || expression.Contains("min(") ||
-                   expression.Contains("max(");
+            if (string.IsNullOrEmpty(expression)) return false;
+
+            // Function calls are always calculations
+            if (expression.Contains("sum(") || expression.Contains("count(") ||
+                expression.Contains("avg(") || expression.Contains("min(") ||
+                expression.Contains("max(") || expression.Contains("concat("))
+                return true;
+
+            // For arithmetic operators (+, -, *, /), need to distinguish from XPath syntax:
+            // - "/" in XPath paths like my:employee/my:name is NOT division
+            // - "-" in field names like my:sub-total is NOT subtraction
+            // Check for operators with surrounding whitespace (actual arithmetic)
+            if (System.Text.RegularExpressions.Regex.IsMatch(expression, @"\s[\+\-\*]\s"))
+                return true;
+
+            // Division: " / " with spaces to distinguish from XPath path separator
+            if (System.Text.RegularExpressions.Regex.IsMatch(expression, @"\s/\s"))
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// Walk up the XSL tree from xsl:value-of to find the target field binding.
+        /// InfoPath XSL pattern: <span xd:binding="my:fieldName" xd:CtrlId="CTRL1"><xsl:value-of select="..."/></span>
+        /// </summary>
+        private string FindTargetFieldFromContext(XElement valueOfElem, XNamespace xd)
+        {
+            var current = valueOfElem.Parent;
+            while (current != null)
+            {
+                // Check for xd:binding attribute (most reliable)
+                var binding = current.Attribute(xd + "binding")?.Value;
+                if (!string.IsNullOrEmpty(binding))
+                    return binding;
+
+                // Check for xd:CtrlId attribute as fallback
+                var ctrlId = current.Attribute(xd + "CtrlId")?.Value;
+                if (!string.IsNullOrEmpty(ctrlId))
+                    return ctrlId;
+
+                // Don't walk past xsl:template or the body element
+                if (current.Name.LocalName == "template" || current.Name.LocalName == "body")
+                    break;
+
+                current = current.Parent;
+            }
+            return null;
         }
 
         private string DetermineRuleType(XElement ruleElem)
