@@ -1131,6 +1131,499 @@
                     </Grid>
                 </TabItem>
 
+                <!-- Rules Mapping Tab -->
+                <TabItem Header="Rules Mapping" Name="RulesMappingTab">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Header with summary and filters -->
+                        <Border Grid.Row="0"
+                                Background="{StaticResource BackgroundLight}"
+                                Padding="15"
+                                Margin="20,10,20,0"
+                                CornerRadius="8">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <Grid Grid.Row="0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="InfoPath to K2 Rules Mapping"
+                                                  FontSize="18"
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"
+                                                  Margin="0,0,0,5"/>
+                                        <TextBlock Text="Compare InfoPath rules with their K2 SmartForms equivalents. Identify gaps and customize generated XML."
+                                                  FontSize="12"
+                                                  Foreground="{StaticResource TextSecondary}"
+                                                  TextWrapping="Wrap"/>
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Name="RefreshRulesMappingButton"
+                                                Content="Refresh"
+                                                Style="{StaticResource ModernButton}"
+                                                Margin="5,0"
+                                                Click="RefreshRulesMapping_Click"/>
+                                        <Button Name="ExportRulesMappingButton"
+                                                Content="Export"
+                                                Style="{StaticResource ModernButton}"
+                                                Background="{StaticResource SuccessColor}"
+                                                Click="ExportRulesMapping_Click"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Summary Stats -->
+                                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,15,0,0">
+                                    <Border Background="{StaticResource BackgroundMedium}" CornerRadius="5" Padding="10,5" Margin="0,0,10,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="Total: " Foreground="{StaticResource TextSecondary}" FontSize="12"/>
+                                            <TextBlock Name="TotalRulesCount" Text="0" Foreground="{StaticResource TextPrimary}" FontWeight="Medium" FontSize="12"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#1A10B981" CornerRadius="5" Padding="10,5" Margin="0,0,10,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="Supported: " Foreground="{StaticResource SuccessColor}" FontSize="12"/>
+                                            <TextBlock Name="SupportedRulesCount" Text="0" Foreground="{StaticResource SuccessColor}" FontWeight="Medium" FontSize="12"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#1AF59E0B" CornerRadius="5" Padding="10,5" Margin="0,0,10,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="Partial: " Foreground="{StaticResource WarningColor}" FontSize="12"/>
+                                            <TextBlock Name="PartialRulesCount" Text="0" Foreground="{StaticResource WarningColor}" FontWeight="Medium" FontSize="12"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#1AEF4444" CornerRadius="5" Padding="10,5" Margin="0,0,10,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="Not Supported: " Foreground="{StaticResource ErrorColor}" FontSize="12"/>
+                                            <TextBlock Name="UnsupportedRulesCount" Text="0" Foreground="{StaticResource ErrorColor}" FontWeight="Medium" FontSize="12"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Background="#1A3B82F6" CornerRadius="5" Padding="10,5" Margin="0,0,10,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="Custom Required: " Foreground="{StaticResource InfoColor}" FontSize="12"/>
+                                            <TextBlock Name="CustomRulesCount" Text="0" Foreground="{StaticResource InfoColor}" FontWeight="Medium" FontSize="12"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Main Content - Split View -->
+                        <Grid Grid.Row="1" Margin="20,10,20,20">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" MinWidth="300"/>
+                                <ColumnDefinition Width="5"/>
+                                <ColumnDefinition Width="*" MinWidth="400"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left Panel - Rules List -->
+                            <Border Grid.Column="0"
+                                    Background="{StaticResource BackgroundLight}"
+                                    CornerRadius="8"
+                                    Padding="10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0"
+                                              Text="InfoPath Rules"
+                                              FontSize="14"
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="5,0,0,10"/>
+
+                                    <!-- Filter -->
+                                    <Grid Grid.Row="1" Margin="0,0,0,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Name="RuleFilterTextBox"
+                                                 Style="{StaticResource ModernTextBox}"
+                                                 Height="28"
+                                                 VerticalContentAlignment="Center"
+                                                 TextChanged="RuleFilter_TextChanged"/>
+                                        <ComboBox Grid.Column="1"
+                                                  Name="RuleStatusFilterCombo"
+                                                  Style="{StaticResource ModernComboBox}"
+                                                  ItemContainerStyle="{StaticResource ModernComboBoxItem}"
+                                                  Width="120"
+                                                  Margin="5,0,0,0"
+                                                  SelectionChanged="RuleStatusFilter_Changed">
+                                            <ComboBoxItem Content="All Status" IsSelected="True"/>
+                                            <ComboBoxItem Content="Supported"/>
+                                            <ComboBoxItem Content="Partial"/>
+                                            <ComboBoxItem Content="Not Supported"/>
+                                            <ComboBoxItem Content="Custom Required"/>
+                                        </ComboBox>
+                                    </Grid>
+
+                                    <!-- Rules List -->
+                                    <ListBox Grid.Row="2"
+                                             Name="RulesMappingListBox"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             SelectionChanged="RulesMappingList_SelectionChanged"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="{StaticResource BackgroundMedium}"
+                                                        BorderBrush="{StaticResource BorderColor}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="5"
+                                                        Padding="10"
+                                                        Margin="0,2">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                        </Grid.RowDefinitions>
+
+                                                        <!-- Status Indicator -->
+                                                        <Border Grid.Column="0" Grid.RowSpan="3"
+                                                                Width="4"
+                                                                CornerRadius="2"
+                                                                Margin="0,0,10,0">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Setter Property="Background" Value="{StaticResource TextDim}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="Supported">
+                                                                            <Setter Property="Background" Value="{StaticResource SuccessColor}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="PartiallySupported">
+                                                                            <Setter Property="Background" Value="{StaticResource WarningColor}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="NotSupported">
+                                                                            <Setter Property="Background" Value="{StaticResource ErrorColor}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="RequiresCustomization">
+                                                                            <Setter Property="Background" Value="{StaticResource InfoColor}"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                        </Border>
+
+                                                        <!-- Rule Name -->
+                                                        <TextBlock Grid.Column="1" Grid.Row="0"
+                                                                  Text="{Binding InfoPathRuleName}"
+                                                                  Foreground="{StaticResource TextPrimary}"
+                                                                  FontWeight="Medium"
+                                                                  FontSize="13"
+                                                                  TextTrimming="CharacterEllipsis"/>
+
+                                                        <!-- Status Badge -->
+                                                        <Border Grid.Column="2" Grid.Row="0"
+                                                                CornerRadius="3"
+                                                                Padding="5,2"
+                                                                HorizontalAlignment="Right">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Setter Property="Background" Value="{StaticResource BackgroundLighter}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="Supported">
+                                                                            <Setter Property="Background" Value="#1A10B981"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="PartiallySupported">
+                                                                            <Setter Property="Background" Value="#1AF59E0B"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="NotSupported">
+                                                                            <Setter Property="Background" Value="#1AEF4444"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Status}" Value="RequiresCustomization">
+                                                                            <Setter Property="Background" Value="#1A3B82F6"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <TextBlock Text="{Binding StatusDisplay}" FontSize="10">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="Supported">
+                                                                                <Setter Property="Foreground" Value="{StaticResource SuccessColor}"/>
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="PartiallySupported">
+                                                                                <Setter Property="Foreground" Value="{StaticResource WarningColor}"/>
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="NotSupported">
+                                                                                <Setter Property="Foreground" Value="{StaticResource ErrorColor}"/>
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="RequiresCustomization">
+                                                                                <Setter Property="Foreground" Value="{StaticResource InfoColor}"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </Border>
+
+                                                        <!-- Rule Type and Form -->
+                                                        <StackPanel Grid.Column="1" Grid.ColumnSpan="2" Grid.Row="1"
+                                                                    Orientation="Horizontal" Margin="0,3,0,0">
+                                                            <TextBlock Text="{Binding InfoPathRuleType}"
+                                                                      Foreground="{StaticResource AccentLight}"
+                                                                      FontSize="11"/>
+                                                            <TextBlock Text=" | "
+                                                                      Foreground="{StaticResource TextDim}"
+                                                                      FontSize="11"/>
+                                                            <TextBlock Text="{Binding FormName}"
+                                                                      Foreground="{StaticResource TextSecondary}"
+                                                                      FontSize="11"
+                                                                      TextTrimming="CharacterEllipsis"/>
+                                                        </StackPanel>
+
+                                                        <!-- Condition Preview -->
+                                                        <TextBlock Grid.Column="1" Grid.ColumnSpan="2" Grid.Row="2"
+                                                                  Text="{Binding InfoPathCondition}"
+                                                                  Foreground="{StaticResource TextDim}"
+                                                                  FontSize="10"
+                                                                  FontFamily="Consolas"
+                                                                  TextTrimming="CharacterEllipsis"
+                                                                  Margin="0,3,0,0"
+                                                                  MaxHeight="30"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Grid>
+                            </Border>
+
+                            <!-- Splitter -->
+                            <GridSplitter Grid.Column="1"
+                                         Width="5"
+                                         HorizontalAlignment="Stretch"
+                                         Background="Transparent"/>
+
+                            <!-- Right Panel - Rule Details and K2 XML -->
+                            <Border Grid.Column="2"
+                                    Background="{StaticResource BackgroundLight}"
+                                    CornerRadius="8"
+                                    Padding="10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Header -->
+                                    <Grid Grid.Row="0" Margin="5,0,5,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="K2 Rule Mapping"
+                                                  FontSize="14"
+                                                  FontWeight="Medium"
+                                                  Foreground="{StaticResource TextPrimary}"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <Button Name="CopyK2XmlButton"
+                                                    Content="Copy XML"
+                                                    Style="{StaticResource ModernButton}"
+                                                    Height="28"
+                                                    Padding="10,5"
+                                                    FontSize="11"
+                                                    Click="CopyK2Xml_Click"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Details Panel -->
+                                    <TabControl Grid.Row="1"
+                                               Background="{StaticResource BackgroundMedium}"
+                                               BorderThickness="0">
+                                        <!-- InfoPath Details -->
+                                        <TabItem Header="InfoPath Rule">
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                                <StackPanel Margin="10">
+                                                    <TextBlock Text="Rule Name:"
+                                                              Foreground="{StaticResource TextSecondary}"
+                                                              FontSize="11" Margin="0,0,0,3"/>
+                                                    <TextBlock Name="InfoPathRuleNameText"
+                                                              Foreground="{StaticResource TextPrimary}"
+                                                              FontWeight="Medium"
+                                                              Margin="0,0,0,10"/>
+
+                                                    <TextBlock Text="Rule Type:"
+                                                              Foreground="{StaticResource TextSecondary}"
+                                                              FontSize="11" Margin="0,0,0,3"/>
+                                                    <TextBlock Name="InfoPathRuleTypeText"
+                                                              Foreground="{StaticResource AccentLight}"
+                                                              Margin="0,0,0,10"/>
+
+                                                    <TextBlock Text="Condition:"
+                                                              Foreground="{StaticResource TextSecondary}"
+                                                              FontSize="11" Margin="0,0,0,3"/>
+                                                    <TextBox Name="InfoPathConditionText"
+                                                            Style="{StaticResource ModernTextBox}"
+                                                            IsReadOnly="True"
+                                                            FontFamily="Consolas"
+                                                            FontSize="11"
+                                                            TextWrapping="Wrap"
+                                                            MaxHeight="100"
+                                                            Margin="0,0,0,10"/>
+
+                                                    <TextBlock Text="Expression:"
+                                                              Foreground="{StaticResource TextSecondary}"
+                                                              FontSize="11" Margin="0,0,0,3"/>
+                                                    <TextBox Name="InfoPathExpressionText"
+                                                            Style="{StaticResource ModernTextBox}"
+                                                            IsReadOnly="True"
+                                                            FontFamily="Consolas"
+                                                            FontSize="11"
+                                                            TextWrapping="Wrap"
+                                                            MaxHeight="100"
+                                                            Margin="0,0,0,10"/>
+
+                                                    <TextBlock Text="Applies To:"
+                                                              Foreground="{StaticResource TextSecondary}"
+                                                              FontSize="11" Margin="0,0,0,3"/>
+                                                    <TextBlock Name="InfoPathAppliesToText"
+                                                              Foreground="{StaticResource TextPrimary}"
+                                                              Margin="0,0,0,10"/>
+
+                                                    <TextBlock Text="Actions:"
+                                                              Foreground="{StaticResource TextSecondary}"
+                                                              FontSize="11" Margin="0,0,0,3"/>
+                                                    <ItemsControl Name="InfoPathActionsPanel">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Background="{StaticResource BackgroundLighter}"
+                                                                        CornerRadius="3"
+                                                                        Padding="8"
+                                                                        Margin="0,2">
+                                                                    <StackPanel>
+                                                                        <TextBlock Text="{Binding InfoPathActionType}"
+                                                                                  Foreground="{StaticResource AccentColor}"
+                                                                                  FontWeight="Medium"
+                                                                                  FontSize="12"/>
+                                                                        <TextBlock Text="{Binding InfoPathTarget}"
+                                                                                  Foreground="{StaticResource TextSecondary}"
+                                                                                  FontSize="11"/>
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </ScrollViewer>
+                                        </TabItem>
+
+                                        <!-- K2 XML Output -->
+                                        <TabItem Header="K2 XML">
+                                            <Grid>
+                                                <TextBox Name="K2XmlOutput"
+                                                        Style="{StaticResource ModernTextBox}"
+                                                        IsReadOnly="False"
+                                                        FontFamily="Consolas"
+                                                        FontSize="11"
+                                                        AcceptsReturn="True"
+                                                        AcceptsTab="True"
+                                                        TextWrapping="NoWrap"
+                                                        VerticalScrollBarVisibility="Auto"
+                                                        HorizontalScrollBarVisibility="Auto"
+                                                        TextChanged="K2XmlOutput_TextChanged"/>
+                                            </Grid>
+                                        </TabItem>
+
+                                        <!-- Notes and Warnings -->
+                                        <TabItem Header="Notes">
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                                <StackPanel Margin="10">
+                                                    <TextBlock Text="Mapping Notes:"
+                                                              Foreground="{StaticResource TextSecondary}"
+                                                              FontSize="11" Margin="0,0,0,3"/>
+                                                    <TextBox Name="MappingNotesText"
+                                                            Style="{StaticResource ModernTextBox}"
+                                                            AcceptsReturn="True"
+                                                            MinHeight="80"
+                                                            TextWrapping="Wrap"
+                                                            Margin="0,0,0,15"
+                                                            TextChanged="MappingNotes_TextChanged"/>
+
+                                                    <TextBlock Text="Warnings:"
+                                                              Foreground="{StaticResource WarningColor}"
+                                                              FontSize="11"
+                                                              FontWeight="Medium"
+                                                              Margin="0,0,0,5"/>
+                                                    <ItemsControl Name="WarningsPanel">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Background="#1AF59E0B"
+                                                                        CornerRadius="3"
+                                                                        Padding="8"
+                                                                        Margin="0,2">
+                                                                    <TextBlock Text="{Binding}"
+                                                                              Foreground="{StaticResource WarningColor}"
+                                                                              FontSize="11"
+                                                                              TextWrapping="Wrap"/>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+
+                                                    <TextBlock Text="Missing Features:"
+                                                              Foreground="{StaticResource ErrorColor}"
+                                                              FontSize="11"
+                                                              FontWeight="Medium"
+                                                              Margin="0,15,0,5"/>
+                                                    <ItemsControl Name="MissingFeaturesPanel">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Background="#1AEF4444"
+                                                                        CornerRadius="3"
+                                                                        Padding="8"
+                                                                        Margin="0,2">
+                                                                    <TextBlock Text="{Binding}"
+                                                                              Foreground="{StaticResource ErrorColor}"
+                                                                              FontSize="11"
+                                                                              TextWrapping="Wrap"/>
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </ScrollViewer>
+                                        </TabItem>
+                                    </TabControl>
+
+                                    <!-- Save Button -->
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                                        <Button Name="SaveRuleMappingButton"
+                                                Content="Save Changes"
+                                                Style="{StaticResource ModernButton}"
+                                                Background="{StaticResource SuccessColor}"
+                                                Click="SaveRuleMapping_Click"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+
                 <!-- JSON Output Tab -->
                 <TabItem Header="JSON Output">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
@@ -2013,6 +2506,17 @@
                                Margin="10,0,0,0"
                                Click="ExportK2Package_Click"
                                IsEnabled="False"/>
+
+                                        <Button Name="DownloadK2LogButton"
+                               Content="📋 Download Log"
+                               Style="{StaticResource ModernButton}"
+                               Width="200"
+                               Height="45"
+                               FontSize="16"
+                               Background="{StaticResource WarningColor}"
+                               Margin="10,0,0,0"
+                               Click="DownloadK2Log_Click"
+                               ToolTip="Download conversion log with details of what was converted and any items requiring manual attention"/>
                                     </StackPanel>
 
                                     <!-- Generation Log -->

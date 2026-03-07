@@ -1,0 +1,2317 @@
+═══════════════════════════════════════════════════════════════════════════════
+                    K2 SMARTFORMS CONVERSION LOG
+═══════════════════════════════════════════════════════════════════════════════
+
+Generated: 2026-01-30 22:56:46
+K2 Server: https://k2trial.safalo.com
+Target Folder: /Forms/Generated
+
+═══════════════════════════════════════════════════════════════════════════════
+                         FORMS PROCESSED
+═══════════════════════════════════════════════════════════════════════════════
+
+Form: Expense Report
+  Views: 1
+  Controls: 63
+  Rules: 1
+  Validations: 0
+  Conditional Rules: 30
+
+═══════════════════════════════════════════════════════════════════════════════
+              ITEMS REQUIRING MANUAL ATTENTION
+═══════════════════════════════════════════════════════════════════════════════
+
+  ✓ No items flagged for manual attention.
+
+═══════════════════════════════════════════════════════════════════════════════
+                         GENERATION LOG
+═══════════════════════════════════════════════════════════════════════════════
+
+Starting K2 SmartForms generation...
+
+Target Folder: /Forms/Generated
+
+
+============================================================
+=== K2 GENERATION START
+============================================================
+[INFO]  [K2Gen] Verbose Logging: ENABLED
+[INFO]  [K2Gen] Log Level: Debug
+
+--------------------------------------------------
+--- Configuration Setup
+--------------------------------------------------
+[INFO]  [K2Gen] Setting up K2 generation configuration...
+[INFO]  [K2Gen] Target Folder: Forms\Generated
+[VERB]  [K2Gen] Form Theme: Lithium
+[VERB]  [K2Gen] Force Cleanup: True
+[VERB]  [K2Gen] Use Timestamp: False
+[DEBUG] [K2Gen] Server: k2trial.safalo.com:5555
+[DEBUG] [K2Gen] SmartBox GUID: e5609413-d844-4325-98c3-db3cacbd406d
+
+--------------------------------------------------
+--- Server Connection
+--------------------------------------------------
+[INFO]  [K2Gen] Establishing fresh connection to K2 server...
+[DEBUG] [K2Gen] Connection Manager State Before: NULL
+[VERB]  [K2Gen] Creating new connection to: k2trial.safalo.com:5555
+[DEBUG] [K2Gen] New connection manager created and connected
+[INFO]  [K2Gen] ✓ K2 connection established
+
+--------------------------------------------------
+--- Registry Initialization
+--------------------------------------------------
+[INFO]  [K2Gen] Initializing generation session...
+[DEBUG] [K2Gen] Registry BEFORE Clear - SmartObjects: 6, Views: 8, Forms: 1
+[DEBUG] [K2Gen] Registry AFTER Clear - SmartObjects: 0, Views: 0, Forms: 0
+[INFO]  [K2Gen] ✓ Registry cleared successfully
+
+--------------------------------------------------
+--- Form Definition Preparation
+--------------------------------------------------
+[INFO]  [K2Gen] Converting 1 form definition(s) to JSON...
+[DEBUG] [K2Gen] JSON Content Length: 88724 characters
+[INFO]  [K2Gen] Form Name (sanitized): Expense_Report
+[VERB]  [K2Gen] Form Display Name: Expense_Report
+[VERB]  [K2Gen] Target Category: Forms/Generated/Expense_Report
+
+--------------------------------------------------
+--- Cleanup Phase
+--------------------------------------------------
+[INFO]  [K2Gen] Cleaning up existing K2 objects...
+[Cleanup] 10%
+[VERB]  [K2Gen] Starting cleanup of Forms, Views, and SmartObjects...
+[Console] [Registry] All registrations cleared
+[Console]   Cleaned up form: Expense_Report_view1_Form
+[Console]   Cleaned up view: Expense_Report_view1
+[Console]   Cleaned up view: Expense_Report_view1_Part1
+[Console]   Cleaned up view: Expense_Report_view1_Part2
+[Console]   Cleaned up view: Expense_Report_view1_Part3
+[Console]   Cleaned up view: Expense_Report_view1_Part4
+[Console]   Cleaned up view: Expense_Report_view1_Part5
+[Console]   Cleaned up view: Expense_Report_view1_Part6
+[Console]   Cleaned up view: Expense_Report_view1_Part7
+[Console]   Cleaned up view: Expense_Report_view1_Part8
+[Console]   Cleaned up view: Expense_Report_view1_Part9
+[Console]   Cleaned up view: Expense_Report_view1_Part10
+[Console]   Cleaned up view: Expense_Report_view1_Table CTRL243_Item
+[Console]   Cleaned up view: Expense_Report_view1_Table CTRL243_List
+[Console]   Cleaned up view: Expense_Report_view1_Item_Item
+[Console]   Cleaned up view: Expense_Report_view1_Item_List
+[Console]   Cleaned up view: Expense_Report_view1_Table CTRL338_Item
+[Console]   Cleaned up view: Expense_Report_view1_Table CTRL338_List
+[Console]   Cleaned up view: Expense_Report_view1_Table CTRL329_Item
+[Console]   Cleaned up view: Expense_Report_view1_Table CTRL329_List
+[Console]   Cleaned up SmartObject: Expense_Report_Lookups
+[Console]   Cleaned up SmartObject: Expense_Report_Table_CTRL243
+[INFO]  [K2Gen] ✓ Cleanup completed
+
+============================================================
+=== SMARTOBJECT GENERATION
+============================================================
+[INFO]  [K2Gen] Starting SmartObject generation...
+[SmartObjects] 25%
+[VERB]  [K2Gen] Initializing SmartObjectGenerator...
+[DEBUG] [K2Gen] Passing configuration and connection to SmartObjectGenerator
+[VERB]  [K2Gen] Calling GenerateSmartObjectsFromJsonAsync...
+[Console]   Cleaned up SmartObject: Expense_Report_Table_CTRL338
+[Console]   Cleaned up SmartObject: Expense_Report_Table_CTRL329
+[Console]   Cleaned up SmartObject: Expense_Report
+[Console] ✓ Connected to K2 server - Connection will be reused for all operations
+[Console] Processing form: Expense_Report
+[Console]   SmartObject target folder: Forms\Generated
+[Console]   Found dropdown field: category with 10 values
+[Console] Creating consolidated lookup SmartObject: Expense_Report_Lookups
+[Console] [Registry] Registered SmartObject: Expense_Report_Lookups (Type: Consolidated, GUID: d88790e8-559b-4ab0-8bdd-056715bfc185)
+[Console]   Created Consolidated Lookup SmartObject Expense_Report_Lookups with GUID: d88790e8-559b-4ab0-8bdd-056715bfc185
+[Console] Publishing consolidated lookup SmartObject...
+[Console] SmartObjects published successfully
+[Console] Populating consolidated lookup SmartObject with data...
+[Console] [Registry] Registered SmartObject: Expense_Report_Lookups (Type: Lookup, GUID: d88790e8-559b-4ab0-8bdd-056715bfc185)
+[Console] [Registry] Registered Lookup SmartObject: Expense_Report_Lookups for field: category
+[Console]     Added to category: 'Select...' = '' (Order: 0, Default: False)
+[Console]     Added to category: 'Entertainment' = 'Entertainment' (Order: 1, Default: False)
+[Console]     Added to category: 'Fees or dues' = 'Fees or dues' (Order: 2, Default: False)
+[Console]     Added to category: 'Gifts' = 'Gifts' (Order: 3, Default: False)
+[Console]     Added to category: 'Lodging' = 'Lodging' (Order: 4, Default: False)
+[Console]     Added to category: 'Meals' = 'Meals' (Order: 5, Default: False)
+[Console]     Added to category: 'Morale' = 'Morale' (Order: 6, Default: False)
+[Console]     Added to category: 'Office supplies' = 'Office supplies' (Order: 7, Default: False)
+[Console]     Added to category: 'Transportation' = 'Transportation' (Order: 8, Default: False)
+[Console]     Added to category: 'Other' = 'Other' (Order: 9, Default: False)
+[Console]   Successfully populated consolidated lookup with data for 1 fields
+[Console] Creating main SmartObject: Expense_Report
+[Console] === Processing 17 fields for SmartObject 'Expense_Report' ===
+[Console]   Processing field: ColumnName='reportDate', DisplayName='Report Date'
+[Console]   ✓ Added property: Name='REPORTDATE' | DisplayName='Report Date' (DateTime)
+[Console]   Processing field: ColumnName='expenseCode', DisplayName='Expense Code'
+[Console]   ✓ Added property: Name='EXPENSECODE' | DisplayName='Expense Code' (Text)
+[Console]   Processing field: ColumnName='startDate', DisplayName='Start Date'
+[Console]   ✓ Added property: Name='STARTDATE' | DisplayName='Start Date' (Text)
+[Console]   Processing field: ColumnName='endDate', DisplayName='End Date'
+[Console]   ✓ Added property: Name='ENDDATE' | DisplayName='End Date' (Text)
+[Console]   Processing field: ColumnName='purpose', DisplayName='Business Purpose'
+[Console]   ✓ Added property: Name='PURPOSE' | DisplayName='Business Purpose' (Text)
+[Console]   Processing field: ColumnName='name', DisplayName='Employee Name'
+[Console]   ✓ Added property: Name='NAME' | DisplayName='Employee Name' (Text)
+[Console]   Processing field: ColumnName='jobTitle', DisplayName='Employee Title'
+[Console]   ✓ Added property: Name='JOBTITLE' | DisplayName='Employee Title' (Text)
+[Console]   Processing field: ColumnName='department', DisplayName='Employee Department'
+[Console]   ✓ Added property: Name='DEPARTMENT' | DisplayName='Employee Department' (Text)
+[Console]   Processing field: ColumnName='identificationNumber', DisplayName='Employee ID Number'
+[Console]   ✓ Added property: Name='IDENTIFICATIONNUMBER' | DisplayName='Employee ID Number' (Text)
+[Console]   Processing field: ColumnName='emailAddress', DisplayName='Employee E-mail Address'
+[Console]   ✓ Added property: Name='EMAILADDRESS' | DisplayName='Employee E-mail Address' (Text)
+[Console]   Processing field: ColumnName='managerName', DisplayName='Manager Name'
+[Console]   ✓ Added property: Name='MANAGERNAME' | DisplayName='Manager Name' (Text)
+[Console]   Processing field: ColumnName='managerEmailAddress', DisplayName='Manager E-mail Address'
+[Console]   ✓ Added property: Name='MANAGEREMAILADDRESS' | DisplayName='Manager E-mail Address' (Text)
+[Console]   Processing field: ColumnName='subTotal', DisplayName='Subtotal'
+[Console]   ✓ Added property: Name='SUBTOTAL' | DisplayName='Subtotal' (Text)
+[Console]   Processing field: ColumnName='cashAdvance', DisplayName='Cash Advance'
+[Console]   ✓ Added property: Name='CASHADVANCE' | DisplayName='Cash Advance' (Text)
+[Console]   Processing field: ColumnName='total', DisplayName='Total Expenses'
+[Console]   ✓ Added property: Name='TOTAL' | DisplayName='Total Expenses' (Text)
+[Console]   Processing field: ColumnName='entertainmentPurpose', DisplayName='Entertainment Purpose'
+[Console]   ✓ Added property: Name='ENTERTAINMENTPURPOSE' | DisplayName='Entertainment Purpose' (Text)
+[Console]   Processing field: ColumnName='entertainmentPlace', DisplayName='Entertainment Place'
+[Console]   ✓ Added property: Name='ENTERTAINMENTPLACE' | DisplayName='Entertainment Place' (Text)
+[Console] === Finished processing fields. Total properties in ExtendObject: 18 ===
+[Console] [Registry] Registered SmartObject: Expense_Report (Type: Main, GUID: 9efe8433-81aa-49ec-afef-0b6f5fdce7af)
+[Console]   Created SmartObject Expense_Report with GUID: 9efe8433-81aa-49ec-afef-0b6f5fdce7af
+[Console] Creating child SmartObject: Expense_Report_Table_CTRL243
+[Console]   Added property: DATE | DisplayName: Itemized Expense Date (DateTime)
+[Console]   Added property: DESCRIPTION | DisplayName: Itemized Expense Description (Text)
+[Console]   Added property: CATEGORY | DisplayName: Itemized Expense Category (Text)
+[Console]   Added property: AMOUNT | DisplayName: Itemized Expense Cost (Text)
+[Console] [Registry] Registered SmartObject: Expense_Report_Table_CTRL243 (Type: Child, GUID: 20c10329-00e4-4f74-b0ab-4634ff34d0fe)
+[Console]            Parent: Expense_Report
+[Console]   Created Child SmartObject Expense_Report_Table_CTRL243 with GUID: 20c10329-00e4-4f74-b0ab-4634ff34d0fe
+[Console]   Parent SmartObject: Expense_Report
+[Console] Creating child SmartObject: Expense_Report_Item
+[Console]   Added property: CTRL276 | DisplayName: Item Details (Text)
+[Console] [Registry] Registered SmartObject: Expense_Report_Item (Type: Child, GUID: 11a63228-a246-4d2d-a901-bae87d1be551)
+[Console]            Parent: Expense_Report
+[Console]   Created Child SmartObject Expense_Report_Item with GUID: 11a63228-a246-4d2d-a901-bae87d1be551
+[Console]   Parent SmartObject: Expense_Report
+[Console] Creating child SmartObject: Expense_Report_Table_CTRL338
+[Console]   Added property: PERSONNAME | DisplayName: Person Name (Text)
+[Console]   Added property: PERSONTITLE | DisplayName: Person Title (Text)
+[Console]   Added property: FIRM | DisplayName: Firm (Text)
+[Console] [Registry] Registered SmartObject: Expense_Report_Table_CTRL338 (Type: Child, GUID: 19270fb7-a709-4302-8039-46987c75bd0a)
+[Console]            Parent: Expense_Report
+[Console]   Created Child SmartObject Expense_Report_Table_CTRL338 with GUID: 19270fb7-a709-4302-8039-46987c75bd0a
+[Console]   Parent SmartObject: Expense_Report
+[Console] Creating child SmartObject: Expense_Report_Table_CTRL329
+[Console]   Added property: RECIPIENTNAME | DisplayName: Recipient Name (Text)
+[Console]   Added property: GIFTAMOUNT | DisplayName: Gift Amount (Text)
+[Console] [Registry] Registered SmartObject: Expense_Report_Table_CTRL329 (Type: Child, GUID: f874be84-306f-4b07-933b-86bbadfe85ab)
+[Console]            Parent: Expense_Report
+[Console]   Created Child SmartObject Expense_Report_Table_CTRL329 with GUID: f874be84-306f-4b07-933b-86bbadfe85ab
+[Console]   Parent SmartObject: Expense_Report
+[Console] Publishing SmartObjects...
+[Console] SmartObjects published successfully
+[Console] Waiting 14s for K2 server indexing (6 SmartObjects)...
+[INFO]  [K2Gen] ✓ Created 6 SmartObjects
+[DEBUG] [K2Gen] Main SmartObjects: 1
+[DEBUG] [K2Gen] Child SmartObjects: 4
+[DEBUG] [K2Gen] Lookup SmartObjects: 1
+
+============================================================
+=== VIEW GENERATION
+============================================================
+[INFO]  [K2Gen] Starting View generation...
+[Views] 50%
+[VERB]  [K2Gen] Initializing ViewGenerator with field mappings...
+[DEBUG] [K2Gen] Field mappings count: 5
+[VERB]  [K2Gen] Setting InfoPath form definition for rule mapping...
+[VERB]  [K2Gen] Calling GenerateViewsFromJson...
+[Console] Creating associations...
+[Console] Creating association: Expense_Report -> Expense_Report_Table_CTRL243
+[Console] [Retry 1/8] Attempting to get parent SmartObject: Expense_Report
+[Console] [Retry 1/8] ✓ Successfully retrieved and validated parent SmartObject: Expense_Report
+[Console] [Retry 1/8] Attempting to get child Association SmartObject: Expense_Report_Table_CTRL243
+[Console] [Retry 1/8] ✓ Successfully retrieved and validated child Association SmartObject: Expense_Report_Table_CTRL243
+[Console] Creating association: Expense_Report -> Expense_Report_Item
+[Console] [Retry 1/8] Attempting to get parent SmartObject: Expense_Report
+[Console] [Retry 1/8] ✓ Successfully retrieved and validated parent SmartObject: Expense_Report
+[Console] [Retry 1/8] Attempting to get child Association SmartObject: Expense_Report_Item
+[Console] [Retry 1/8] ✓ Successfully retrieved and validated child Association SmartObject: Expense_Report_Item
+[Console] Creating association: Expense_Report -> Expense_Report_Table_CTRL338
+[Console] [Retry 1/8] Attempting to get parent SmartObject: Expense_Report
+[Console] [Retry 1/8] ✓ Successfully retrieved and validated parent SmartObject: Expense_Report
+[Console] [Retry 1/8] Attempting to get child Association SmartObject: Expense_Report_Table_CTRL338
+[Console] [Retry 1/8] ✓ Successfully retrieved and validated child Association SmartObject: Expense_Report_Table_CTRL338
+[Console] Creating association: Expense_Report -> Expense_Report_Table_CTRL329
+[Console] [Retry 1/8] Attempting to get parent SmartObject: Expense_Report
+[Console] [Retry 1/8] ✓ Successfully retrieved and validated parent SmartObject: Expense_Report
+[Console] [Retry 1/8] Attempting to get child Association SmartObject: Expense_Report_Table_CTRL329
+[Console] [Retry 1/8] ✓ Successfully retrieved and validated child Association SmartObject: Expense_Report_Table_CTRL329
+[Console] SmartObjects published successfully
+[Console] ✓ Disconnected from K2 server
+[Console]   Found 3 dynamic section(s) with visibility rules at form level
+[Console]   Found conditional visibility rules for 2 field(s) at form level
+[Console]   View base category: Forms\Generated\Expense_Report
+[Console] === Processing InfoPath View: view1 ===
+[Console]     Found 3 dynamic section(s) with visibility rules
+[Console]     Found conditional visibility rules for 2 field(s)
+[Console]     Checking for nested RepeatingTables to auto-generate buttons...
+[Console]     Analyzing 63 controls for repeating sections...
+[Console]         Skipping repeating container control: TABLECTRL243 (RepeatingTable)
+[Console]     Created regular segment with 26 controls (before repeating section)
+[Console]         Found new repeating section: Table CTRL243 (original: Table CTRL243)
+[Console]         Control 'DATE' belongs to repeating section: Table CTRL243
+[Console]         Control 'DESCRIPTION' belongs to repeating section: Table CTRL243
+[Console]         Control 'CATEGORY' belongs to repeating section: Table CTRL243
+[Console]         Control 'COST' belongs to repeating section: Table CTRL243
+[Console]         Control 'DATE' belongs to repeating section: Table CTRL243
+[Console]         Control 'DESCRIPTION' belongs to repeating section: Table CTRL243
+[Console]         Control 'ITEMIZEDEXPENSECATEGORY' belongs to repeating section: Table CTRL243
+[Console]         Control 'AMOUNT' belongs to repeating section: Table CTRL243
+[Console]         Control 'ITEMIZEDEXPENSEDETAILS' belongs to repeating section: Table CTRL243
+[Console]     Created regular segment with 7 controls (before repeating section)
+[Console]         Found new repeating section: Item (original: Item)
+[Console]         Control 'CTRL276' belongs to repeating section: Item
+[Console]         Skipping repeating container control: TABLECTRL338 (RepeatingTable)
+[Console]     Created regular segment with 6 controls (before repeating section)
+[Console]         Found new repeating section: Table CTRL338 (original: Table CTRL338)
+[Console]         Control 'PERSONNAME' belongs to repeating section: Table CTRL338
+[Console]         Control 'PERSONTITLE' belongs to repeating section: Table CTRL338
+[Console]         Control 'FIRM' belongs to repeating section: Table CTRL338
+[Console]         Control 'PERSONNAME' belongs to repeating section: Table CTRL338
+[Console]         Control 'PERSONTITLE' belongs to repeating section: Table CTRL338
+[Console]         Control 'FIRM' belongs to repeating section: Table CTRL338
+[Console]         Skipping repeating container control: TABLECTRL329 (RepeatingTable)
+[Console]     Created regular segment with 1 controls (before repeating section)
+[Console]         Found new repeating section: Table CTRL329 (original: Table CTRL329)
+[Console]         Control 'RECIPIENTNAME' belongs to repeating section: Table CTRL329
+[Console]         Control 'GIFTAMOUNT' belongs to repeating section: Table CTRL329
+[Console]         Control 'RECIPIENTNAME' belongs to repeating section: Table CTRL329
+[Console]         Control 'GIFTAMOUNT' belongs to repeating section: Table CTRL329
+[Console]     Added repeating section segment 'Table CTRL243' with 9 controls
+[Console]     Added repeating section segment 'Item' with 1 controls
+[Console]     Added repeating section segment 'Table CTRL338' with 6 controls
+[Console]     Added repeating section segment 'Table CTRL329' with 4 controls
+[Console]     === Segmentation Summary ===
+[Console]     Total segments created: 8
+[Console]     Regular segment #1: 26 controls
+[Console]     Repeating section 'Table CTRL243': 9 controls
+[Console]     Regular segment #2: 7 controls
+[Console]     Repeating section 'Item': 1 controls
+[Console]     Regular segment #3: 6 controls
+[Console]     Repeating section 'Table CTRL338': 6 controls
+[Console]     Regular segment #4: 1 controls
+[Console]     Repeating section 'Table CTRL329': 4 controls
+[Console] Generating Regular View (Segment 1): Expense_Report_EXPENSE_REPORT
+[Console]     Category: Forms\Generated\Expense_Report\Views
+[Console]     Contains 26 controls
+[Console]     Position: Beginning of form
+[Console]         Grid positions already normalized (no empty rows)
+[Console]         No empty rows found, no compaction needed
+[Console]         Detected title label: 'EXPENSE REPORT' (single label on row 1)
+[Console]         Removing title label from row 1 and shifting all rows up
+[Console]     Extracted view title: 'EXPENSE REPORT' and removed title label from view
+[Console]         Found control at column E, expanding to 5 columns
+[Console]         Found control at column F, expanding to 6 columns
+[Console]         Found control at column G, expanding to 7 columns
+[Console]         Found control at column H, expanding to 8 columns
+[Console]         Creating 8 columns for the table
+[Console]       Processing control: REPORTDATE of type: Label at position: 1A
+[Console]         Processing control 'REPORTDATE' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1A -> 419dc89e-08df-4827-b2f0-c7b219f4ce9d
+[Console]         Added control to XML with ID: 419dc89e-08df-4827-b2f0-c7b219f4ce9d
+[Console]       Processing control: REPORTDATE of type: DatePicker at position: 1B
+[Console]         JSON Control ID: CTRL114
+[Console]         Processing control 'REPORTDATE' of type 'DatePicker' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: DatePicker
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Calendar
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped JSON CtrlId CTRL114 -> K2 ID 14dd5074-31dc-4d1c-bc41-d5fa0db20349
+[Console]         Mapped grid position 1B -> 14dd5074-31dc-4d1c-bc41-d5fa0db20349
+[Console]         Tracked control mapping: REPORTDATE -> ControlName (ID: 14dd5074-31dc-4d1c-bc41-d5fa0db20349)
+[Console]         Added control to XML with ID: 14dd5074-31dc-4d1c-bc41-d5fa0db20349
+[Console]       Processing control: EXPENSECODE of type: Label at position: 1C
+[Console]         Processing control 'EXPENSECODE' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1C -> b70bdeef-dcba-4088-bd46-4d22e33e89b7
+[Console]         Added control to XML with ID: b70bdeef-dcba-4088-bd46-4d22e33e89b7
+[Console]       Processing control: EXPENSECODE of type: TextField at position: 1D
+[Console]         JSON Control ID: CTRL115
+[Console]         Processing control 'EXPENSECODE' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL115 -> K2 ID 7cceefc5-f36c-40bc-8da6-d03878e3bfe1
+[Console]         Mapped grid position 1D -> 7cceefc5-f36c-40bc-8da6-d03878e3bfe1
+[Console]         Tracked control mapping: EXPENSECODE -> ControlName (ID: 7cceefc5-f36c-40bc-8da6-d03878e3bfe1)
+[Console]         Added control to XML with ID: 7cceefc5-f36c-40bc-8da6-d03878e3bfe1
+[Console]       Processing control: STARTDATE of type: Label at position: 1E
+[Console]         Processing control 'STARTDATE' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1E -> fd79f890-7070-4dbd-9773-ba876de9b211
+[Console]         Added control to XML with ID: fd79f890-7070-4dbd-9773-ba876de9b211
+[Console]       Processing control: STARTDATE of type: TextField at position: 1F
+[Console]         JSON Control ID: CTRL116
+[Console]         Processing control 'STARTDATE' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         [FORMATTING] Upgraded TextBox to Calendar due to date formatting: boundProp='xd:num', datafmt='"date","dateFormat:Short Date;"'
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Calendar
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Applying formatting after Styles created: boundProp='xd:num', datafmt='"date","dateFormat:Short Date;"'
+[Console]         Applied InfoPath formatting to TextBox: datafmt='"date","dateFormat:Short Date;"', boundProp='xd:num'
+[Console]         [FORMATTING] Format elements found in control: 1
+[Console]         [FORMATTING] Format XML: <Format Type="Date" Culture="en-US">d</Format>
+[Console]         [READ-ONLY] Applied IsReadOnly=true due to disableEditing=yes
+[Console]         Mapped JSON CtrlId CTRL116 -> K2 ID 3140e70f-6fad-439c-8d6b-f2f5471acfea
+[Console]         Mapped grid position 1F -> 3140e70f-6fad-439c-8d6b-f2f5471acfea
+[Console]         Tracked control mapping: STARTDATE -> ControlName (ID: 3140e70f-6fad-439c-8d6b-f2f5471acfea)
+[Console]         Added control to XML with ID: 3140e70f-6fad-439c-8d6b-f2f5471acfea
+[Console]       Processing control: ENDDATE of type: Label at position: 1G
+[Console]         Processing control 'ENDDATE' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1G -> 59a7257a-06d6-4aa0-9a02-b28a67b11556
+[Console]         Added control to XML with ID: 59a7257a-06d6-4aa0-9a02-b28a67b11556
+[Console]       Processing control: ENDDATE of type: TextField at position: 1H
+[Console]         JSON Control ID: CTRL117
+[Console]         Processing control 'ENDDATE' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         [FORMATTING] Upgraded TextBox to Calendar due to date formatting: boundProp='xd:num', datafmt='"date","dateFormat:Short Date;"'
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Calendar
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Applying formatting after Styles created: boundProp='xd:num', datafmt='"date","dateFormat:Short Date;"'
+[Console]         Applied InfoPath formatting to TextBox: datafmt='"date","dateFormat:Short Date;"', boundProp='xd:num'
+[Console]         [FORMATTING] Format elements found in control: 1
+[Console]         [FORMATTING] Format XML: <Format Type="Date" Culture="en-US">d</Format>
+[Console]         [READ-ONLY] Applied IsReadOnly=true due to disableEditing=yes
+[Console]         Mapped JSON CtrlId CTRL117 -> K2 ID ee8eaaca-81de-4564-8073-643a74f3ad6b
+[Console]         Mapped grid position 1H -> ee8eaaca-81de-4564-8073-643a74f3ad6b
+[Console]         Tracked control mapping: ENDDATE -> ControlName (ID: ee8eaaca-81de-4564-8073-643a74f3ad6b)
+[Console]         Added control to XML with ID: ee8eaaca-81de-4564-8073-643a74f3ad6b
+[Console]       Processing control: BUSINESSPURPOSE of type: Label at position: 2A
+[Console]         Processing control 'BUSINESSPURPOSE' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 2A -> 7a36bb83-830e-4d68-bdee-5f6ec9e834bb
+[Console]         Added control to XML with ID: 7a36bb83-830e-4d68-bdee-5f6ec9e834bb
+[Console]       Processing control: PURPOSE of type: TextField at position: 2B
+[Console]         JSON Control ID: CTRL118
+[Console]         Processing control 'PURPOSE' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL118 -> K2 ID dc36e453-6841-4559-ab44-e906dbaacb47
+[Console]         Mapped grid position 2B -> dc36e453-6841-4559-ab44-e906dbaacb47
+[Console]         Tracked control mapping: PURPOSE -> ControlName (ID: dc36e453-6841-4559-ab44-e906dbaacb47)
+[Console]         Added control to XML with ID: dc36e453-6841-4559-ab44-e906dbaacb47
+[Console]       Processing control: EMPLOYEEINFORMATION of type: Label at position: 3A
+[Console]         Processing control 'EMPLOYEEINFORMATION' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 3A -> b84b208b-3cf3-4207-ab7e-16bbef4a3789
+[Console]         Added control to XML with ID: b84b208b-3cf3-4207-ab7e-16bbef4a3789
+[Console]       Processing control: NAME of type: Label at position: 4A
+[Console]         Processing control 'NAME' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 4A -> b500567a-0b8d-4e27-8806-4ec7606cbd3d
+[Console]         Added control to XML with ID: b500567a-0b8d-4e27-8806-4ec7606cbd3d
+[Console]       Processing control: NAME of type: TextField at position: 4B
+[Console]         JSON Control ID: CTRL119
+[Console]         Processing control 'NAME' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL119 -> K2 ID fd0ba22c-a716-4cfd-af7b-c378265167e8
+[Console]         Mapped grid position 4B -> fd0ba22c-a716-4cfd-af7b-c378265167e8
+[Console]         Tracked control mapping: NAME -> ControlName (ID: fd0ba22c-a716-4cfd-af7b-c378265167e8)
+[Console]         Added control to XML with ID: fd0ba22c-a716-4cfd-af7b-c378265167e8
+[Console]       Processing control: TITLE of type: Label at position: 4C
+[Console]         Processing control 'TITLE' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 4C -> 961422ff-804f-4c05-8523-37a12f567ec3
+[Console]         Added control to XML with ID: 961422ff-804f-4c05-8523-37a12f567ec3
+[Console]       Processing control: JOBTITLE of type: TextField at position: 4D
+[Console]         JSON Control ID: CTRL122
+[Console]         Processing control 'JOBTITLE' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL122 -> K2 ID a6ad63b7-ebd6-4f2b-a3bb-76c282baad2d
+[Console]         Mapped grid position 4D -> a6ad63b7-ebd6-4f2b-a3bb-76c282baad2d
+[Console]         Tracked control mapping: JOBTITLE -> ControlName (ID: a6ad63b7-ebd6-4f2b-a3bb-76c282baad2d)
+[Console]         Added control to XML with ID: a6ad63b7-ebd6-4f2b-a3bb-76c282baad2d
+[Console]       Processing control: DEPARTMENT of type: Label at position: 5A
+[Console]         Processing control 'DEPARTMENT' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 5A -> 54365d63-0e5b-4c2a-b116-4024e3de3e6a
+[Console]         Added control to XML with ID: 54365d63-0e5b-4c2a-b116-4024e3de3e6a
+[Console]       Processing control: DEPARTMENT of type: TextField at position: 5B
+[Console]         JSON Control ID: CTRL120
+[Console]         Processing control 'DEPARTMENT' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL120 -> K2 ID 89e21f59-352f-4c1c-9d5e-14cd79f7e2a6
+[Console]         Mapped grid position 5B -> 89e21f59-352f-4c1c-9d5e-14cd79f7e2a6
+[Console]         Tracked control mapping: DEPARTMENT -> ControlName (ID: 89e21f59-352f-4c1c-9d5e-14cd79f7e2a6)
+[Console]         Added control to XML with ID: 89e21f59-352f-4c1c-9d5e-14cd79f7e2a6
+[Console]       Processing control: IDNUMBER of type: Label at position: 5C
+[Console]         Processing control 'IDNUMBER' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 5C -> dfe715fc-9287-412e-89b3-d9f65436d364
+[Console]         Added control to XML with ID: dfe715fc-9287-412e-89b3-d9f65436d364
+[Console]       Processing control: IDENTIFICATIONNUMBER of type: TextField at position: 5D
+[Console]         JSON Control ID: CTRL123
+[Console]         Processing control 'IDENTIFICATIONNUMBER' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL123 -> K2 ID 2fce7859-3484-4054-b756-e510df097904
+[Console]         Mapped grid position 5D -> 2fce7859-3484-4054-b756-e510df097904
+[Console]         Tracked control mapping: IDENTIFICATIONNUMBER -> ControlName (ID: 2fce7859-3484-4054-b756-e510df097904)
+[Console]         Added control to XML with ID: 2fce7859-3484-4054-b756-e510df097904
+[Console]       Processing control: EMAILADDRESS of type: Label at position: 6A
+[Console]         Processing control 'EMAILADDRESS' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 6A -> ab5b9324-7cff-4cbe-bd26-ce729e8cce0b
+[Console]         Added control to XML with ID: ab5b9324-7cff-4cbe-bd26-ce729e8cce0b
+[Console]       Processing control: EMAILADDRESS of type: TextField at position: 6B
+[Console]         JSON Control ID: CTRL121
+[Console]         Processing control 'EMAILADDRESS' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL121 -> K2 ID f885409b-c4c0-4b58-b865-bca5de576e52
+[Console]         Mapped grid position 6B -> f885409b-c4c0-4b58-b865-bca5de576e52
+[Console]         Tracked control mapping: EMAILADDRESS -> ControlName (ID: f885409b-c4c0-4b58-b865-bca5de576e52)
+[Console]         Added control to XML with ID: f885409b-c4c0-4b58-b865-bca5de576e52
+[Console]       Processing control: MANAGERINFORMATION of type: Label at position: 7A
+[Console]         Processing control 'MANAGERINFORMATION' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 7A -> 0e344d72-a85d-4f0d-bb14-d7b9e6b47b4b
+[Console]         Added control to XML with ID: 0e344d72-a85d-4f0d-bb14-d7b9e6b47b4b
+[Console]       Processing control: MANAGERNAME of type: TextField at position: 8B
+[Console]         JSON Control ID: CTRL124
+[Console]         Processing control 'MANAGERNAME' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL124 -> K2 ID 14173067-6f18-4d0e-b11d-98ba2c04fda9
+[Console]         Mapped grid position 8B -> 14173067-6f18-4d0e-b11d-98ba2c04fda9
+[Console]         Tracked control mapping: MANAGERNAME -> ControlName (ID: 14173067-6f18-4d0e-b11d-98ba2c04fda9)
+[Console]         Added control to XML with ID: 14173067-6f18-4d0e-b11d-98ba2c04fda9
+[Console]       Processing control: MANAGEREMAILADDRESS of type: TextField at position: 8D
+[Console]         JSON Control ID: CTRL125
+[Console]         Processing control 'MANAGEREMAILADDRESS' of type 'TextField' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL125 -> K2 ID 9ceea778-7441-449c-abab-0086f8b00e73
+[Console]         Mapped grid position 8D -> 9ceea778-7441-449c-abab-0086f8b00e73
+[Console]         Tracked control mapping: MANAGEREMAILADDRESS -> ControlName (ID: 9ceea778-7441-449c-abab-0086f8b00e73)
+[Console]         Added control to XML with ID: 9ceea778-7441-449c-abab-0086f8b00e73
+[Console]       Processing control: ITEMIZEDEXPENSES of type: Label at position: 9A
+[Console]         Processing control 'ITEMIZEDEXPENSES' of type 'Label' for view 'Expense_Report_EXPENSE_REPORT' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 9A -> 5495c1cf-5eab-4619-9beb-f3ab0383247b
+[Console]         Added control to XML with ID: 5495c1cf-5eab-4619-9beb-f3ab0383247b
+[Console]     ControlMappingService: Registered 12 controls for view 'Expense_Report_EXPENSE_REPORT'
+[Console]       - Field: REPORTDATE, Control: ControlName, Type: Calendar
+[Console]       - Field: EXPENSECODE, Control: ControlName, Type: TextBox
+[Console]       - Field: STARTDATE, Control: ControlName, Type: Calendar
+[Console]       ... and 9 more controls
+[Console]     Registered 12 control mappings for view: Expense_Report_EXPENSE_REPORT
+[Console]     Control mapping summary:
+[Console]       Total controls created: 25
+[Console]       JSON control IDs mapped: 12
+[Console]       Control names mapped: 153
+[Console]       Data controls tracked: 12
+[Console]       Columns created: 8
+[Console]       Rows created: 9
+[Console]         Created fallback row mapping in CreateCanvasStructure
+[Console]         Canvas will have 8 columns and 9 rows
+[Console]         Placed control REPORTDATE (Label) at Row 1 (was 1), Column A with ID 419dc89e-08df-4827-b2f0-c7b219f4ce9d
+[Console]         Placed control REPORTDATE (DatePicker) at Row 1 (was 1), Column B with ID 14dd5074-31dc-4d1c-bc41-d5fa0db20349
+[Console]         Placed control EXPENSECODE (Label) at Row 1 (was 1), Column C with ID b70bdeef-dcba-4088-bd46-4d22e33e89b7
+[Console]         Placed control EXPENSECODE (TextField) at Row 1 (was 1), Column D with ID 7cceefc5-f36c-40bc-8da6-d03878e3bfe1
+[Console]         Placed control STARTDATE (Label) at Row 1 (was 1), Column E with ID fd79f890-7070-4dbd-9773-ba876de9b211
+[Console]         Placed control STARTDATE (TextField) at Row 1 (was 1), Column F with ID 3140e70f-6fad-439c-8d6b-f2f5471acfea
+[Console]         Placed control ENDDATE (Label) at Row 1 (was 1), Column G with ID 59a7257a-06d6-4aa0-9a02-b28a67b11556
+[Console]         Placed control ENDDATE (TextField) at Row 1 (was 1), Column H with ID ee8eaaca-81de-4564-8073-643a74f3ad6b
+[Console]         Placed control BUSINESSPURPOSE (Label) at Row 2 (was 2), Column A with ID 7a36bb83-830e-4d68-bdee-5f6ec9e834bb
+[Console]         Placed control PURPOSE (TextField) at Row 2 (was 2), Column B with ID dc36e453-6841-4559-ab44-e906dbaacb47
+[Console]         Placed control EMPLOYEEINFORMATION (Label) at Row 3 (was 3), Column A with ID b84b208b-3cf3-4207-ab7e-16bbef4a3789
+[Console]         Placed control NAME (Label) at Row 4 (was 4), Column A with ID b500567a-0b8d-4e27-8806-4ec7606cbd3d
+[Console]         Placed control NAME (TextField) at Row 4 (was 4), Column B with ID fd0ba22c-a716-4cfd-af7b-c378265167e8
+[Console]         Placed control TITLE (Label) at Row 4 (was 4), Column C with ID 961422ff-804f-4c05-8523-37a12f567ec3
+[Console]         Placed control JOBTITLE (TextField) at Row 4 (was 4), Column D with ID a6ad63b7-ebd6-4f2b-a3bb-76c282baad2d
+[Console]         Placed control DEPARTMENT (Label) at Row 5 (was 5), Column A with ID 54365d63-0e5b-4c2a-b116-4024e3de3e6a
+[Console]         Placed control DEPARTMENT (TextField) at Row 5 (was 5), Column B with ID 89e21f59-352f-4c1c-9d5e-14cd79f7e2a6
+[Console]         Placed control IDNUMBER (Label) at Row 5 (was 5), Column C with ID dfe715fc-9287-412e-89b3-d9f65436d364
+[Console]         Placed control IDENTIFICATIONNUMBER (TextField) at Row 5 (was 5), Column D with ID 2fce7859-3484-4054-b756-e510df097904
+[Console]         Placed control EMAILADDRESS (Label) at Row 6 (was 6), Column A with ID ab5b9324-7cff-4cbe-bd26-ce729e8cce0b
+[Console]         Placed control EMAILADDRESS (TextField) at Row 6 (was 6), Column B with ID f885409b-c4c0-4b58-b865-bca5de576e52
+[Console]         Placed control MANAGERINFORMATION (Label) at Row 7 (was 7), Column A with ID 0e344d72-a85d-4f0d-bb14-d7b9e6b47b4b
+[Console]         Placed control MANAGERNAME (TextField) at Row 8 (was 8), Column B with ID 14173067-6f18-4d0e-b11d-98ba2c04fda9
+[Console]         Placed control MANAGEREMAILADDRESS (TextField) at Row 8 (was 8), Column D with ID 9ceea778-7441-449c-abab-0086f8b00e73
+[Console]         Placed control ITEMIZEDEXPENSES (Label) at Row 9 (was 9), Column A with ID 5495c1cf-5eab-4619-9beb-f3ab0383247b
+[Console]         Mapping type: Label
+[Console]         Mapping type: DatePicker
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Setting initial visibility states based on default values
+[Console]     Processing 3 dynamic sections for visibility rules
+[Console]     Adding visibility rules from 3 dynamic sections
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 3 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]     Processing conditional visibility rules
+[Console]     Adding 20 mapped InfoPath rules to view Expense_Report_EXPENSE_REPORT
+[Console]     Adding 20 mapped InfoPath rules
+[Console]         Added rule: Visibility rule for CTRL276
+[Console]         Added rule: Visibility rule for CTRL353
+[Console]         Added rule: Visibility rule for CTRL359
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Rule 1
+[Console]     Stored title 'EXPENSE REPORT' for view 'Expense_Report_EXPENSE_REPORT'
+[Console]     Warning: Could not deploy view Expense_Report_EXPENSE_REPORT: Requested value 'ShowControls' was not found.
+[Console] === Processing Repeating Section: Table CTRL243 ===
+[Console]     InfoPath View: view1
+[Console]     SmartObject: Expense_Report_Table_CTRL243
+[Console]     Controls in section: 9
+[Console] Generating Repeating Section Views:
+[Console]     Item View: Expense_Report_view1_Table_CTRL243_Item
+[Console]     List View: Expense_Report_view1_Table_CTRL243_List
+[Console]     Category: Forms\Generated\Expense_Report\Views
+[Console]         Normalizing grid positions: compacting 2 rows
+[Console]           Row 12 -> Row 1
+[Console]           Row 13 -> Row 2
+[Console]         No empty rows found, no compaction needed
+[Console]         Found control at column E, expanding to 5 columns
+[Console]         Creating 5 columns for the table
+[Console]       Processing control: DATE of type: Label at position: 1A
+[Console]         Processing control 'DATE' of type 'Label' for view 'Expense_Report_view1_Table_CTRL243_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1A -> f878759a-abd8-4b75-827c-37755defa377
+[Console]         Added control to XML with ID: f878759a-abd8-4b75-827c-37755defa377
+[Console]       Processing control: DESCRIPTION of type: Label at position: 1B
+[Console]         Processing control 'DESCRIPTION' of type 'Label' for view 'Expense_Report_view1_Table_CTRL243_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1B -> 04624255-7563-46bc-97ed-1dd2a50c9959
+[Console]         Added control to XML with ID: 04624255-7563-46bc-97ed-1dd2a50c9959
+[Console]       Processing control: CATEGORY of type: Label at position: 1C
+[Console]         Processing control 'CATEGORY' of type 'Label' for view 'Expense_Report_view1_Table_CTRL243_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1C -> ad029292-27e4-4f0a-8ef5-f0dd6f254634
+[Console]         Added control to XML with ID: ad029292-27e4-4f0a-8ef5-f0dd6f254634
+[Console]       Processing control: COST of type: Label at position: 1D
+[Console]         Processing control 'COST' of type 'Label' for view 'Expense_Report_view1_Table_CTRL243_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1D -> e082bd74-c1dd-457a-918b-27753d25b7e0
+[Console]         Added control to XML with ID: e082bd74-c1dd-457a-918b-27753d25b7e0
+[Console]       Processing control: DATE of type: DatePicker at position: 2A
+[Console]         JSON Control ID: CTRL244
+[Console]         Processing control 'DATE' of type 'DatePicker' for view 'Expense_Report_view1_Table_CTRL243_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: DatePicker
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Calendar
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped JSON CtrlId CTRL244 -> K2 ID 1f307f4a-beef-4cd4-86e2-3c5a55930b45
+[Console]         Mapped grid position 2A -> 1f307f4a-beef-4cd4-86e2-3c5a55930b45
+[Console]         Tracked control mapping: DATE -> ControlName (ID: 1f307f4a-beef-4cd4-86e2-3c5a55930b45)
+[Console]         Added control to XML with ID: 1f307f4a-beef-4cd4-86e2-3c5a55930b45
+[Console]       Processing control: DESCRIPTION of type: TextField at position: 2B
+[Console]         JSON Control ID: CTRL245
+[Console]         Processing control 'DESCRIPTION' of type 'TextField' for view 'Expense_Report_view1_Table_CTRL243_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         Mapped JSON CtrlId CTRL245 -> K2 ID 098afd1a-58f5-4c8b-a2fe-281184f5711b
+[Console]         Mapped grid position 2B -> 098afd1a-58f5-4c8b-a2fe-281184f5711b
+[Console]         Tracked control mapping: DESCRIPTION -> ControlName (ID: 098afd1a-58f5-4c8b-a2fe-281184f5711b)
+[Console]         Added control to XML with ID: 098afd1a-58f5-4c8b-a2fe-281184f5711b
+[Console]       Processing control: ITEMIZEDEXPENSECATEGORY of type: DropDown at position: 2C
+[Console]         JSON Control ID: CTRL246
+[Console]         Processing control 'ITEMIZEDEXPENSECATEGORY' of type 'DropDown' for view 'Expense_Report_view1_Table_CTRL243_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Found 10 DataOptions in control definition
+[Console]         Binding DropDown 'ITEMIZEDEXPENSECATEGORY' to consolidated lookup
+[Console]         Mapping type: DropDown
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: DropDown
+[Console]           hasLookupSmartObject: True
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]   Retrieved GUID from registry for Expense_Report_Lookups: d88790e8-559b-4ab0-8bdd-056715bfc185
+[Console]         Got GUID for consolidated lookup: d88790e8-559b-4ab0-8bdd-056715bfc185
+[Console]         Successfully binding dropdown 'ITEMIZEDEXPENSECATEGORY' to consolidated lookup
+[Console]         LookupParameter set to: ITEMIZEDEXPENSECATEGORY
+[Console]         Mapped JSON CtrlId CTRL246 -> K2 ID 0fcc743c-8cea-4f4f-8616-13c02280533b
+[Console]         Mapped grid position 2C -> 0fcc743c-8cea-4f4f-8616-13c02280533b
+[Console]         Tracked control mapping: ITEMIZEDEXPENSECATEGORY -> ControlName (ID: 0fcc743c-8cea-4f4f-8616-13c02280533b)
+[Console]         Added control to XML with ID: 0fcc743c-8cea-4f4f-8616-13c02280533b
+[Console]       Processing control: AMOUNT of type: TextField at position: 2D
+[Console]         JSON Control ID: CTRL247
+[Console]         Processing control 'AMOUNT' of type 'TextField' for view 'Expense_Report_view1_Table_CTRL243_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='xd:num', datafmt='"number","numDigits:2;negativeOrder:1;"'
+[Console]         [FORMATTING] ShouldApplyFormatting returned: True
+[Console]         [FORMATTING] controlElement is null: True
+[Console]         [FORMATTING] Applying formatting after Styles created: boundProp='xd:num', datafmt='"number","numDigits:2;negativeOrder:1;"'
+[Console]         Applied InfoPath formatting to TextBox: datafmt='"number","numDigits:2;negativeOrder:1;"', boundProp='xd:num'
+[Console]         [FORMATTING] Format elements found in control: 1
+[Console]         [FORMATTING] Format XML: <Format Type="Number" Culture="en-US" NegativePattern="-1.1">F2</Format>
+[Console]         Mapped JSON CtrlId CTRL247 -> K2 ID 25efe3f8-56ac-4c08-97c2-78aec1cbcb9f
+[Console]         Mapped grid position 2D -> 25efe3f8-56ac-4c08-97c2-78aec1cbcb9f
+[Console]         Tracked control mapping: AMOUNT -> ControlName (ID: 25efe3f8-56ac-4c08-97c2-78aec1cbcb9f)
+[Console]         Added control to XML with ID: 25efe3f8-56ac-4c08-97c2-78aec1cbcb9f
+[Console]       FILTERING OUT button control: ITEMIZEDEXPENSEDETAILS of type: Button at position: 2E
+[Console]         Reason: This is an item view (Expense_Report_view1_Table_CTRL243_Item) and buttons from JSON should not be added
+[Console]     ControlMappingService: Registered 4 controls for view 'Expense_Report_view1_Table_CTRL243_Item'
+[Console]       - Field: DATE, Control: ControlName, Type: Calendar
+[Console]       - Field: DESCRIPTION, Control: ControlName, Type: TextBox
+[Console]       - Field: ITEMIZEDEXPENSECATEGORY, Control: ControlName, Type: DropDown
+[Console]       ... and 1 more controls
+[Console]     Registered 4 control mappings for view: Expense_Report_view1_Table_CTRL243_Item
+[Console]     Control mapping summary:
+[Console]       Total controls created: 8
+[Console]       JSON control IDs mapped: 4
+[Console]       Control names mapped: 39
+[Console]       Data controls tracked: 4
+[Console]       Columns created: 5
+[Console]       Rows created: 2
+[Console]         Created fallback row mapping in CreateCanvasStructure
+[Console]         Canvas will have 5 columns and 2 rows
+[Console]         Placed control DATE (Label) at Row 1 (was 1), Column A with ID f878759a-abd8-4b75-827c-37755defa377
+[Console]         Placed control DESCRIPTION (Label) at Row 1 (was 1), Column B with ID 04624255-7563-46bc-97ed-1dd2a50c9959
+[Console]         Placed control CATEGORY (Label) at Row 1 (was 1), Column C with ID ad029292-27e4-4f0a-8ef5-f0dd6f254634
+[Console]         Placed control COST (Label) at Row 1 (was 1), Column D with ID e082bd74-c1dd-457a-918b-27753d25b7e0
+[Console]         Placed control DATE (DatePicker) at Row 2 (was 2), Column A with ID 1f307f4a-beef-4cd4-86e2-3c5a55930b45
+[Console]         Placed control DESCRIPTION (TextField) at Row 2 (was 2), Column B with ID 098afd1a-58f5-4c8b-a2fe-281184f5711b
+[Console]         Placed control ITEMIZEDEXPENSECATEGORY (DropDown) at Row 2 (was 2), Column C with ID 0fcc743c-8cea-4f4f-8616-13c02280533b
+[Console]         Placed control AMOUNT (TextField) at Row 2 (was 2), Column D with ID 25efe3f8-56ac-4c08-97c2-78aec1cbcb9f
+[Console]         WARNING: No control ID found for positions 2E or 2E (control: ITEMIZEDEXPENSEDETAILS)
+[Console]         Adding buttons to item view with 5 columns
+[Console]     ButtonTracker: Registered buttons for view Expense_Report_view1_Table_CTRL243_Item
+[Console]       Add Button ID: 42d68205-3fe8-4433-a289-e231022b2e48
+[Console]       Cancel Button ID: 6b7612bf-6fd1-4e01-b5bf-7076240b9e0c
+[Console]         Added Cancel button in column 0 and Add button in column 4 to item view
+[Console]         Mapping type: Label
+[Console]         Mapping type: Label
+[Console]         Mapping type: Label
+[Console]         Mapping type: Label
+[Console]         Mapping type: DatePicker
+[Console]         Mapping type: TextField
+[Console]         Mapping type: DropDown
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Button
+[Console]           Added filter for LookupType = 'ITEMIZEDEXPENSECATEGORY'
+[Console]         Added GetList action for dropdown: ITEMIZEDEXPENSECATEGORY
+[Console]         Setting initial visibility states based on default values
+[Console]         No controls found to set initial visibility for CATEGORY
+[Console]     Processing 3 dynamic sections for visibility rules
+[Console]     Adding visibility rules from 3 dynamic sections
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 3 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]     Processing conditional visibility rules
+[Console]         Added conditional visibility rule for field: category
+[Console]     Adding 20 mapped InfoPath rules to view Expense_Report_view1_Table_CTRL243_Item
+[Console]     Adding 20 mapped InfoPath rules
+[Console]         Added rule: Visibility rule for CTRL276
+[Console]         Added rule: Visibility rule for CTRL353
+[Console]         Added rule: Visibility rule for CTRL359
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Rule 1
+[Console]     Warning: Could not deploy view Expense_Report_view1_Table_CTRL243_Item: Unable to cast object of type 'SourceCode.Forms.Runtime.Filters.PropertyExpression' to type 'SourceCode.Forms.Runtime.Filters.LogicalExpression'.
+[Console]         Extracting visible fields from 9 controls
+[Console]         Found field from header label: CATEGORY
+[Console]         Found field from header label: COST
+[Console]         Found data field: DATE from control type: DatePicker
+[Console]         Found data field: DESCRIPTION from control type: TextField
+[Console]         Found data field: ITEMIZEDEXPENSECATEGORY from control type: DropDown
+[Console]         Found data field: AMOUNT from control type: TextField
+[Console]         Total visible fields extracted: 6
+[Console]         Fields: CATEGORY, COST, DATE, DESCRIPTION, ITEMIZEDEXPENSECATEGORY, AMOUNT
+[Console]     Final field list for list view: CATEGORY, COST, DATE, DESCRIPTION, ITEMIZEDEXPENSECATEGORY, AMOUNT
+[Console]     Extracted 6 visible fields (excluding ID/ParentID): CATEGORY, COST, DATE, DESCRIPTION, ITEMIZEDEXPENSECATEGORY, AMOUNT
+[Console]     Deleted existing view: Expense_Report_view1_Table_CTRL243_List
+[Console]     Processing 6 visible fields from InfoPath view
+[Console]     After filtering ID/ParentID: 6 fields remain
+[Console]         Validated field: CATEGORY -> CATEGORY
+[Console]         WARNING: Field 'COST' not found in SmartObject Expense_Report_Table_CTRL243
+[Console]         Validated field: DATE -> DATE
+[Console]         Validated field: DESCRIPTION -> DESCRIPTION
+[Console]         WARNING: Field 'ITEMIZEDEXPENSECATEGORY' not found in SmartObject Expense_Report_Table_CTRL243
+[Console]         Validated field: AMOUNT -> AMOUNT
+[Console]     Using 4 validated fields
+[Console]     List view will display fields: CATEGORY, DATE, DESCRIPTION, AMOUNT
+[Console]     Checked in view: Expense_Report_view1_Table_CTRL243_List
+[Console] [Registry] Registered View: Expense_Report_view1_Table_CTRL243_Item
+[Console]            SmartObject: Expense_Report_Table_CTRL243
+[Console]            Type: Item
+[Console]            Repeating Section: view1_Table CTRL243
+[Console] [Registry] Registered View: Expense_Report_view1_Table_CTRL243_List
+[Console]            SmartObject: Expense_Report_Table_CTRL243
+[Console]            Type: List
+[Console]            Repeating Section: view1_Table CTRL243
+[Console] [Registry] Registered Repeating Section Views for: view1_Table CTRL243
+[Console]            Item View: Expense_Report_view1_Table_CTRL243_Item
+[Console]            List View: Expense_Report_view1_Table_CTRL243_List
+[Console]     Successfully created view pair for Table CTRL243 in InfoPath view view1
+[Console] Generating Regular View (Segment 2): Expense_Report_view1_Part2
+[Console]     Category: Forms\Generated\Expense_Report\Views
+[Console]     Contains 7 controls
+[Console]     Position: Between repeating sections 'Table CTRL243' and 'Item'
+[Console]         Normalizing grid positions: compacting 4 rows
+[Console]           Row 14 -> Row 1
+[Console]           Row 15 -> Row 2
+[Console]           Row 16 -> Row 3
+[Console]           Row 18 -> Row 4
+[Console]         No empty rows found, no compaction needed
+[Console]         Detected title label: 'Subtotal' (single label on row 1)
+[Console]     Extracted view title: 'Subtotal' and removed title label from view
+[Console]         Creating 4 columns for the table
+[Console]       Processing control: SUBTOTAL of type: Label at position: 1A
+[Console]         Processing control 'SUBTOTAL' of type 'Label' for view 'Expense_Report_view1_Part2' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1A -> 795ea650-6dc3-4f50-8b99-c26e044faa83
+[Console]         Added control to XML with ID: 795ea650-6dc3-4f50-8b99-c26e044faa83
+[Console]       Processing control: SUBTOTAL of type: TextField at position: 1B
+[Console]         JSON Control ID: CTRL249
+[Console]         Processing control 'SUBTOTAL' of type 'TextField' for view 'Expense_Report_view1_Part2' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='xd:num', datafmt='"number","numDigits:2;negativeOrder:1;"'
+[Console]         [FORMATTING] ShouldApplyFormatting returned: True
+[Console]         [FORMATTING] controlElement is null: True
+[Console]         [FORMATTING] Applying formatting after Styles created: boundProp='xd:num', datafmt='"number","numDigits:2;negativeOrder:1;"'
+[Console]         Applied InfoPath formatting to TextBox: datafmt='"number","numDigits:2;negativeOrder:1;"', boundProp='xd:num'
+[Console]         [FORMATTING] Format elements found in control: 1
+[Console]         [FORMATTING] Format XML: <Format Type="Number" Culture="en-US" NegativePattern="-1.1">F2</Format>
+[Console]         [READ-ONLY] Applied IsReadOnly=true due to disableEditing=yes
+[Console]         Mapped JSON CtrlId CTRL249 -> K2 ID e5fa6eac-5d0a-4051-8c4c-414a26106538
+[Console]         Mapped grid position 1B -> e5fa6eac-5d0a-4051-8c4c-414a26106538
+[Console]         Tracked control mapping: SUBTOTAL -> ControlName (ID: e5fa6eac-5d0a-4051-8c4c-414a26106538)
+[Console]         Added control to XML with ID: e5fa6eac-5d0a-4051-8c4c-414a26106538
+[Console]       Processing control: LESSCASHADVANCE of type: Label at position: 2A
+[Console]         Processing control 'LESSCASHADVANCE' of type 'Label' for view 'Expense_Report_view1_Part2' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 2A -> f1e234b7-511d-4066-9331-017993c02b34
+[Console]         Added control to XML with ID: f1e234b7-511d-4066-9331-017993c02b34
+[Console]       Processing control: CASHADVANCE of type: TextField at position: 2B
+[Console]         JSON Control ID: CTRL250
+[Console]         Processing control 'CASHADVANCE' of type 'TextField' for view 'Expense_Report_view1_Part2' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='xd:num', datafmt='"number","numDigits:2;negativeOrder:1;"'
+[Console]         [FORMATTING] ShouldApplyFormatting returned: True
+[Console]         [FORMATTING] controlElement is null: True
+[Console]         [FORMATTING] Applying formatting after Styles created: boundProp='xd:num', datafmt='"number","numDigits:2;negativeOrder:1;"'
+[Console]         Applied InfoPath formatting to TextBox: datafmt='"number","numDigits:2;negativeOrder:1;"', boundProp='xd:num'
+[Console]         [FORMATTING] Format elements found in control: 1
+[Console]         [FORMATTING] Format XML: <Format Type="Number" Culture="en-US" NegativePattern="-1.1">F2</Format>
+[Console]         Mapped JSON CtrlId CTRL250 -> K2 ID fa300e32-9644-481c-91e2-780d079ffbb2
+[Console]         Mapped grid position 2B -> fa300e32-9644-481c-91e2-780d079ffbb2
+[Console]         Tracked control mapping: CASHADVANCE -> ControlName (ID: fa300e32-9644-481c-91e2-780d079ffbb2)
+[Console]         Added control to XML with ID: fa300e32-9644-481c-91e2-780d079ffbb2
+[Console]       Processing control: TOTALEXPENSES of type: Label at position: 3A
+[Console]         Processing control 'TOTALEXPENSES' of type 'Label' for view 'Expense_Report_view1_Part2' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 3A -> 1e08aedd-6537-4df7-bf98-115a2ce555e0
+[Console]         Added control to XML with ID: 1e08aedd-6537-4df7-bf98-115a2ce555e0
+[Console]       Processing control: TOTAL of type: TextField at position: 3B
+[Console]         JSON Control ID: CTRL251
+[Console]         Processing control 'TOTAL' of type 'TextField' for view 'Expense_Report_view1_Part2' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='xd:num', datafmt='"number","numDigits:2;negativeOrder:1;"'
+[Console]         [FORMATTING] ShouldApplyFormatting returned: True
+[Console]         [FORMATTING] controlElement is null: True
+[Console]         [FORMATTING] Applying formatting after Styles created: boundProp='xd:num', datafmt='"number","numDigits:2;negativeOrder:1;"'
+[Console]         Applied InfoPath formatting to TextBox: datafmt='"number","numDigits:2;negativeOrder:1;"', boundProp='xd:num'
+[Console]         [FORMATTING] Format elements found in control: 1
+[Console]         [FORMATTING] Format XML: <Format Type="Number" Culture="en-US" NegativePattern="-1.1">F2</Format>
+[Console]         [READ-ONLY] Applied IsReadOnly=true due to disableEditing=yes
+[Console]         Mapped JSON CtrlId CTRL251 -> K2 ID f4bea510-b823-4004-b250-6e4b4ad87190
+[Console]         Mapped grid position 3B -> f4bea510-b823-4004-b250-6e4b4ad87190
+[Console]         Tracked control mapping: TOTAL -> ControlName (ID: f4bea510-b823-4004-b250-6e4b4ad87190)
+[Console]         Added control to XML with ID: f4bea510-b823-4004-b250-6e4b4ad87190
+[Console]       Processing control: ITEMDETAILS of type: Label at position: 4A
+[Console]         Processing control 'ITEMDETAILS' of type 'Label' for view 'Expense_Report_view1_Part2' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 4A -> df7fc819-aa12-4e07-97a3-276ecea020c4
+[Console]         Added control to XML with ID: df7fc819-aa12-4e07-97a3-276ecea020c4
+[Console]     ControlMappingService: Registered 3 controls for view 'Expense_Report_view1_Part2'
+[Console]       - Field: SUBTOTAL, Control: ControlName, Type: TextBox
+[Console]       - Field: CASHADVANCE, Control: ControlName, Type: TextBox
+[Console]       - Field: TOTAL, Control: ControlName, Type: TextBox
+[Console]     Registered 3 control mappings for view: Expense_Report_view1_Part2
+[Console]     Control mapping summary:
+[Console]       Total controls created: 7
+[Console]       JSON control IDs mapped: 3
+[Console]       Control names mapped: 43
+[Console]       Data controls tracked: 3
+[Console]       Columns created: 4
+[Console]       Rows created: 4
+[Console]         Created fallback row mapping in CreateCanvasStructure
+[Console]         Canvas will have 2 columns and 4 rows
+[Console]         Placed control SUBTOTAL (Label) at Row 1 (was 1), Column A with ID 795ea650-6dc3-4f50-8b99-c26e044faa83
+[Console]         Placed control SUBTOTAL (TextField) at Row 1 (was 1), Column B with ID e5fa6eac-5d0a-4051-8c4c-414a26106538
+[Console]         Placed control LESSCASHADVANCE (Label) at Row 2 (was 2), Column A with ID f1e234b7-511d-4066-9331-017993c02b34
+[Console]         Placed control CASHADVANCE (TextField) at Row 2 (was 2), Column B with ID fa300e32-9644-481c-91e2-780d079ffbb2
+[Console]         Placed control TOTALEXPENSES (Label) at Row 3 (was 3), Column A with ID 1e08aedd-6537-4df7-bf98-115a2ce555e0
+[Console]         Placed control TOTAL (TextField) at Row 3 (was 3), Column B with ID f4bea510-b823-4004-b250-6e4b4ad87190
+[Console]         Placed control ITEMDETAILS (Label) at Row 4 (was 4), Column A with ID df7fc819-aa12-4e07-97a3-276ecea020c4
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Setting initial visibility states based on default values
+[Console]     Processing 3 dynamic sections for visibility rules
+[Console]     Adding visibility rules from 3 dynamic sections
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 3 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]     Processing conditional visibility rules
+[Console]     Adding 20 mapped InfoPath rules to view Expense_Report_view1_Part2
+[Console]     Adding 20 mapped InfoPath rules
+[Console]         Added rule: Visibility rule for CTRL276
+[Console]         Added rule: Visibility rule for CTRL353
+[Console]         Added rule: Visibility rule for CTRL359
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Rule 1
+[Console]     Stored title 'Subtotal' for view 'Expense_Report_view1_Part2'
+[Console]     Warning: Could not deploy view Expense_Report_view1_Part2: Requested value 'ShowControls' was not found.
+[Console] === Processing Repeating Section: Item ===
+[Console]     InfoPath View: view1
+[Console]     SmartObject: Expense_Report_Item
+[Console]     Controls in section: 1
+[Console] Generating Repeating Section Views:
+[Console]     Item View: Expense_Report_view1_Item_Item
+[Console]     List View: Expense_Report_view1_Item_List
+[Console]     Category: Forms\Generated\Expense_Report\Views
+[Console]         Normalizing grid positions: compacting 1 rows
+[Console]           Row 19 -> Row 1
+[Console]         No empty rows found, no compaction needed
+[Console]         Creating 4 columns for the table
+[Console]       Processing control: CTRL276 of type: Unknown at position: 1A
+[Console]         JSON Control ID: CTRL276
+[Console]         Processing control 'CTRL276' of type 'Unknown' for view 'Expense_Report_view1_Item_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Unknown
+[Console]         WARNING: Unknown type 'Unknown', skipping control
+[Console]         WARNING: Control was null for: CTRL276
+[Console]     Control mapping summary:
+[Console]       Total controls created: 0
+[Console]       JSON control IDs mapped: 0
+[Console]       Control names mapped: 11
+[Console]       Data controls tracked: 0
+[Console]       Columns created: 4
+[Console]       Rows created: 1
+[Console]         Created fallback row mapping in CreateCanvasStructure
+[Console]         Canvas will have 1 columns and 1 rows
+[Console]         WARNING: No control ID found for positions 1A or 1A (control: CTRL276)
+[Console]         Adding buttons to item view with 4 columns
+[Console]     ButtonTracker: Registered buttons for view Expense_Report_view1_Item_Item
+[Console]       Add Button ID: 17596503-4485-4de3-8c35-14dd7d72f94e
+[Console]       Cancel Button ID: 2bbea7b8-b8df-4d46-b5d1-411416bbe7dc
+[Console]         Added Cancel button in column 0 and Add button in column 3 to item view
+[Console]         Mapping type: Unknown
+[Console]         WARNING: Unknown type 'Unknown', skipping control
+[Console]         Setting initial visibility states based on default values
+[Console]     Processing 3 dynamic sections for visibility rules
+[Console]     Adding visibility rules from 3 dynamic sections
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 3 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]     Processing conditional visibility rules
+[Console]     Adding 20 mapped InfoPath rules to view Expense_Report_view1_Item_Item
+[Console]     Adding 20 mapped InfoPath rules
+[Console]         Added rule: Visibility rule for CTRL276
+[Console]         Added rule: Visibility rule for CTRL353
+[Console]         Added rule: Visibility rule for CTRL359
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Rule 1
+[Console]     Warning: Could not deploy view Expense_Report_view1_Item_Item: Requested value 'ShowControls' was not found.
+[Console]         Extracting visible fields from 1 controls
+[Console]         Found field from data array: CTRL276
+[Console]         Total visible fields extracted: 1
+[Console]         Fields: CTRL276
+[Console]     Final field list for list view: CTRL276
+[Console]     Extracted 1 visible fields (excluding ID/ParentID): CTRL276
+[Console]     ✓ Field count matches: List view and SmartObject both have 1 non-system fields
+[Console]     Processing 1 visible fields from InfoPath view
+[Console]     After filtering ID/ParentID: 1 fields remain
+[Console]         Validated field: CTRL276 -> CTRL276
+[Console]     Using 1 validated fields
+[Console]     List view will display fields: CTRL276
+[Console]     Checked in view: Expense_Report_view1_Item_List
+[Console] [Registry] Registered View: Expense_Report_view1_Item_Item
+[Console]            SmartObject: Expense_Report_Item
+[Console]            Type: Item
+[Console]            Repeating Section: view1_Item
+[Console] [Registry] Registered View: Expense_Report_view1_Item_List
+[Console]            SmartObject: Expense_Report_Item
+[Console]            Type: List
+[Console]            Repeating Section: view1_Item
+[Console] [Registry] Registered Repeating Section Views for: view1_Item
+[Console]            Item View: Expense_Report_view1_Item_Item
+[Console]            List View: Expense_Report_view1_Item_List
+[Console]     Successfully created view pair for Item in InfoPath view view1
+[Console] Generating Regular View (Segment 3): Expense_Report_view1_Part3
+[Console]     Category: Forms\Generated\Expense_Report\Views
+[Console]     Contains 6 controls
+[Console]     Position: Between repeating sections 'Item' and 'Table CTRL338'
+[Console]         Normalizing grid positions: compacting 3 rows
+[Console]           Row 19 -> Row 1
+[Console]           Row 20 -> Row 2
+[Console]           Row 21 -> Row 3
+[Console]         No empty rows found, no compaction needed
+[Console]         Creating 4 columns for the table
+[Console]       Processing control: CTRL113_6 of type: Button at position: 1B
+[Console]         JSON Control ID: CTRL113_6
+[Console]         Processing control 'CTRL113_6' of type 'Button' for view 'Expense_Report_view1_Part3' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Button
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Button
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped JSON CtrlId CTRL113_6 -> K2 ID 8f046858-7045-43b0-8698-1d8c4e5bec37
+[Console]         Mapped grid position 1B -> 8f046858-7045-43b0-8698-1d8c4e5bec37
+[Console]         Added control to XML with ID: 8f046858-7045-43b0-8698-1d8c4e5bec37
+[Console]       Processing control: ENTERTAINMENTDETAILS of type: Label at position: 2A
+[Console]         Processing control 'ENTERTAINMENTDETAILS' of type 'Label' for view 'Expense_Report_view1_Part3' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 2A -> 72778796-224e-4fc6-97b4-e3e1e43fbe69
+[Console]         Added control to XML with ID: 72778796-224e-4fc6-97b4-e3e1e43fbe69
+[Console]       Processing control: PURPOSE of type: Label at position: 3A
+[Console]         Processing control 'PURPOSE' of type 'Label' for view 'Expense_Report_view1_Part3' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 3A -> 3b9dd9a6-852f-4b1e-a533-5ee2c714192d
+[Console]         Added control to XML with ID: 3b9dd9a6-852f-4b1e-a533-5ee2c714192d
+[Console]       Processing control: ENTERTAINMENTPURPOSE of type: TextField at position: 3B
+[Console]         JSON Control ID: CTRL354
+[Console]         Processing control 'ENTERTAINMENTPURPOSE' of type 'TextField' for view 'Expense_Report_view1_Part3' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         [VISIBILITY] Control CTRL354 will be initially hidden (conditional on category)
+[Console]         [VISIBILITY] Added IsVisible=false to control CTRL354
+[Console]         Mapped JSON CtrlId CTRL354 -> K2 ID 1db9a92d-5caa-40c9-a25b-5fc9578b456e
+[Console]         Mapped grid position 3B -> 1db9a92d-5caa-40c9-a25b-5fc9578b456e
+[Console]         Tracked control mapping: ENTERTAINMENTPURPOSE -> ControlName (ID: 1db9a92d-5caa-40c9-a25b-5fc9578b456e)
+[Console]         Added control to XML with ID: 1db9a92d-5caa-40c9-a25b-5fc9578b456e
+[Console]       Processing control: PLACE of type: Label at position: 3C
+[Console]         Processing control 'PLACE' of type 'Label' for view 'Expense_Report_view1_Part3' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 3C -> e9f61f51-b8f6-4a9d-bf24-66dcd810f5d0
+[Console]         Added control to XML with ID: e9f61f51-b8f6-4a9d-bf24-66dcd810f5d0
+[Console]       Processing control: ENTERTAINMENTPLACE of type: TextField at position: 3D
+[Console]         JSON Control ID: CTRL355
+[Console]         Processing control 'ENTERTAINMENTPLACE' of type 'TextField' for view 'Expense_Report_view1_Part3' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         [VISIBILITY] Control CTRL355 will be initially hidden (conditional on category)
+[Console]         [VISIBILITY] Added IsVisible=false to control CTRL355
+[Console]         Mapped JSON CtrlId CTRL355 -> K2 ID 480ba0ed-38d0-4138-ba39-ad51cce138db
+[Console]         Mapped grid position 3D -> 480ba0ed-38d0-4138-ba39-ad51cce138db
+[Console]         Tracked control mapping: ENTERTAINMENTPLACE -> ControlName (ID: 480ba0ed-38d0-4138-ba39-ad51cce138db)
+[Console]         Added control to XML with ID: 480ba0ed-38d0-4138-ba39-ad51cce138db
+[Console]     ControlMappingService: Registered 2 controls for view 'Expense_Report_view1_Part3'
+[Console]       - Field: ENTERTAINMENTPURPOSE, Control: ControlName, Type: TextBox
+[Console]       - Field: ENTERTAINMENTPLACE, Control: ControlName, Type: TextBox
+[Console]     Registered 2 control mappings for view: Expense_Report_view1_Part3
+[Console]     Control mapping summary:
+[Console]       Total controls created: 6
+[Console]       JSON control IDs mapped: 3
+[Console]       Control names mapped: 37
+[Console]       Data controls tracked: 2
+[Console]       Columns created: 4
+[Console]       Rows created: 3
+[Console]         Created fallback row mapping in CreateCanvasStructure
+[Console]         Canvas will have 4 columns and 3 rows
+[Console]         Placed control CTRL113_6 (Button) at Row 1 (was 1), Column B with ID 8f046858-7045-43b0-8698-1d8c4e5bec37
+[Console]         Placed control ENTERTAINMENTDETAILS (Label) at Row 2 (was 2), Column A with ID 72778796-224e-4fc6-97b4-e3e1e43fbe69
+[Console]         Placed control PURPOSE (Label) at Row 3 (was 3), Column A with ID 3b9dd9a6-852f-4b1e-a533-5ee2c714192d
+[Console]         Placed control ENTERTAINMENTPURPOSE (TextField) at Row 3 (was 3), Column B with ID 1db9a92d-5caa-40c9-a25b-5fc9578b456e
+[Console]         Placed control PLACE (Label) at Row 3 (was 3), Column C with ID e9f61f51-b8f6-4a9d-bf24-66dcd810f5d0
+[Console]         Placed control ENTERTAINMENTPLACE (TextField) at Row 3 (was 3), Column D with ID 480ba0ed-38d0-4138-ba39-ad51cce138db
+[Console]         Mapping type: Label
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Setting initial visibility states based on default values
+[Console]     Processing 3 dynamic sections for visibility rules
+[Console]     Adding visibility rules from 3 dynamic sections
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]         Found control CTRL354 -> 1db9a92d-5caa-40c9-a25b-5fc9578b456e
+[Console]         Found control CTRL355 -> 480ba0ed-38d0-4138-ba39-ad51cce138db
+[Console]       Section has 6 explicit controls, expanded to 2 total controls (including labels)
+[Console]       WARNING: Could not find trigger control for CtrlId=CTRL353, ConditionField=category
+[Console]       Section has 3 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]     Processing conditional visibility rules
+[Console]     Adding 20 mapped InfoPath rules to view Expense_Report_view1_Part3
+[Console]     Adding 20 mapped InfoPath rules
+[Console]         Added rule: Visibility rule for CTRL276
+[Console]         Added rule: Visibility rule for CTRL353
+[Console]         Added rule: Visibility rule for CTRL359
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Rule 1
+[Console]     Warning: Could not deploy view Expense_Report_view1_Part3: Requested value 'ShowControls' was not found.
+[Console] === Processing Repeating Section: Table CTRL338 ===
+[Console]     InfoPath View: view1
+[Console]     SmartObject: Expense_Report_Table_CTRL338
+[Console]     Controls in section: 6
+[Console] Generating Repeating Section Views:
+[Console]     Item View: Expense_Report_view1_Table_CTRL338_Item
+[Console]     List View: Expense_Report_view1_Table_CTRL338_List
+[Console]     Category: Forms\Generated\Expense_Report\Views
+[Console]         Normalizing grid positions: compacting 2 rows
+[Console]           Row 22 -> Row 1
+[Console]           Row 23 -> Row 2
+[Console]         No empty rows found, no compaction needed
+[Console]         Creating 4 columns for the table
+[Console]       Processing control: PERSONNAME of type: Label at position: 1A
+[Console]         Processing control 'PERSONNAME' of type 'Label' for view 'Expense_Report_view1_Table_CTRL338_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1A -> f758424a-ea55-49e9-ab45-d1b44836bf58
+[Console]         Added control to XML with ID: f758424a-ea55-49e9-ab45-d1b44836bf58
+[Console]       Processing control: PERSONTITLE of type: Label at position: 1B
+[Console]         Processing control 'PERSONTITLE' of type 'Label' for view 'Expense_Report_view1_Table_CTRL338_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1B -> ed8c0115-1e2e-457b-91d4-c61b27aac3de
+[Console]         Added control to XML with ID: ed8c0115-1e2e-457b-91d4-c61b27aac3de
+[Console]       Processing control: FIRM of type: Label at position: 1C
+[Console]         Processing control 'FIRM' of type 'Label' for view 'Expense_Report_view1_Table_CTRL338_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1C -> 9459ec2a-bfa9-408b-9316-31f19dec9ddf
+[Console]         Added control to XML with ID: 9459ec2a-bfa9-408b-9316-31f19dec9ddf
+[Console]       Processing control: PERSONNAME of type: TextField at position: 2A
+[Console]         JSON Control ID: CTRL356
+[Console]         Processing control 'PERSONNAME' of type 'TextField' for view 'Expense_Report_view1_Table_CTRL338_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         [VISIBILITY] Control CTRL356 will be initially hidden (conditional on category)
+[Console]         [VISIBILITY] Added IsVisible=false to control CTRL356
+[Console]         Mapped JSON CtrlId CTRL356 -> K2 ID 4987533e-f879-4625-98ef-1133e7ce0835
+[Console]         Mapped grid position 2A -> 4987533e-f879-4625-98ef-1133e7ce0835
+[Console]         Tracked control mapping: PERSONNAME -> ControlName (ID: 4987533e-f879-4625-98ef-1133e7ce0835)
+[Console]         Added control to XML with ID: 4987533e-f879-4625-98ef-1133e7ce0835
+[Console]       Processing control: PERSONTITLE of type: TextField at position: 2B
+[Console]         JSON Control ID: CTRL357
+[Console]         Processing control 'PERSONTITLE' of type 'TextField' for view 'Expense_Report_view1_Table_CTRL338_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         [VISIBILITY] Control CTRL357 will be initially hidden (conditional on category)
+[Console]         [VISIBILITY] Added IsVisible=false to control CTRL357
+[Console]         Mapped JSON CtrlId CTRL357 -> K2 ID 8fab5f80-1e12-4e40-9ab2-e0f522c5dc99
+[Console]         Mapped grid position 2B -> 8fab5f80-1e12-4e40-9ab2-e0f522c5dc99
+[Console]         Tracked control mapping: PERSONTITLE -> ControlName (ID: 8fab5f80-1e12-4e40-9ab2-e0f522c5dc99)
+[Console]         Added control to XML with ID: 8fab5f80-1e12-4e40-9ab2-e0f522c5dc99
+[Console]       Processing control: FIRM of type: TextField at position: 2C
+[Console]         JSON Control ID: CTRL358
+[Console]         Processing control 'FIRM' of type 'TextField' for view 'Expense_Report_view1_Table_CTRL338_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         [VISIBILITY] Control CTRL358 will be initially hidden (conditional on category)
+[Console]         [VISIBILITY] Added IsVisible=false to control CTRL358
+[Console]         Mapped JSON CtrlId CTRL358 -> K2 ID e7a8144c-85bf-4582-9fe9-a0c382f11a3c
+[Console]         Mapped grid position 2C -> e7a8144c-85bf-4582-9fe9-a0c382f11a3c
+[Console]         Tracked control mapping: FIRM -> ControlName (ID: e7a8144c-85bf-4582-9fe9-a0c382f11a3c)
+[Console]         Added control to XML with ID: e7a8144c-85bf-4582-9fe9-a0c382f11a3c
+[Console]     ControlMappingService: Registered 3 controls for view 'Expense_Report_view1_Table_CTRL338_Item'
+[Console]       - Field: PERSONNAME, Control: ControlName, Type: TextBox
+[Console]       - Field: PERSONTITLE, Control: ControlName, Type: TextBox
+[Console]       - Field: FIRM, Control: ControlName, Type: TextBox
+[Console]     Registered 3 control mappings for view: Expense_Report_view1_Table_CTRL338_Item
+[Console]     Control mapping summary:
+[Console]       Total controls created: 6
+[Console]       JSON control IDs mapped: 3
+[Console]       Control names mapped: 31
+[Console]       Data controls tracked: 3
+[Console]       Columns created: 4
+[Console]       Rows created: 2
+[Console]         Created fallback row mapping in CreateCanvasStructure
+[Console]         Canvas will have 3 columns and 2 rows
+[Console]         Placed control PERSONNAME (Label) at Row 1 (was 1), Column A with ID f758424a-ea55-49e9-ab45-d1b44836bf58
+[Console]         Placed control PERSONTITLE (Label) at Row 1 (was 1), Column B with ID ed8c0115-1e2e-457b-91d4-c61b27aac3de
+[Console]         Placed control FIRM (Label) at Row 1 (was 1), Column C with ID 9459ec2a-bfa9-408b-9316-31f19dec9ddf
+[Console]         Placed control PERSONNAME (TextField) at Row 2 (was 2), Column A with ID 4987533e-f879-4625-98ef-1133e7ce0835
+[Console]         Placed control PERSONTITLE (TextField) at Row 2 (was 2), Column B with ID 8fab5f80-1e12-4e40-9ab2-e0f522c5dc99
+[Console]         Placed control FIRM (TextField) at Row 2 (was 2), Column C with ID e7a8144c-85bf-4582-9fe9-a0c382f11a3c
+[Console]         Adding buttons to item view with 4 columns
+[Console]     ButtonTracker: Registered buttons for view Expense_Report_view1_Table_CTRL338_Item
+[Console]       Add Button ID: 32664999-ab35-4d6c-99d6-c9d41f9e1a1a
+[Console]       Cancel Button ID: addb3725-31c0-402a-818b-ced1285b35a0
+[Console]         Added Cancel button in column 0 and Add button in column 3 to item view
+[Console]         Mapping type: Label
+[Console]         Mapping type: Label
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: TextField
+[Console]         Mapping type: TextField
+[Console]         Setting initial visibility states based on default values
+[Console]     Processing 3 dynamic sections for visibility rules
+[Console]     Adding visibility rules from 3 dynamic sections
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]         Found control CTRL356 -> 4987533e-f879-4625-98ef-1133e7ce0835
+[Console]         Found label for PERSONNAME at 1A -> f758424a-ea55-49e9-ab45-d1b44836bf58
+[Console]         Found control CTRL357 -> 8fab5f80-1e12-4e40-9ab2-e0f522c5dc99
+[Console]         Found label for PERSONTITLE at 1B -> ed8c0115-1e2e-457b-91d4-c61b27aac3de
+[Console]         Found control CTRL358 -> e7a8144c-85bf-4582-9fe9-a0c382f11a3c
+[Console]         Found label for FIRM at 1C -> 9459ec2a-bfa9-408b-9316-31f19dec9ddf
+[Console]       Section has 6 explicit controls, expanded to 6 total controls (including labels)
+[Console]       WARNING: Could not find trigger control for CtrlId=CTRL353, ConditionField=category
+[Console]       Section has 3 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]     Processing conditional visibility rules
+[Console]     Adding 20 mapped InfoPath rules to view Expense_Report_view1_Table_CTRL338_Item
+[Console]     Adding 20 mapped InfoPath rules
+[Console]         Added rule: Visibility rule for CTRL276
+[Console]         Added rule: Visibility rule for CTRL353
+[Console]         Added rule: Visibility rule for CTRL359
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Rule 1
+[Console]     Warning: Could not deploy view Expense_Report_view1_Table_CTRL338_Item: Requested value 'ShowControls' was not found.
+[Console]         Extracting visible fields from 6 controls
+[Console]         Found data field: PERSONNAME from control type: TextField
+[Console]         Found data field: PERSONTITLE from control type: TextField
+[Console]         Found data field: FIRM from control type: TextField
+[Console]         Total visible fields extracted: 3
+[Console]         Fields: PERSONNAME, PERSONTITLE, FIRM
+[Console]     Final field list for list view: PERSONNAME, PERSONTITLE, FIRM
+[Console]     Extracted 3 visible fields (excluding ID/ParentID): PERSONNAME, PERSONTITLE, FIRM
+[Console]     ✓ Field count matches: List view and SmartObject both have 3 non-system fields
+[Console]     Deleted existing view: Expense_Report_view1_Table_CTRL338_List
+[Console]     Processing 3 visible fields from InfoPath view
+[Console]     After filtering ID/ParentID: 3 fields remain
+[Console]         Validated field: PERSONNAME -> PERSONNAME
+[Console]         Validated field: PERSONTITLE -> PERSONTITLE
+[Console]         Validated field: FIRM -> FIRM
+[Console]     Using 3 validated fields
+[Console]     List view will display fields: PERSONNAME, PERSONTITLE, FIRM
+[Console]     Checked in view: Expense_Report_view1_Table_CTRL338_List
+[Console] [Registry] Registered View: Expense_Report_view1_Table_CTRL338_Item
+[Console]            SmartObject: Expense_Report_Table_CTRL338
+[Console]            Type: Item
+[Console]            Repeating Section: view1_Table CTRL338
+[Console] [Registry] Registered View: Expense_Report_view1_Table_CTRL338_List
+[Console]            SmartObject: Expense_Report_Table_CTRL338
+[Console]            Type: List
+[Console]            Repeating Section: view1_Table CTRL338
+[Console] [Registry] Registered Repeating Section Views for: view1_Table CTRL338
+[Console]            Item View: Expense_Report_view1_Table_CTRL338_Item
+[Console]            List View: Expense_Report_view1_Table_CTRL338_List
+[Console]     Successfully created view pair for Table CTRL338 in InfoPath view view1
+[Console] Generating Regular View (Segment 4): Expense_Report_view1_Part4
+[Console]     Category: Forms\Generated\Expense_Report\Views
+[Console]     Contains 1 controls
+[Console]     Position: Between repeating sections 'Table CTRL338' and 'Table CTRL329'
+[Console]         Normalizing grid positions: compacting 1 rows
+[Console]           Row 25 -> Row 1
+[Console]         No empty rows found, no compaction needed
+[Console]         Creating 4 columns for the table
+[Console]       Processing control: GIFTRECIPIENTS of type: Label at position: 1A
+[Console]         Processing control 'GIFTRECIPIENTS' of type 'Label' for view 'Expense_Report_view1_Part4' (isItemView: False)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1A -> 57cce14e-7342-4359-bb32-f5e98b6172ab
+[Console]         Added control to XML with ID: 57cce14e-7342-4359-bb32-f5e98b6172ab
+[Console]     Control mapping summary:
+[Console]       Total controls created: 1
+[Console]       JSON control IDs mapped: 0
+[Console]       Control names mapped: 13
+[Console]       Data controls tracked: 0
+[Console]       Columns created: 4
+[Console]       Rows created: 1
+[Console]         Created fallback row mapping in CreateCanvasStructure
+[Console]         Canvas will have 1 columns and 1 rows
+[Console]         Placed control GIFTRECIPIENTS (Label) at Row 1 (was 1), Column A with ID 57cce14e-7342-4359-bb32-f5e98b6172ab
+[Console]         Mapping type: Label
+[Console]         Setting initial visibility states based on default values
+[Console]     Processing 3 dynamic sections for visibility rules
+[Console]     Adding visibility rules from 3 dynamic sections
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 3 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]     Processing conditional visibility rules
+[Console]     Adding 20 mapped InfoPath rules to view Expense_Report_view1_Part4
+[Console]     Adding 20 mapped InfoPath rules
+[Console]         Added rule: Visibility rule for CTRL276
+[Console]         Added rule: Visibility rule for CTRL353
+[Console]         Added rule: Visibility rule for CTRL359
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Rule 1
+[Console]     Warning: Could not deploy view Expense_Report_view1_Part4: Requested value 'ShowControls' was not found.
+[Console] === Processing Repeating Section: Table CTRL329 ===
+[Console]     InfoPath View: view1
+[Console]     SmartObject: Expense_Report_Table_CTRL329
+[Console]     Controls in section: 4
+[Console] Generating Repeating Section Views:
+[Console]     Item View: Expense_Report_view1_Table_CTRL329_Item
+[Console]     List View: Expense_Report_view1_Table_CTRL329_List
+[Console]     Category: Forms\Generated\Expense_Report\Views
+[Console]         Normalizing grid positions: compacting 2 rows
+[Console]           Row 27 -> Row 1
+[Console]           Row 28 -> Row 2
+[Console]         No empty rows found, no compaction needed
+[Console]         Creating 4 columns for the table
+[Console]       Processing control: RECIPIENTNAME of type: Label at position: 1A
+[Console]         Processing control 'RECIPIENTNAME' of type 'Label' for view 'Expense_Report_view1_Table_CTRL329_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1A -> 92d16c6f-ccf2-4400-89f1-dbb110d527a5
+[Console]         Added control to XML with ID: 92d16c6f-ccf2-4400-89f1-dbb110d527a5
+[Console]       Processing control: GIFTAMOUNT of type: Label at position: 1B
+[Console]         Processing control 'GIFTAMOUNT' of type 'Label' for view 'Expense_Report_view1_Table_CTRL329_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: Label
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: Label
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         Mapped grid position 1B -> 7146a589-9a68-44be-9482-57b8948e0810
+[Console]         Added control to XML with ID: 7146a589-9a68-44be-9482-57b8948e0810
+[Console]       Processing control: RECIPIENTNAME of type: TextField at position: 2A
+[Console]         JSON Control ID: CTRL360
+[Console]         Processing control 'RECIPIENTNAME' of type 'TextField' for view 'Expense_Report_view1_Table_CTRL329_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='', datafmt=''
+[Console]         [FORMATTING] ShouldApplyFormatting returned: False
+[Console]         [VISIBILITY] Control CTRL360 will be initially hidden (conditional on category)
+[Console]         [VISIBILITY] Added IsVisible=false to control CTRL360
+[Console]         Mapped JSON CtrlId CTRL360 -> K2 ID c98e16bb-40cc-4e2a-bccf-f53bb4a31bf0
+[Console]         Mapped grid position 2A -> c98e16bb-40cc-4e2a-bccf-f53bb4a31bf0
+[Console]         Tracked control mapping: RECIPIENTNAME -> ControlName (ID: c98e16bb-40cc-4e2a-bccf-f53bb4a31bf0)
+[Console]         Added control to XML with ID: c98e16bb-40cc-4e2a-bccf-f53bb4a31bf0
+[Console]       Processing control: GIFTAMOUNT of type: TextField at position: 2B
+[Console]         JSON Control ID: CTRL361
+[Console]         Processing control 'GIFTAMOUNT' of type 'TextField' for view 'Expense_Report_view1_Table_CTRL329_Item' (isItemView: True)
+[Console]         Checking for consolidated lookup SmartObject: Expense_Report_Lookups
+[Console]         Mapping type: TextField
+[Console]         CreateControlProperties called:
+[Console]           k2ControlType: TextBox
+[Console]           hasLookupSmartObject: False
+[Console]           lookupSmoName: Expense_Report_Lookups
+[Console]         [FORMATTING] Checking TextBox formatting: boundProp='xd:num', datafmt='"number","numDigits:auto;negativeOrder:1;"'
+[Console]         [FORMATTING] ShouldApplyFormatting returned: True
+[Console]         [FORMATTING] controlElement is null: True
+[Console]         [VISIBILITY] Control CTRL361 will be initially hidden (conditional on category)
+[Console]         [VISIBILITY] Added IsVisible=false to control CTRL361
+[Console]         [FORMATTING] Applying formatting after Styles created: boundProp='xd:num', datafmt='"number","numDigits:auto;negativeOrder:1;"'
+[Console]         Applied InfoPath formatting to TextBox: datafmt='"number","numDigits:auto;negativeOrder:1;"', boundProp='xd:num'
+[Console]         [FORMATTING] Format elements found in control: 1
+[Console]         [FORMATTING] Format XML: <Format Type="Number" Culture="en-US" NegativePattern="-1.1">N2</Format>
+[Console]         Mapped JSON CtrlId CTRL361 -> K2 ID 3bdf8c49-706c-46ea-8b45-b7bedfc106d6
+[Console]         Mapped grid position 2B -> 3bdf8c49-706c-46ea-8b45-b7bedfc106d6
+[Console]         Tracked control mapping: GIFTAMOUNT -> ControlName (ID: 3bdf8c49-706c-46ea-8b45-b7bedfc106d6)
+[Console]         Added control to XML with ID: 3bdf8c49-706c-46ea-8b45-b7bedfc106d6
+[Console]     ControlMappingService: Registered 2 controls for view 'Expense_Report_view1_Table_CTRL329_Item'
+[Console]       - Field: RECIPIENTNAME, Control: ControlName, Type: TextBox
+[Console]       - Field: GIFTAMOUNT, Control: ControlName, Type: TextBox
+[Console]     Registered 2 control mappings for view: Expense_Report_view1_Table_CTRL329_Item
+[Console]     Control mapping summary:
+[Console]       Total controls created: 4
+[Console]       JSON control IDs mapped: 2
+[Console]       Control names mapped: 26
+[Console]       Data controls tracked: 2
+[Console]       Columns created: 4
+[Console]       Rows created: 2
+[Console]         Created fallback row mapping in CreateCanvasStructure
+[Console]         Canvas will have 2 columns and 2 rows
+[Console]         Placed control RECIPIENTNAME (Label) at Row 1 (was 1), Column A with ID 92d16c6f-ccf2-4400-89f1-dbb110d527a5
+[Console]         Placed control GIFTAMOUNT (Label) at Row 1 (was 1), Column B with ID 7146a589-9a68-44be-9482-57b8948e0810
+[Console]         Placed control RECIPIENTNAME (TextField) at Row 2 (was 2), Column A with ID c98e16bb-40cc-4e2a-bccf-f53bb4a31bf0
+[Console]         Placed control GIFTAMOUNT (TextField) at Row 2 (was 2), Column B with ID 3bdf8c49-706c-46ea-8b45-b7bedfc106d6
+[Console]         Adding buttons to item view with 4 columns
+[Console]     ButtonTracker: Registered buttons for view Expense_Report_view1_Table_CTRL329_Item
+[Console]       Add Button ID: e2335872-e446-42b8-bfe4-f89d055349d0
+[Console]       Cancel Button ID: 099d4b31-56f4-447c-b6c6-8718d26aa458
+[Console]         Added Cancel button in column 0 and Add button in column 3 to item view
+[Console]         Mapping type: Label
+[Console]         Mapping type: Label
+[Console]         Mapping type: TextField
+[Console]         Mapping type: TextField
+[Console]         Setting initial visibility states based on default values
+[Console]     Processing 3 dynamic sections for visibility rules
+[Console]     Adding visibility rules from 3 dynamic sections
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]       Section has 6 explicit controls, expanded to 0 total controls (including labels)
+[Console]       WARNING: No controls found for section, skipping
+[Console]         Found control CTRL360 -> c98e16bb-40cc-4e2a-bccf-f53bb4a31bf0
+[Console]         Found label for RECIPIENTNAME at 1A -> 92d16c6f-ccf2-4400-89f1-dbb110d527a5
+[Console]         Found control CTRL361 -> 3bdf8c49-706c-46ea-8b45-b7bedfc106d6
+[Console]         Found label for GIFTAMOUNT at 1B -> 7146a589-9a68-44be-9482-57b8948e0810
+[Console]       Section has 3 explicit controls, expanded to 4 total controls (including labels)
+[Console]       WARNING: Could not find trigger control for CtrlId=CTRL359, ConditionField=category
+[Console]     Processing conditional visibility rules
+[Console]     Adding 20 mapped InfoPath rules to view Expense_Report_view1_Table_CTRL329_Item
+[Console]     Adding 20 mapped InfoPath rules
+[Console]         Added rule: Visibility rule for CTRL276
+[Console]         Added rule: Visibility rule for CTRL353
+[Console]         Added rule: Visibility rule for CTRL359
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Transfer Unknown to Unknown
+[Console]         Added rule: Rule 1
+[Console]     Warning: Could not deploy view Expense_Report_view1_Table_CTRL329_Item: Requested value 'ShowControls' was not found.
+[Console]         Extracting visible fields from 4 controls
+[Console]         Found data field: RECIPIENTNAME from control type: TextField
+[Console]         Found data field: GIFTAMOUNT from control type: TextField
+[Console]         Total visible fields extracted: 2
+[Console]         Fields: RECIPIENTNAME, GIFTAMOUNT
+[Console]     Final field list for list view: RECIPIENTNAME, GIFTAMOUNT
+[Console]     Extracted 2 visible fields (excluding ID/ParentID): RECIPIENTNAME, GIFTAMOUNT
+[Console]     ✓ Field count matches: List view and SmartObject both have 2 non-system fields
+[Console]     Deleted existing view: Expense_Report_view1_Table_CTRL329_List
+[Console]     Processing 2 visible fields from InfoPath view
+[Console]     After filtering ID/ParentID: 2 fields remain
+[Console]         Validated field: RECIPIENTNAME -> RECIPIENTNAME
+[Console]         Validated field: GIFTAMOUNT -> GIFTAMOUNT
+[Console]     Using 2 validated fields
+[Console]     List view will display fields: RECIPIENTNAME, GIFTAMOUNT
+[INFO]  [K2Gen] ✓ Created 8 Views
+[VERB]  [K2Gen] ViewTitles collected: 2
+[DEBUG] [K2Gen] Capture Views: 0
+[DEBUG] [K2Gen] Item Views: 4
+[DEBUG] [K2Gen] List Views: 4
+
+============================================================
+=== FORM GENERATION
+============================================================
+[INFO]  [K2Gen] Starting Form generation...
+[Forms] 75%
+[VERB]  [K2Gen] Initializing FormGenerator with theme: Lithium
+[DEBUG] [K2Gen] Passing 2 view titles to form generator
+[VERB]  [K2Gen] Calling GenerateFormsFromJson...
+[Console]     Checked in view: Expense_Report_view1_Table_CTRL329_List
+[Console] [Registry] Registered View: Expense_Report_view1_Table_CTRL329_Item
+[Console]            SmartObject: Expense_Report_Table_CTRL329
+[Console]            Type: Item
+[Console]            Repeating Section: view1_Table CTRL329
+[Console] [Registry] Registered View: Expense_Report_view1_Table_CTRL329_List
+[Console]            SmartObject: Expense_Report_Table_CTRL329
+[Console]            Type: List
+[Console]            Repeating Section: view1_Table CTRL329
+[Console] [Registry] Registered Repeating Section Views for: view1_Table CTRL329
+[Console]            Item View: Expense_Report_view1_Table_CTRL329_Item
+[Console]            List View: Expense_Report_view1_Table_CTRL329_List
+[Console]     Successfully created view pair for Table CTRL329 in InfoPath view view1
+[Console] === View Generation Complete ===
+[Console]     Found repeating section 'TABLECTRL243' at position 11A (row 11)
+[Console]     Found repeating section 'Table CTRL243' starting at position 12A (row 12)
+[Console]     Found repeating section 'Item' starting at position 19A (row 19)
+[Console]     Found repeating section 'TABLECTRL338' at position 21E (row 21)
+[Console]     Found repeating section 'Table CTRL338' starting at position 22A (row 22)
+[Console]     Found repeating section 'TABLECTRL329' at position 26A (row 26)
+[Console]     Found repeating section 'Table CTRL329' starting at position 27A (row 27)
+[Console]     Extracting grid positions for view: view1
+[Console]       Mapped Expense_Report_Table_CTRL243_List and Expense_Report_Table_CTRL243_Item to grid row 12
+[Console]       Mapped Expense_Report_Item_List and Expense_Report_Item_Item to grid row 19
+[Console]       Mapped Expense_Report_Table_CTRL338_List and Expense_Report_Table_CTRL338_Item to grid row 22
+[Console]       Mapped Expense_Report_Table_CTRL329_List and Expense_Report_Table_CTRL329_Item to grid row 27
+[Console]       Mapped Expense_Report_view1 to grid row 1
+[Console]       Found control 'EXPENSEREPORT' outside repeating sections at row 1
+[Console]         Control 'EXPENSEREPORT' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'REPORTDATE' outside repeating sections at row 2
+[Console]         Control 'REPORTDATE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'REPORTDATE' outside repeating sections at row 2
+[Console]         Control 'REPORTDATE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'EXPENSECODE' outside repeating sections at row 2
+[Console]         Control 'EXPENSECODE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'EXPENSECODE' outside repeating sections at row 2
+[Console]         Control 'EXPENSECODE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'STARTDATE' outside repeating sections at row 2
+[Console]         Control 'STARTDATE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'STARTDATE' outside repeating sections at row 2
+[Console]         Control 'STARTDATE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'ENDDATE' outside repeating sections at row 2
+[Console]         Control 'ENDDATE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'ENDDATE' outside repeating sections at row 2
+[Console]         Control 'ENDDATE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'BUSINESSPURPOSE' outside repeating sections at row 3
+[Console]         Control 'BUSINESSPURPOSE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'PURPOSE' outside repeating sections at row 3
+[Console]         Control 'PURPOSE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'EMPLOYEEINFORMATION' outside repeating sections at row 4
+[Console]         Control 'EMPLOYEEINFORMATION' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'NAME' outside repeating sections at row 5
+[Console]         Control 'NAME' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'NAME' outside repeating sections at row 5
+[Console]         Control 'NAME' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'TITLE' outside repeating sections at row 5
+[Console]         Control 'TITLE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'JOBTITLE' outside repeating sections at row 5
+[Console]         Control 'JOBTITLE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'DEPARTMENT' outside repeating sections at row 6
+[Console]         Control 'DEPARTMENT' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'DEPARTMENT' outside repeating sections at row 6
+[Console]         Control 'DEPARTMENT' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'IDNUMBER' outside repeating sections at row 6
+[Console]         Control 'IDNUMBER' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'IDENTIFICATIONNUMBER' outside repeating sections at row 6
+[Console]         Control 'IDENTIFICATIONNUMBER' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'EMAILADDRESS' outside repeating sections at row 7
+[Console]         Control 'EMAILADDRESS' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'EMAILADDRESS' outside repeating sections at row 7
+[Console]         Control 'EMAILADDRESS' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'MANAGERINFORMATION' outside repeating sections at row 8
+[Console]         Control 'MANAGERINFORMATION' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'MANAGERNAME' outside repeating sections at row 9
+[Console]         Control 'MANAGERNAME' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'MANAGEREMAILADDRESS' outside repeating sections at row 9
+[Console]         Control 'MANAGEREMAILADDRESS' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'ITEMIZEDEXPENSES' outside repeating sections at row 10
+[Console]         Control 'ITEMIZEDEXPENSES' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'TABLECTRL243' outside repeating sections at row 11
+[Console]         Control 'TABLECTRL243' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'SUBTOTAL' outside repeating sections at row 14
+[Console]         Control 'SUBTOTAL' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'SUBTOTAL' outside repeating sections at row 14
+[Console]         Control 'SUBTOTAL' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'LESSCASHADVANCE' outside repeating sections at row 15
+[Console]         Control 'LESSCASHADVANCE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'CASHADVANCE' outside repeating sections at row 15
+[Console]         Control 'CASHADVANCE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'TOTALEXPENSES' outside repeating sections at row 16
+[Console]         Control 'TOTALEXPENSES' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'TOTAL' outside repeating sections at row 16
+[Console]         Control 'TOTAL' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'ITEMDETAILS' outside repeating sections at row 18
+[Console]         Control 'ITEMDETAILS' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'CTRL113_6' outside repeating sections at row 19
+[Console]         Control 'CTRL113_6' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'ENTERTAINMENTDETAILS' outside repeating sections at row 20
+[Console]         Control 'ENTERTAINMENTDETAILS' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'PURPOSE' outside repeating sections at row 21
+[Console]         Control 'PURPOSE' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'ENTERTAINMENTPURPOSE' outside repeating sections at row 21
+[Console]         Control 'ENTERTAINMENTPURPOSE' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'PLACE' outside repeating sections at row 21
+[Console]         Control 'PLACE' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'ENTERTAINMENTPLACE' outside repeating sections at row 21
+[Console]         Control 'ENTERTAINMENTPLACE' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'TABLECTRL338' outside repeating sections at row 21
+[Console]         Control 'TABLECTRL338' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'GIFTRECIPIENTS' outside repeating sections at row 25
+[Console]         Control 'GIFTRECIPIENTS' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'TABLECTRL329' outside repeating sections at row 26
+[Console]         Control 'TABLECTRL329' comes after section 'Item' (ends at row 19)
+[Console]   Form category: Forms\Generated\Expense_Report\Forms
+[Console] === Preparing Form for InfoPath View: view1 ===
+[Console]         Found repeating section: Table CTRL243 -> normalized to: Table_CTRL243
+[Console]         Found repeating section: Item -> normalized to: Item
+[Console]         Found repeating section: Table CTRL338 -> normalized to: Table_CTRL338
+[Console]         Found repeating section: Table CTRL329 -> normalized to: Table_CTRL329
+[Console]     Found 4 repeating sections in InfoPath view: view1
+[Console]     Checked in view: Expense_Report_view1_Table_CTRL329_List
+[Console]         - Table_CTRL243
+[INFO]  [K2Gen] ✓ Form generation completed
+[Console] [Registry] Registered View: Expense_Report_view1_Table_CTRL329_Item
+[Console]         - Item
+
+--------------------------------------------------
+[Console]            SmartObject: Expense_Report_Table_CTRL329
+[Console]         - Table_CTRL338
+--- Form Registration
+[Console]            Type: Item
+[Console]         - Table_CTRL329
+--------------------------------------------------
+[Console]            Repeating Section: view1_Table CTRL329
+[Console]     WARNING: Item view not found: Expense_Report_view1_Table_CTRL243_Item
+[INFO]  [K2Gen] Registering forms in SmartObjectViewRegistry...
+[Console] [Registry] Registered View: Expense_Report_view1_Table_CTRL329_List
+[Console]     Adding list view: Expense_Report_view1_Table_CTRL243_List
+[VERB]  [K2Gen] Added lookup SmartObject: Expense_Report_Lookups
+[Console]            SmartObject: Expense_Report_Table_CTRL329
+[Console]     WARNING: Item view not found: Expense_Report_view1_Item_Item
+[VERB]  [K2Gen] Total SmartObjects to register: 6
+[Console]            Type: List
+[Console]     Adding list view: Expense_Report_view1_Item_List
+[DEBUG] [K2Gen]   • SmartObject: Expense_Report
+[Console]            Repeating Section: view1_Table CTRL329
+[Console]     WARNING: Item view not found: Expense_Report_view1_Table_CTRL338_Item
+[DEBUG] [K2Gen]   • SmartObject: Expense_Report_Table_CTRL243
+[Console] [Registry] Registered Repeating Section Views for: view1_Table CTRL329
+[Console]     Adding list view: Expense_Report_view1_Table_CTRL338_List
+[DEBUG] [K2Gen]   • SmartObject: Expense_Report_Item
+[Console]            Item View: Expense_Report_view1_Table_CTRL329_Item
+[Console]     WARNING: Item view not found: Expense_Report_view1_Table_CTRL329_Item
+[DEBUG] [K2Gen]   • SmartObject: Expense_Report_Table_CTRL338
+[Console]            List View: Expense_Report_view1_Table_CTRL329_List
+[Console]     Adding list view: Expense_Report_view1_Table_CTRL329_List
+[DEBUG] [K2Gen]   • SmartObject: Expense_Report_Table_CTRL329
+[Console]     Successfully created view pair for Table CTRL329 in InfoPath view view1
+[Console]     Total views mapped to form: 4
+[DEBUG] [K2Gen]   • SmartObject: Expense_Report_Lookups
+[Console] === View Generation Complete ===
+[Console]     Form has repeating sections: Yes
+[VERB]  [K2Gen] SmartObject 'Expense_Report' has 0 view(s)
+[Console]     Found repeating section 'TABLECTRL243' at position 11A (row 11)
+[Console] === Generating Form: Expense_Report_view1_Form ===
+[VERB]  [K2Gen] SmartObject 'Expense_Report_Table_CTRL243' has 2 view(s)
+[Console]     Found repeating section 'Table CTRL243' starting at position 12A (row 12)
+[Console]     Category: Forms\Generated\Expense_Report\Forms
+[VERB]  [K2Gen] SmartObject 'Expense_Report_Item' has 2 view(s)
+[Console]     Found repeating section 'Item' starting at position 19A (row 19)
+[Console]     Views to include: 4
+[VERB]  [K2Gen] SmartObject 'Expense_Report_Table_CTRL338' has 2 view(s)
+[Console]     Found repeating section 'TABLECTRL338' at position 21E (row 21)
+[Console]     Theme: Lithium
+[VERB]  [K2Gen] SmartObject 'Expense_Report_Table_CTRL329' has 2 view(s)
+[Console]     Found repeating section 'Table CTRL338' starting at position 22A (row 22)
+[VERB]  [K2Gen] SmartObject 'Expense_Report_Lookups' has 0 view(s)
+[Console]     Found repeating section 'TABLECTRL329' at position 26A (row 26)
+[VERB]  [K2Gen] Total form views: 8
+[Console]     Found repeating section 'Table CTRL329' starting at position 27A (row 27)
+[DEBUG] [K2Gen]   • View: Expense_Report_view1_Table_CTRL243_List
+[Console]     Extracting grid positions for view: view1
+[DEBUG] [K2Gen]   • View: Expense_Report_view1_Table_CTRL243_Item
+[Console]       Mapped Expense_Report_Table_CTRL243_List and Expense_Report_Table_CTRL243_Item to grid row 12
+[DEBUG] [K2Gen]   • View: Expense_Report_view1_Item_List
+[Console]       Mapped Expense_Report_Item_List and Expense_Report_Item_Item to grid row 19
+[DEBUG] [K2Gen]   • View: Expense_Report_view1_Item_Item
+[Console]       Mapped Expense_Report_Table_CTRL338_List and Expense_Report_Table_CTRL338_Item to grid row 22
+[DEBUG] [K2Gen]   • View: Expense_Report_view1_Table_CTRL338_List
+[Console]       Mapped Expense_Report_Table_CTRL329_List and Expense_Report_Table_CTRL329_Item to grid row 27
+[DEBUG] [K2Gen]   • View: Expense_Report_view1_Table_CTRL338_Item
+[Console]       Mapped Expense_Report_view1 to grid row 1
+[DEBUG] [K2Gen]   • View: Expense_Report_view1_Table_CTRL329_List
+[Console]       Found control 'EXPENSEREPORT' outside repeating sections at row 1
+[DEBUG] [K2Gen]   • View: Expense_Report_view1_Table_CTRL329_Item
+[Console]         Control 'EXPENSEREPORT' comes after section 'Table_CTRL243' (ends at row 0)
+[INFO]  [K2Gen] ✓ Form 'Expense_Report' registered in registry
+[Console]       Found control 'REPORTDATE' outside repeating sections at row 2
+[INFO]  [K2Gen] ✓ Registry reports 1 form(s) created
+[Console]         Control 'REPORTDATE' comes after section 'Table_CTRL243' (ends at row 0)
+
+============================================================
+[Console]       Found control 'REPORTDATE' outside repeating sections at row 2
+=== GENERATION COMPLETE
+[Console]         Control 'REPORTDATE' comes after section 'Table_CTRL243' (ends at row 0)
+============================================================
+[Console]       Found control 'EXPENSECODE' outside repeating sections at row 2
+[Complete] 100%
+[Console]         Control 'EXPENSECODE' comes after section 'Table_CTRL243' (ends at row 0)
+[INFO]  [K2Gen] ════════════════════════════════════════════════
+[Console]       Found control 'EXPENSECODE' outside repeating sections at row 2
+[INFO]  [K2Gen] ✓ SUCCESS: K2 generation completed
+[Console]         Control 'EXPENSECODE' comes after section 'Table_CTRL243' (ends at row 0)
+[INFO]  [K2Gen]   • SmartObjects: 6
+[Console]       Found control 'STARTDATE' outside repeating sections at row 2
+[INFO]  [K2Gen]   • Views: 8
+[Console]         Control 'STARTDATE' comes after section 'Table_CTRL243' (ends at row 0)
+[INFO]  [K2Gen]   • Forms: 1
+[Console]       Found control 'STARTDATE' outside repeating sections at row 2
+[INFO]  [K2Gen] ════════════════════════════════════════════════
+[Console]         Control 'STARTDATE' comes after section 'Table_CTRL243' (ends at row 0)
+
+--------------------------------------------------
+[Console]       Found control 'ENDDATE' outside repeating sections at row 2
+--- Cleanup
+[Console]         Control 'ENDDATE' comes after section 'Table_CTRL243' (ends at row 0)
+--------------------------------------------------
+[Console]       Found control 'ENDDATE' outside repeating sections at row 2
+[VERB]  [K2Gen] Clearing K2 connection and cache...
+[Console]         Control 'ENDDATE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'BUSINESSPURPOSE' outside repeating sections at row 3
+[Console]         Control 'BUSINESSPURPOSE' comes after section 'Table_CTRL243' (ends at row 0)
+[DEBUG] [K2Gen] K2 connection cleared and garbage collected
+[Console]       Found control 'PURPOSE' outside repeating sections at row 3
+[Console] [Registry] Registered Form: Expense_Report
+[Console]         Control 'PURPOSE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]            Views: Expense_Report_view1_Table_CTRL243_List, Expense_Report_view1_Table_CTRL243_Item, Expense_Report_view1_Item_List, Expense_Report_view1_Item_Item, Expense_Report_view1_Table_CTRL338_List, Expense_Report_view1_Table_CTRL338_Item, Expense_Report_view1_Table_CTRL329_List, Expense_Report_view1_Table_CTRL329_Item
+[Console]       Found control 'EMPLOYEEINFORMATION' outside repeating sections at row 4
+[Console]            SmartObjects: Expense_Report, Expense_Report_Table_CTRL243, Expense_Report_Item, Expense_Report_Table_CTRL338, Expense_Report_Table_CTRL329, Expense_Report_Lookups
+[Console]         Control 'EMPLOYEEINFORMATION' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'NAME' outside repeating sections at row 5
+
+✅ Generation completed successfully!
+   SmartObjects: 6
+   Views: 8
+   Forms: 1
+
+K2 Form URL: https://k2trial.safalo.com/Runtime/Runtime/Form/Expense_Report
+Category Path: Forms/Generated
+
+✅ K2 SmartForms generated successfully!
+[Console]         Control 'NAME' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'NAME' outside repeating sections at row 5
+[Console]         Control 'NAME' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'TITLE' outside repeating sections at row 5
+[Console]         Control 'TITLE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'JOBTITLE' outside repeating sections at row 5
+[Console]         Control 'JOBTITLE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'DEPARTMENT' outside repeating sections at row 6
+[Console]         Control 'DEPARTMENT' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'DEPARTMENT' outside repeating sections at row 6
+[Console]         Control 'DEPARTMENT' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'IDNUMBER' outside repeating sections at row 6
+[Console]         Control 'IDNUMBER' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'IDENTIFICATIONNUMBER' outside repeating sections at row 6
+[Console]         Control 'IDENTIFICATIONNUMBER' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'EMAILADDRESS' outside repeating sections at row 7
+[Console]         Control 'EMAILADDRESS' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'EMAILADDRESS' outside repeating sections at row 7
+[Console]         Control 'EMAILADDRESS' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'MANAGERINFORMATION' outside repeating sections at row 8
+[Console]         Control 'MANAGERINFORMATION' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'MANAGERNAME' outside repeating sections at row 9
+[Console]         Control 'MANAGERNAME' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'MANAGEREMAILADDRESS' outside repeating sections at row 9
+[Console]         Control 'MANAGEREMAILADDRESS' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'ITEMIZEDEXPENSES' outside repeating sections at row 10
+[Console]         Control 'ITEMIZEDEXPENSES' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'TABLECTRL243' outside repeating sections at row 11
+[Console]         Control 'TABLECTRL243' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'SUBTOTAL' outside repeating sections at row 14
+[Console]         Control 'SUBTOTAL' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'SUBTOTAL' outside repeating sections at row 14
+[Console]         Control 'SUBTOTAL' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'LESSCASHADVANCE' outside repeating sections at row 15
+[Console]         Control 'LESSCASHADVANCE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'CASHADVANCE' outside repeating sections at row 15
+[Console]         Control 'CASHADVANCE' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'TOTALEXPENSES' outside repeating sections at row 16
+[Console]         Control 'TOTALEXPENSES' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'TOTAL' outside repeating sections at row 16
+[Console]         Control 'TOTAL' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'ITEMDETAILS' outside repeating sections at row 18
+[Console]         Control 'ITEMDETAILS' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'CTRL113_6' outside repeating sections at row 19
+[Console]         Control 'CTRL113_6' comes after section 'Table_CTRL243' (ends at row 0)
+[Console]       Found control 'ENTERTAINMENTDETAILS' outside repeating sections at row 20
+[Console]         Control 'ENTERTAINMENTDETAILS' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'PURPOSE' outside repeating sections at row 21
+[Console]         Control 'PURPOSE' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'ENTERTAINMENTPURPOSE' outside repeating sections at row 21
+[Console]         Control 'ENTERTAINMENTPURPOSE' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'PLACE' outside repeating sections at row 21
+[Console]         Control 'PLACE' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'ENTERTAINMENTPLACE' outside repeating sections at row 21
+[Console]         Control 'ENTERTAINMENTPLACE' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'TABLECTRL338' outside repeating sections at row 21
+[Console]         Control 'TABLECTRL338' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'GIFTRECIPIENTS' outside repeating sections at row 25
+[Console]         Control 'GIFTRECIPIENTS' comes after section 'Item' (ends at row 19)
+[Console]       Found control 'TABLECTRL329' outside repeating sections at row 26
+[Console]         Control 'TABLECTRL329' comes after section 'Item' (ends at row 19)
+[Console]   Form category: Forms\Generated\Expense_Report\Forms
+[Console] === Preparing Form for InfoPath View: view1 ===
+[Console]         Found repeating section: Table CTRL243 -> normalized to: Table_CTRL243
+[Console]         Found repeating section: Item -> normalized to: Item
+[Console]         Found repeating section: Table CTRL338 -> normalized to: Table_CTRL338
+[Console]         Found repeating section: Table CTRL329 -> normalized to: Table_CTRL329
+[Console]     Found 4 repeating sections in InfoPath view: view1
+[Console]         - Table_CTRL243
+[Console]         - Item
+[Console]         - Table_CTRL338
+[Console]         - Table_CTRL329
+[Console]     WARNING: Item view not found: Expense_Report_view1_Table_CTRL243_Item
+[Console]     Adding list view: Expense_Report_view1_Table_CTRL243_List
+[Console]     WARNING: Item view not found: Expense_Report_view1_Item_Item
+[Console]     Adding list view: Expense_Report_view1_Item_List
+[Console]     WARNING: Item view not found: Expense_Report_view1_Table_CTRL338_Item
+[Console]     Adding list view: Expense_Report_view1_Table_CTRL338_List
+[Console]     WARNING: Item view not found: Expense_Report_view1_Table_CTRL329_Item
+[Console]     Adding list view: Expense_Report_view1_Table_CTRL329_List
+[Console]     Total views mapped to form: 4
+[Console]     Form has repeating sections: Yes
+[Console] === Generating Form: Expense_Report_view1_Form ===
+[Console]     Category: Forms\Generated\Expense_Report\Forms
+[Console]     Views to include: 4
+[Console]     Theme: Lithium
+[Console]         Created new Parameters section in form
+[Console]         Added ID parameter to form with GUID: d02f4444-1252-4610-8fbb-cb405324136d
+[Console]     Added ID parameter to form: Expense_Report_view1_Form
+[Console]     Updated form theme to _Dynamic
+[Console]     Added UseLegacyTheme=false property to Form control
+[Console]     Restructuring form to group list and item views...
+[Console]     Updated form theme to _Dynamic
+[Console]     Updated UseLegacyTheme to false
+[Console]     === Analyzing Form Structure ===
+[Console]       Position 0: Expense_Report_view1_Table_CTRL243_List
+[Console]         No title provided for AreaItem: Expense_Report_view1_Table_CTRL243_List, disabling collapsibility
+[Console]         Added IsCollapsible=false to AreaItem control: Expense_Report_view1_Table_CTRL243_List
+[Console]         Added WrapText=true to AreaItem control: Expense_Report_view1_Table_CTRL243_List
+[Console]       Position 1: Expense_Report_view1_Item_List
+[Console]         No title provided for AreaItem: Expense_Report_view1_Item_List, disabling collapsibility
+[Console]         Added IsCollapsible=false to AreaItem control: Expense_Report_view1_Item_List
+[Console]         Added WrapText=true to AreaItem control: Expense_Report_view1_Item_List
+[Console]       Position 2: Expense_Report_view1_Table_CTRL338_List
+[Console]         No title provided for AreaItem: Expense_Report_view1_Table_CTRL338_List, disabling collapsibility
+[Console]         Added IsCollapsible=false to AreaItem control: Expense_Report_view1_Table_CTRL338_List
+[Console]         Added WrapText=true to AreaItem control: Expense_Report_view1_Table_CTRL338_List
+[Console]       Position 3: Expense_Report_view1_Table_CTRL329_List
+[Console]         No title provided for AreaItem: Expense_Report_view1_Table_CTRL329_List, disabling collapsibility
+[Console]         Added IsCollapsible=false to AreaItem control: Expense_Report_view1_Table_CTRL329_List
+[Console]         Added WrapText=true to AreaItem control: Expense_Report_view1_Table_CTRL329_List
+[Console]     === Rebuilding Form Structure ===
+[Console]     === Using GridPosition-Based Ordering ===
+[Console]     Creating grid position ordered view list...
+[Console]     Available grid positions:
+[Console]       'Expense_Report_Table_CTRL243_List' -> 12
+[Console]       'Expense_Report_Table_CTRL243_Item' -> 12
+[Console]       'Expense_Report_Item_List' -> 19
+[Console]       'Expense_Report_Item_Item' -> 19
+[Console]       'Expense_Report_Table_CTRL338_List' -> 22
+[Console]       'Expense_Report_Table_CTRL338_Item' -> 22
+[Console]       'Expense_Report_Table_CTRL329_List' -> 27
+[Console]       'Expense_Report_Table_CTRL329_Item' -> 27
+[Console]       'Expense_Report_view1' -> 1
+[Console]       formDef.FormName = 'Expense_Report_view1_Form'
+[Console]       Looking for 'Expense_Report_Table_CTRL243_List' in grid positions: FOUND
+[Console]       Repeating section Table_CTRL243 mapped to grid position 12
+[Console]       formDef.FormName = 'Expense_Report_view1_Form'
+[Console]       Looking for 'Expense_Report_Item_List' in grid positions: FOUND
+[Console]       Repeating section Item mapped to grid position 19
+[Console]       formDef.FormName = 'Expense_Report_view1_Form'
+[Console]       Looking for 'Expense_Report_Table_CTRL338_List' in grid positions: FOUND
+[Console]       Repeating section Table_CTRL338 mapped to grid position 22
+[Console]       formDef.FormName = 'Expense_Report_view1_Form'
+[Console]       Looking for 'Expense_Report_Table_CTRL329_List' in grid positions: FOUND
+[Console]       Repeating section Table_CTRL329 mapped to grid position 27
+[Console]     Total views to order: 4
+[Console]       Added Form Action Table at the end
+[Console]     === Adding Form-Level Rules (Clear & Submit) ===
+[Console]       Found existing Form ID: 1a1fcb85-7f51-4fe5-b3d8-6db1e745b8dd
+[Console]     === Adding Form-Level Rules (Clear & Submit) ===
+[Console]       Creating Clear button click handler with direct actions
+[Console]         Found 0 views to clear
+[Console]         ✓ Clear button handler created with 0 clear actions
+[Console]       === Creating Submit Form Rule ===
+[Console]         ✓ Submit button rule created with proper parent-child mapping
+[Console]       Creating Add Item button rules for nested sections...
+[Console]         No add item buttons found in registry
+[Console]       Form-level rules added successfully
+[Console]     === Adding ID Parameter Condition to Init Rule ===
+[Console]       Found Form Action Table: Form Action Table (ID: 2393e33e-ed31-477f-8088-b8f9c12343d4)
+[Console]       Found 2 Form events
+[Console]       Checking Form event with SourceName: Expense_Report_view1_Form
+[Console]         Found 1 handlers
+[Console]           Handler 1: Found 0 Execute actions
+[Console]           Handler 1: Has Initialize=False, Has ListRefresh=False
+[Console]       Checking Form event with SourceName: Expense_Report_view1_Form
+[Console]         Found 1 handlers
+[Console]           Handler 1: Found 8 Execute actions
+[Console]           Handler 1: Has Initialize=True, Has ListRefresh=True
+[Console]         Found MIXED handler - splitting Initialize and ListRefresh actions
+[Console]           Removed 4 ListRefresh actions from handler
+[Console]             Creating Hide Form Action Table control action
+[Console]         Added Hide Form Action Table action as first action in conditional handler
+[Console]         Created new conditional handler with Hide Form Action Table and 4 ListRefresh actions
+[Console]         ✓ Successfully added ID parameter condition with Form Action Table visibility
+[Console]     === Adding SmartObject Load Action to Init Rule ===
+[Console]       No main views found to map
+[Console]         Verified: ID parameter is present in form XML after restructuring
+[Console]     === Adding Calculation Rules (After All Views and Rules Added) ===
+[Console]     ========== CALCULATION RULES GENERATION START ==========
+[Console]       Found 63 controls in first view
+[Console]     Found 63 total fields in form data
+[Console]     Checking field: EXPENSEREPORT (Type: Label, Disabled: False)
+[Console]     Checking field: REPORTDATE (Type: Label, Disabled: False)
+[Console]     Checking field: REPORTDATE (Type: DatePicker, Disabled: False)
+[Console]     Checking field: EXPENSECODE (Type: Label, Disabled: False)
+[Console]     Checking field: EXPENSECODE (Type: TextField, Disabled: False)
+[Console]     Checking field: STARTDATE (Type: Label, Disabled: False)
+[Console]     Checking field: STARTDATE (Type: TextField, Disabled: False)
+[Console]     Checking field: ENDDATE (Type: Label, Disabled: False)
+[Console]     Checking field: ENDDATE (Type: TextField, Disabled: False)
+[Console]     Checking field: BUSINESSPURPOSE (Type: Label, Disabled: False)
+[Console]     Checking field: PURPOSE (Type: TextField, Disabled: False)
+[Console]     Checking field: EMPLOYEEINFORMATION (Type: Label, Disabled: False)
+[Console]     Checking field: NAME (Type: Label, Disabled: False)
+[Console]     Checking field: NAME (Type: TextField, Disabled: False)
+[Console]     Checking field: TITLE (Type: Label, Disabled: False)
+[Console]     Checking field: JOBTITLE (Type: TextField, Disabled: False)
+[Console]     Checking field: DEPARTMENT (Type: Label, Disabled: False)
+[Console]     Checking field: DEPARTMENT (Type: TextField, Disabled: False)
+[Console]     Checking field: IDNUMBER (Type: Label, Disabled: False)
+[Console]     Checking field: IDENTIFICATIONNUMBER (Type: TextField, Disabled: False)
+[Console]     Checking field: EMAILADDRESS (Type: Label, Disabled: False)
+[Console]     Checking field: EMAILADDRESS (Type: TextField, Disabled: False)
+[Console]     Checking field: MANAGERINFORMATION (Type: Label, Disabled: False)
+[Console]     Checking field: MANAGERNAME (Type: TextField, Disabled: False)
+[Console]     Checking field: MANAGEREMAILADDRESS (Type: TextField, Disabled: False)
+[Console]     Checking field: ITEMIZEDEXPENSES (Type: Label, Disabled: False)
+[Console]     Checking field: TABLECTRL243 (Type: RepeatingTable, Disabled: False)
+[Console]     Checking field: DATE (Type: Label, Disabled: False)
+[Console]     Checking field: DESCRIPTION (Type: Label, Disabled: False)
+[Console]     Checking field: CATEGORY (Type: Label, Disabled: False)
+[Console]     Checking field: COST (Type: Label, Disabled: False)
+[Console]     Checking field: DATE (Type: DatePicker, Disabled: False)
+[Console]     Checking field: DESCRIPTION (Type: TextField, Disabled: False)
+[Console]     Checking field: ITEMIZEDEXPENSECATEGORY (Type: DropDown, Disabled: False)
+[Console]     Checking field: AMOUNT (Type: TextField, Disabled: False)
+[Console]     Checking field: ITEMIZEDEXPENSEDETAILS (Type: Button, Disabled: False)
+[Console]     Checking field: SUBTOTAL (Type: Label, Disabled: False)
+[Console]     Checking field: SUBTOTAL (Type: TextField, Disabled: False)
+[Console]       Found 63 controls in first view
+[Console]       Found source field: AMOUNT (ID: CTRL247) in section: Table CTRL243
+[Console]     Identified calculation field: SUBTOTAL (ID: CTRL249) with 1 source fields
+[Console]     Checking field: LESSCASHADVANCE (Type: Label, Disabled: False)
+[Console]     Checking field: CASHADVANCE (Type: TextField, Disabled: False)
+[Console]     Checking field: TOTALEXPENSES (Type: Label, Disabled: False)
+[Console]     Checking field: TOTAL (Type: TextField, Disabled: False)
+[Console]       Found 63 controls in first view
+[Console]       Found source field: AMOUNT (ID: CTRL247) in section: Table CTRL243
+[Console]     Identified calculation field: TOTAL (ID: CTRL251) with 1 source fields
+[Console]     Checking field: ITEMDETAILS (Type: Label, Disabled: False)
+[Console]     Checking field: CTRL276 (Type: Unknown, Disabled: False)
+[Console]     Checking field: CTRL113_6 (Type: Button, Disabled: False)
+[Console]     Checking field: ENTERTAINMENTDETAILS (Type: Label, Disabled: False)
+[Console]     Checking field: PURPOSE (Type: Label, Disabled: False)
+[Console]     Checking field: ENTERTAINMENTPURPOSE (Type: TextField, Disabled: False)
+[Console]     Checking field: PLACE (Type: Label, Disabled: False)
+[Console]     Checking field: ENTERTAINMENTPLACE (Type: TextField, Disabled: False)
+[Console]     Checking field: TABLECTRL338 (Type: RepeatingTable, Disabled: False)
+[Console]     Checking field: PERSONNAME (Type: Label, Disabled: False)
+[Console]     Checking field: PERSONTITLE (Type: Label, Disabled: False)
+[Console]     Checking field: FIRM (Type: Label, Disabled: False)
+[Console]     Checking field: PERSONNAME (Type: TextField, Disabled: False)
+[Console]     Checking field: PERSONTITLE (Type: TextField, Disabled: False)
+[Console]     Checking field: FIRM (Type: TextField, Disabled: False)
+[Console]     Checking field: GIFTRECIPIENTS (Type: Label, Disabled: False)
+[Console]     Checking field: TABLECTRL329 (Type: RepeatingTable, Disabled: False)
+[Console]     Checking field: RECIPIENTNAME (Type: Label, Disabled: False)
+[Console]     Checking field: GIFTAMOUNT (Type: Label, Disabled: False)
+[Console]     Checking field: RECIPIENTNAME (Type: TextField, Disabled: False)
+[Console]     Checking field: GIFTAMOUNT (Type: TextField, Disabled: False)
+[Console]     Found 2 calculation fields
+[Console]     Found 1 unique source field groups from 2 calculation fields
+[Console]     Generating calculation expression for: SUBTOTAL
+[Console]           Searching for ALL instances of field 'AMOUNT' in form XML...
+[Console]           Examining 1 parameter elements for 'AMOUNT'...
+[Console]           Found 0 matching controls via parameters
+[Console]         WARNING: Could not find any controls for field AMOUNT in form XML
+[Console]       Successfully created expression for SUBTOTAL
+[Console]     Generated expression for source fields: AMOUNT
+[Console]     DEBUG: Could not save form XML: Could not find a part of the path 'C:\Users\k2admin\source\repos\homepresso\windows-nintexformsgen\FormGenerator\bin\Debug\net48\SmartObjectAuthoringSample\bin\Debug\form_with_expressions_debug.xml'.
+[Console]     Successfully generated calculation expressions (expressions only)
+[Console]     ========== CALCULATION RULES GENERATION END ==========
+[Console]     Form restructuring completed successfully
+[Console]     [DEPLOY] About to call DeployForms:
+[Console]     [DEPLOY]   Form name: Expense_Report_view1_Form
+[Console]     [DEPLOY]   Category path: Forms\Generated\Expense_Report\Forms
+[Console]     [DEPLOY]   Form XML length: 84478 chars
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                           END OF LOG
+═══════════════════════════════════════════════════════════════════════════════

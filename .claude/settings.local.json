@@ -24,7 +24,10 @@
       "Bash(timeout:*)",
       "Bash(Select-String \"Build succeeded|Build FAILED|error\" -Context 0,2)",
       "Bash(cat:*)",
-      "Bash(Select-String \"error\" -Context 0,1)"
+      "Bash(Select-String \"error\" -Context 0,1)",
+      "Bash(ls:*)",
+      "WebSearch",
+      "Bash(git ls-tree:*)"
     ],
     "deny": [],
     "ask": []

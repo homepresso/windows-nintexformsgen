@@ -913,14 +913,18 @@ namespace K2SmartObjectGenerator
 
                 areasContainer.AppendChild(result.Area);
 
-                // Update the view that should be hidden (returned by CreateRepeatingSectionArea)
-                UpdateItemViewVisibility(doc, result.ItemViewName);
-
-                // For nested sections, also hide the list view
-                if (!string.IsNullOrEmpty(result.ListViewName))
+                // Always hide the list view and show the item view
+                if (viewPairs.ContainsKey(sectionName))
                 {
-                    UpdateItemViewVisibility(doc, result.ListViewName);
-                    Console.WriteLine($"        Set both nested section views to invisible: {result.ItemViewName} and {result.ListViewName}");
+                    var pair = viewPairs[sectionName];
+
+                    // Hide the list view
+                    UpdateItemViewVisibility(doc, pair.ListViewName);
+                    Console.WriteLine($"        Set list view '{pair.ListViewName}' to hidden");
+
+                    // Make the item view visible
+                    SetAreaItemVisible(doc, pair.ItemViewName);
+                    Console.WriteLine($"        Set item view '{pair.ItemViewName}' to visible");
                 }
 
                 Console.WriteLine($"      Added repeating section: {sectionName}");
@@ -1243,6 +1247,79 @@ namespace K2SmartObjectGenerator
 
                             propertiesElement.AppendChild(visibilityProp);
                             Console.WriteLine($"        Added IsVisible=false property to AreaItem control: {itemViewName}");
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        private void SetAreaItemVisible(XmlDocument doc, string viewName)
+        {
+            XmlNodeList allControls = doc.GetElementsByTagName("Control");
+
+            foreach (XmlElement control in allControls)
+            {
+                if (control.GetAttribute("Type") == "AreaItem")
+                {
+                    XmlNodeList nameNodes = control.GetElementsByTagName("Name");
+                    if (nameNodes.Count > 0 && nameNodes[0].InnerText == viewName)
+                    {
+                        Console.WriteLine($"      Found AreaItem control for: {viewName}, setting IsVisible=true");
+
+                        XmlNodeList propsNodes = control.GetElementsByTagName("Properties");
+                        XmlElement propertiesElement = null;
+
+                        if (propsNodes.Count == 0)
+                        {
+                            propertiesElement = doc.CreateElement("Properties");
+                            XmlNodeList styleNodes = control.GetElementsByTagName("Styles");
+                            if (styleNodes.Count > 0)
+                                control.InsertBefore(propertiesElement, styleNodes[0]);
+                            else
+                                control.AppendChild(propertiesElement);
+                        }
+                        else
+                        {
+                            propertiesElement = (XmlElement)propsNodes[0];
+                        }
+
+                        bool hasVisibilityProperty = false;
+                        XmlNodeList properties = propertiesElement.GetElementsByTagName("Property");
+
+                        foreach (XmlElement prop in properties)
+                        {
+                            XmlNodeList propNameNodes = prop.GetElementsByTagName("Name");
+                            if (propNameNodes.Count > 0 && propNameNodes[0].InnerText == "IsVisible")
+                            {
+                                hasVisibilityProperty = true;
+                                SetPropertyValue(doc, prop, "true");
+                                break;
+                            }
+                        }
+
+                        if (!hasVisibilityProperty)
+                        {
+                            XmlElement visibilityProp = doc.CreateElement("Property");
+
+                            XmlElement propName = doc.CreateElement("Name");
+                            propName.InnerText = "IsVisible";
+                            visibilityProp.AppendChild(propName);
+
+                            XmlElement propValue = doc.CreateElement("Value");
+                            propValue.InnerText = "true";
+                            visibilityProp.AppendChild(propValue);
+
+                            XmlElement propDisplayValue = doc.CreateElement("DisplayValue");
+                            propDisplayValue.InnerText = "true";
+                            visibilityProp.AppendChild(propDisplayValue);
+
+                            XmlElement propNameValue = doc.CreateElement("NameValue");
+                            propNameValue.InnerText = "true";
+                            visibilityProp.AppendChild(propNameValue);
+
+                            propertiesElement.AppendChild(visibilityProp);
+                            Console.WriteLine($"        Added IsVisible=true to AreaItem: {viewName}");
                         }
                         break;
                     }

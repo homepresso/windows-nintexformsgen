@@ -83,6 +83,12 @@
     <Page Remove="NAC Example\**" />
 
     <!-- K2 Writers are now included for .NET Framework 4.8 -->
+
+    <!-- Exclude reference folder (documentation/example code, not for compilation) -->
+    <Compile Remove="reference\**" />
+    <EmbeddedResource Remove="reference\**" />
+    <None Remove="reference\**" />
+    <Page Remove="reference\**" />
   </ItemGroup>
 
 </Project>

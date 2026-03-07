@@ -346,7 +346,17 @@ namespace FormGenerator.Services
                     _logger.Verbose("Initializing ViewGenerator with field mappings...");
                     _logger.Debug($"Field mappings count: {smoGenerator.FieldMappings.Count}");
 
-                    var viewGenerator = new ViewGenerator(_connectionManager, smoGenerator.FieldMappings, smoGenerator, _config);
+                    // Extract InfoPathFormDefinition for rule generation
+                    InfoPathFormDefinition infoPathFormDef = null;
+                    if (request.FormDefinitions != null && request.FormDefinitions.Count > 0)
+                    {
+                        var firstDef = request.FormDefinitions.Values.FirstOrDefault();
+                        infoPathFormDef = firstDef?.FormDefinition as InfoPathFormDefinition;
+                        if (infoPathFormDef != null)
+                            _logger.Info($"InfoPath form definition available for rule generation ({infoPathFormDef.FormName})");
+                    }
+
+                    var viewGenerator = new ViewGenerator(_connectionManager, smoGenerator.FieldMappings, smoGenerator, _config, infoPathFormDef);
                     _logger.Verbose("Calling GenerateViewsFromJson...");
                     viewGenerator.GenerateViewsFromJson(jsonContent);
 

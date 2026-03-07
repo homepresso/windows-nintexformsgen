@@ -35,6 +35,7 @@ namespace FormGenerator.Views
         // Partial class handlers - initialized before InitializeComponent
         private MainWindowGenerationHandlers _generationHandlers;
         private MainWindowAnalysisHandlers _analysisHandlers;
+        private MainWindowRulesMappingHandlers _rulesMappingHandlers;
 
         public MainWindow()
         {
@@ -46,6 +47,7 @@ namespace FormGenerator.Views
             // Initialize handlers BEFORE InitializeComponent (important!)
             _generationHandlers = new MainWindowGenerationHandlers(this);
             _analysisHandlers = new MainWindowAnalysisHandlers(this);
+            _rulesMappingHandlers = new MainWindowRulesMappingHandlers(this);
 
             // Now initialize the UI components
             InitializeComponent();
@@ -637,6 +639,9 @@ namespace FormGenerator.Views
                     await _analysisHandlers.DisplayCombinedAnalysisResults(_allAnalysisResults);
                     await _generationHandlers.GenerateCombinedSqlPreview(_allAnalysisResults);
 
+                    // Populate rules mapping tab
+                    _rulesMappingHandlers.PopulateRulesMappings(_allFormDefinitions);
+
                     UpdateStatus($"Analysis completed for {_allAnalysisResults.Count} form(s)", MessageSeverity.Info);
                     ExportButton.IsEnabled = true;
 
@@ -769,6 +774,12 @@ namespace FormGenerator.Views
         {
             if (_generationHandlers != null)
                 await _generationHandlers.ExportK2Package();
+        }
+
+        private async void DownloadK2Log_Click(object sender, RoutedEventArgs e)
+        {
+            if (_generationHandlers != null)
+                await _generationHandlers.DownloadK2ConversionLog();
         }
 
         // Reusable Views (K2 Tab)
@@ -922,6 +933,56 @@ namespace FormGenerator.Views
                                   MessageBoxImage.Error);
                 }
             }
+        }
+
+        #endregion
+
+        #region Rules Mapping Handlers
+
+        private void RefreshRulesMapping_Click(object sender, RoutedEventArgs e)
+        {
+            _rulesMappingHandlers?.RefreshRulesMapping();
+        }
+
+        private void ExportRulesMapping_Click(object sender, RoutedEventArgs e)
+        {
+            _rulesMappingHandlers?.ExportRulesMappings();
+        }
+
+        private void RuleFilter_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            _rulesMappingHandlers?.OnRuleFilterChanged(RuleFilterTextBox.Text);
+        }
+
+        private void RuleStatusFilter_Changed(object sender, SelectionChangedEventArgs e)
+        {
+            _rulesMappingHandlers?.OnStatusFilterChanged(RuleStatusFilterCombo.SelectedIndex);
+        }
+
+        private void RulesMappingList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var selectedItem = RulesMappingListBox.SelectedItem as RuleMappingItem;
+            _rulesMappingHandlers?.OnRuleSelected(selectedItem);
+        }
+
+        private void K2XmlOutput_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            _rulesMappingHandlers?.OnK2XmlChanged(K2XmlOutput.Text);
+        }
+
+        private void MappingNotes_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            _rulesMappingHandlers?.OnMappingNotesChanged(MappingNotesText.Text);
+        }
+
+        private void CopyK2Xml_Click(object sender, RoutedEventArgs e)
+        {
+            _rulesMappingHandlers?.CopyK2Xml();
+        }
+
+        private void SaveRuleMapping_Click(object sender, RoutedEventArgs e)
+        {
+            _rulesMappingHandlers?.SaveRuleMapping();
         }
 
         #endregion

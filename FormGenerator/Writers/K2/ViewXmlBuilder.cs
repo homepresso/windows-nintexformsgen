@@ -7,6 +7,9 @@ using SourceCode.SmartObjects.Authoring;
 using K2SmartObjectGenerator.Models;
 using K2SmartObjectGenerator.Utilities;
 using K2SmartObjectGenerator.Config;
+using FormGenerator.Analyzers.Infopath;
+using FormGenerator.Core.Models;
+using FormGenerator.Services;
 using static K2SmartObjectGenerator.ViewGenerator;
 
 namespace K2SmartObjectGenerator
@@ -18,6 +21,7 @@ namespace K2SmartObjectGenerator
         private readonly SmartObjectGenerator _smoGenerator;
         private readonly ViewRulesBuilder _rulesBuilder;
         private readonly GeneratorConfiguration _config;
+        private readonly InfoPathFormDefinition _infoPathFormDef;
         private Dictionary<string, string> _jsonToK2ControlIdMap;
         private HashSet<string> _usedControlNames;
         private int _controlCounter;
@@ -27,12 +31,14 @@ namespace K2SmartObjectGenerator
         public ViewXmlBuilder(ServerConnectionManager connectionManager,
                              Dictionary<string, Dictionary<string, FieldInfo>> smoFieldMappings,
                              SmartObjectGenerator smoGenerator,
-                             GeneratorConfiguration config = null)
+                             GeneratorConfiguration config = null,
+                             InfoPathFormDefinition infoPathFormDef = null)
         {
             _connectionManager = connectionManager;
             _smoFieldMappings = smoFieldMappings;
             _smoGenerator = smoGenerator;
             _config = config ?? GeneratorConfiguration.CreateDefault();
+            _infoPathFormDef = infoPathFormDef;
             _rulesBuilder = new ViewRulesBuilder();
             _jsonToK2ControlIdMap = new Dictionary<string, string>();
             _usedControlNames = new HashSet<string>();
@@ -121,6 +127,10 @@ namespace K2SmartObjectGenerator
             XmlElement events = _rulesBuilder.CreateEventsWithRules(doc, viewGuid, viewName, controlIdMap,
                 controlToFieldMap, fieldMap, lookupSmartObjects, dynamicSections, conditionalVisibility,
                 finalControls, _jsonToK2ControlIdMap);
+
+            // Add InfoPath rules via modular builders (safe - wrapped in try/catch)
+            AddInfoPathRulesToEvents(doc, events, viewGuid, viewName, controlIdMap, controlToFieldMap);
+
             view.AppendChild(events);
 
             // Add empty but required sections
@@ -136,6 +146,43 @@ namespace K2SmartObjectGenerator
             XmlHelper.AddElement(doc, view, "DisplayName", displayName);
 
             return doc;
+        }
+
+        /// <summary>
+        /// Adds InfoPath rules to the events section using modular builders.
+        /// Wrapped in try/catch so it cannot break form generation.
+        /// </summary>
+        private void AddInfoPathRulesToEvents(XmlDocument doc, XmlElement events,
+            string viewGuid, string viewName,
+            Dictionary<string, string> controlIdMap,
+            Dictionary<string, string> controlToFieldMap)
+        {
+            if (_infoPathFormDef == null) return;
+
+            try
+            {
+                var context = new K2RuleContext
+                {
+                    ViewGuid = viewGuid,
+                    ViewName = viewName,
+                    ControlIdMap = controlIdMap ?? new Dictionary<string, string>(),
+                    ControlToFieldMap = controlToFieldMap ?? new Dictionary<string, string>(),
+                    JsonToK2ControlIdMap = _jsonToK2ControlIdMap ?? new Dictionary<string, string>()
+                };
+
+                // Initialize the control resolver with all available maps
+                context.ControlResolver = new K2ControlResolver(
+                    context.ControlIdMap,
+                    context.ControlToFieldMap,
+                    context.JsonToK2ControlIdMap);
+
+                var orchestrator = new K2InfoPathRuleOrchestrator();
+                orchestrator.AddInfoPathRules(doc, events, _infoPathFormDef, context);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"WARNING: InfoPath rule generation failed (form generation continues): {ex.Message}");
+            }
         }
 
         private JArray RemoveTitleLabel(JArray controls)
@@ -1129,6 +1176,10 @@ namespace K2SmartObjectGenerator
             XmlElement events = _rulesBuilder.CreateEventsWithRules(doc, viewGuid, viewName, controlIdMap,
                 controlToFieldMap, fieldMap, lookupSmartObjects, dynamicSections, conditionalVisibility,
                 finalControls, _jsonToK2ControlIdMap);
+
+            // Add InfoPath rules via modular builders (safe - wrapped in try/catch)
+            AddInfoPathRulesToEvents(doc, events, viewGuid, viewName, controlIdMap, controlToFieldMap);
+
             view.AppendChild(events);
 
             // Add empty but required sections
@@ -1532,17 +1583,8 @@ namespace K2SmartObjectGenerator
             AddControlTypeSpecificProperties(doc, properties, k2ControlType, displayName, label,
                 controlDef, controlToFieldMap, controlGuid, fieldMap);
 
-            // Check if this control should be initially hidden based on conditional visibility rules
-            bool shouldBeHidden = ShouldControlBeInitiallyHidden(jsonCtrlId);
-            if (shouldBeHidden)
-            {
-                XmlElement isVisibleProp = doc.CreateElement("Property");
-                XmlHelper.AddElement(doc, isVisibleProp, "Name", "IsVisible");
-                XmlHelper.AddElement(doc, isVisibleProp, "DisplayValue", "false");
-                XmlHelper.AddElement(doc, isVisibleProp, "Value", "false");
-                properties.AppendChild(isVisibleProp);
-                Console.WriteLine($"        [VISIBILITY] Added IsVisible=false to control {jsonCtrlId}");
-            }
+            // NOTE: Conditional visibility (ShouldControlBeInitiallyHidden) disabled -
+            // let rules handle visibility toggling at runtime rather than hiding controls at generation time
 
             return properties;
         }
@@ -1691,17 +1733,8 @@ namespace K2SmartObjectGenerator
                 Console.WriteLine($"        WARNING: No valid values found for dropdown {originalName}");
             }
 
-            // Check if this control should be initially hidden based on conditional visibility rules
-            bool shouldBeHidden = ShouldControlBeInitiallyHidden(jsonCtrlId);
-            if (shouldBeHidden)
-            {
-                XmlElement isVisibleProp = doc.CreateElement("Property");
-                XmlHelper.AddElement(doc, isVisibleProp, "Name", "IsVisible");
-                XmlHelper.AddElement(doc, isVisibleProp, "DisplayValue", "false");
-                XmlHelper.AddElement(doc, isVisibleProp, "Value", "false");
-                properties.AppendChild(isVisibleProp);
-                Console.WriteLine($"        [VISIBILITY] Added IsVisible=false to dropdown control {jsonCtrlId}");
-            }
+            // NOTE: Conditional visibility (ShouldControlBeInitiallyHidden) disabled -
+            // let rules handle visibility toggling at runtime rather than hiding controls at generation time
 
             return properties;
         }

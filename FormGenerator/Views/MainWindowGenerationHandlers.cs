@@ -1203,6 +1203,209 @@ namespace FormGenerator.Views
             }
         }
 
+        public async Task DownloadK2ConversionLog()
+        {
+            try
+            {
+                var dialog = new SaveFileDialog
+                {
+                    Title = "Save K2 Conversion Log",
+                    Filter = "Text Files (*.txt)|*.txt|Log Files (*.log)|*.log|All Files (*.*)|*.*",
+                    FileName = $"K2_Conversion_Log_{DateTime.Now:yyyyMMdd_HHmmss}"
+                };
+
+                if (dialog.ShowDialog() == true)
+                {
+                    var logContent = new StringBuilder();
+
+                    // Header
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine("                    K2 SMARTFORMS CONVERSION LOG");
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine();
+                    logContent.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    logContent.AppendLine($"K2 Server: {_mainWindow.K2ServerTextBox.Text}");
+                    logContent.AppendLine($"Target Folder: {_mainWindow.K2FolderTextBox.Text}");
+                    logContent.AppendLine();
+
+                    // Forms processed
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine("                         FORMS PROCESSED");
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine();
+
+                    if (_mainWindow._allAnalysisResults != null && _mainWindow._allAnalysisResults.Any())
+                    {
+                        foreach (var form in _mainWindow._allAnalysisResults)
+                        {
+                            var formDef = form.Value.FormDefinition as InfoPathFormDefinition;
+                            logContent.AppendLine($"Form: {Path.GetFileNameWithoutExtension(form.Key)}");
+
+                            if (formDef != null)
+                            {
+                                var viewCount = formDef.Views?.Count ?? 0;
+                                var totalControls = formDef.Views?.Sum(v => v.Controls?.Count ?? 0) ?? 0;
+                                var ruleCount = formDef.Rules?.Count ?? 0;
+                                var validationCount = formDef.Validations?.Count ?? 0;
+                                var conditionalCount = formDef.ConditionalRules?.Count ?? 0;
+
+                                logContent.AppendLine($"  Views: {viewCount}");
+                                logContent.AppendLine($"  Controls: {totalControls}");
+                                logContent.AppendLine($"  Rules: {ruleCount}");
+                                logContent.AppendLine($"  Validations: {validationCount}");
+                                logContent.AppendLine($"  Conditional Rules: {conditionalCount}");
+                            }
+                            logContent.AppendLine();
+                        }
+                    }
+                    else
+                    {
+                        logContent.AppendLine("No forms have been analyzed yet.");
+                        logContent.AppendLine();
+                    }
+
+                    // Items requiring manual attention
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine("              ITEMS REQUIRING MANUAL ATTENTION");
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine();
+
+                    var manualItems = new List<string>();
+
+                    if (_mainWindow._allFormDefinitions != null)
+                    {
+                        foreach (var kvp in _mainWindow._allFormDefinitions)
+                        {
+                            var formDef = kvp.Value;
+                            var formName = kvp.Key;
+
+                            // Check for complex rules
+                            if (formDef.Rules != null)
+                            {
+                                foreach (var rule in formDef.Rules)
+                                {
+                                    if (rule == null) continue;
+
+                                    // Check for complex conditions
+                                    if (!string.IsNullOrEmpty(rule.Condition))
+                                    {
+                                        if (rule.Condition.Contains("xdDate:") ||
+                                            rule.Condition.Contains("xdMath:") ||
+                                            rule.Condition.Contains("xdUser:") ||
+                                            rule.Condition.Contains("translate(") ||
+                                            rule.Condition.Contains("substring-before(") ||
+                                            rule.Condition.Contains("substring-after("))
+                                        {
+                                            manualItems.Add($"[{formName}] Rule '{rule.Name}': Contains complex XPath function that may need manual conversion");
+                                        }
+                                    }
+
+                                    // Check for unsupported action types
+                                    if (rule.Actions != null)
+                                    {
+                                        foreach (var action in rule.Actions)
+                                        {
+                                            if (action.Type?.ToLower() == "query" || action.Type?.ToLower() == "submit")
+                                            {
+                                                manualItems.Add($"[{formName}] Rule '{rule.Name}': Contains '{action.Type}' action - verify data connection in K2");
+                                            }
+                                            if (action.Type?.ToLower() == "sendemail")
+                                            {
+                                                manualItems.Add($"[{formName}] Rule '{rule.Name}': Contains email action - configure K2 email settings");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Check for custom validations
+                            if (formDef.Validations != null)
+                            {
+                                foreach (var validation in formDef.Validations)
+                                {
+                                    if (validation?.ValidationType?.ToLower() == "custom")
+                                    {
+                                        manualItems.Add($"[{formName}] Custom validation on '{validation.ControlName}': Requires manual K2 implementation");
+                                    }
+                                }
+                            }
+
+                            // Check for digital signatures
+                            if (formDef.Views != null)
+                            {
+                                foreach (var view in formDef.Views)
+                                {
+                                    if (view.Controls != null)
+                                    {
+                                        foreach (var control in view.Controls)
+                                        {
+                                            if (control.Type?.ToLower() == "signature" || control.Type?.ToLower() == "digitalsignature")
+                                            {
+                                                manualItems.Add($"[{formName}] Digital signature control '{control.Name}': K2 signature implementation differs");
+                                            }
+                                            if (control.Type?.ToLower() == "fileattachment" || control.Type?.ToLower() == "attachment")
+                                            {
+                                                manualItems.Add($"[{formName}] File attachment '{control.Name}': Configure K2 attachment handling");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (manualItems.Any())
+                    {
+                        foreach (var item in manualItems)
+                        {
+                            logContent.AppendLine($"  ⚠ {item}");
+                        }
+                    }
+                    else
+                    {
+                        logContent.AppendLine("  ✓ No items flagged for manual attention.");
+                    }
+                    logContent.AppendLine();
+
+                    // Generation log
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine("                         GENERATION LOG");
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine();
+                    logContent.AppendLine(_mainWindow.K2GenerationLog.Text);
+                    logContent.AppendLine();
+
+                    // Footer
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+                    logContent.AppendLine("                           END OF LOG");
+                    logContent.AppendLine("═══════════════════════════════════════════════════════════════════════════════");
+
+                    await NetFrameworkCompatibility.WriteAllTextAsync(dialog.FileName, logContent.ToString());
+
+                    _mainWindow.K2GenerationLog.Text += $"\n📋 Conversion log saved to: {dialog.FileName}\n";
+                    _mainWindow.UpdateStatus($"Conversion log saved", MessageSeverity.Info);
+
+                    var manualCount = manualItems.Count;
+                    MessageBox.Show($"Conversion log saved successfully!\n\n" +
+                                   $"Location: {dialog.FileName}\n\n" +
+                                   $"Items requiring manual attention: {manualCount}",
+                                   "Log Saved",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                _mainWindow.K2GenerationLog.Text += $"\n❌ Failed to save log: {ex.Message}\n";
+                _mainWindow.UpdateStatus($"Failed to save conversion log: {ex.Message}", MessageSeverity.Error);
+
+                MessageBox.Show($"Failed to save conversion log:\n{ex.Message}",
+                               "Save Error",
+                               MessageBoxButton.OK,
+                               MessageBoxImage.Error);
+            }
+        }
+
         #endregion
         /// <summary>
         /// Formats a form name for display by replacing underscores with spaces

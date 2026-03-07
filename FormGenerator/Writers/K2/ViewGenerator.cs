@@ -5,6 +5,7 @@ using Newtonsoft.Json.Linq;
 using SourceCode.Forms.Management;
 using SourceCode.Forms.Utilities;
 using SourceCode.SmartObjects.Authoring;
+using FormGenerator.Analyzers.Infopath;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,6 +21,7 @@ namespace K2SmartObjectGenerator
         private readonly Dictionary<string, Dictionary<string, FieldInfo>> _smoFieldMappings;
         private readonly SmartObjectGenerator _smoGenerator;
         private readonly GeneratorConfiguration _config;
+        private readonly InfoPathFormDefinition _infoPathFormDef;
         public Dictionary<string, Dictionary<string, ControlMapping>> ViewControlMappings { get; private set; }
 
 
@@ -28,13 +30,15 @@ namespace K2SmartObjectGenerator
         public ViewGenerator(ServerConnectionManager connectionManager,
                            Dictionary<string, Dictionary<string, FieldInfo>> smoFieldMappings,
                            SmartObjectGenerator smoGenerator,
-                           GeneratorConfiguration config = null)
+                           GeneratorConfiguration config = null,
+                           InfoPathFormDefinition infoPathFormDef = null)
         {
             _connectionManager = connectionManager;
             _smoFieldMappings = smoFieldMappings;
             _smoGenerator = smoGenerator;
             _config = config ?? GeneratorConfiguration.CreateDefault();
-            _xmlBuilder = new ViewXmlBuilder(connectionManager, smoFieldMappings, smoGenerator, _config);
+            _infoPathFormDef = infoPathFormDef;
+            _xmlBuilder = new ViewXmlBuilder(connectionManager, smoFieldMappings, smoGenerator, _config, infoPathFormDef);
             _rulesBuilder = new ViewRulesBuilder();
             ViewTitles = new Dictionary<string, string>();
             ViewControlMappings = new Dictionary<string, Dictionary<string, ControlMapping>>();
