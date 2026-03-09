@@ -545,6 +545,14 @@ namespace K2SmartObjectGenerator.Utilities
         }
 
         /// <summary>
+        /// Get all registered form names
+        /// </summary>
+        public static List<string> GetAllFormNames()
+        {
+            return _forms.Keys.ToList();
+        }
+
+        /// <summary>
         /// Get all lookup field mappings
         /// </summary>
         public static Dictionary<string, string> GetAllLookupMappings()

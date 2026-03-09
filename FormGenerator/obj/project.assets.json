@@ -2922,7 +2922,7 @@
     "version": "1.0.0",
     "restore": {
       "projectUniqueName": "C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
-      "projectName": "FormGenerator",
+      "projectName": "NintexFormsGenerator",
       "projectPath": "C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
       "packagesPath": "C:\\Users\\k2admin\\.nuget\\packages\\",
       "outputPath": "C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\obj\\",

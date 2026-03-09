@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -585,7 +586,6 @@ namespace FormGenerator.Views
                 return;
 
             AnalyzeButton.IsEnabled = false;
-            ExportButton.IsEnabled = false;
             ProgressBar.Visibility = Visibility.Visible;
 
             // Clear previous results
@@ -643,7 +643,6 @@ namespace FormGenerator.Views
                     _rulesMappingHandlers.PopulateRulesMappings(_allFormDefinitions);
 
                     UpdateStatus($"Analysis completed for {_allAnalysisResults.Count} form(s)", MessageSeverity.Info);
-                    ExportButton.IsEnabled = true;
 
                     // Enable generation tabs after successful analysis
                     EnableGenerationTabs();
@@ -1032,7 +1031,7 @@ namespace FormGenerator.Views
 
                 // Also enable the generation buttons within each tab
                 GenerateSqlButton.IsEnabled = true;
-                GenerateNintexButton.IsEnabled = true;
+                DownloadNintexButton.IsEnabled = true;
                 GenerateK2Button.IsEnabled = true;
 
                 // Show a subtle notification that new tabs are available
@@ -1338,6 +1337,26 @@ namespace FormGenerator.Views
             catch (Exception ex)
             {
                 UpdateStatus($"Error in selection: {ex.Message}", MessageSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Opens the andyhayes.ai support website in the default browser
+        /// </summary>
+        private void OpenSupportWebsite_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://andyhayes.ai",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Could not open browser: {ex.Message}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         #endregion

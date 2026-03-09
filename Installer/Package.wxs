@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+  WiX v4 installer definition for Nintex Forms Generator
+  Produces a standard MSI with:
+    - Program Files installation
+    - Start Menu shortcut
+    - Desktop shortcut (optional via feature)
+    - Add/Remove Programs entry with icon
+    - Clean uninstall
+-->
+
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!--
+    UpgradeCode is PERMANENT. Never change this GUID once released.
+    It allows future versions to upgrade in-place.
+  -->
+  <Package
+    Name="Nintex Forms Generator"
+    Manufacturer="andyhayes.ai"
+    Version="!(bind.FileVersion.NintexFormsGenerator.exe)"
+    UpgradeCode="E4A3B8C1-5D72-4F9A-B6E1-8C3D5A7F2E90"
+    Scope="perMachine"
+    Language="1033"
+    InstallerVersion="500">
+
+    <!-- Allow upgrades from older versions, prevent downgrades -->
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+      Schedule="afterInstallInitialize" />
+
+    <!-- Embed all files in the MSI (single file distribution) -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Application icon shown in Add/Remove Programs -->
+    <Icon Id="AppIcon.ico" SourceFile="$(var.PublishDir)\Resources\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://andyhayes.ai" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://andyhayes.ai" />
+
+    <!-- ============================================================ -->
+    <!-- DIRECTORY STRUCTURE                                          -->
+    <!-- ============================================================ -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="COMPANYDIR" Name="andyhayes.ai">
+        <Directory Id="INSTALLFOLDER" Name="Forms Generator" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Nintex Forms Generator" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!-- ============================================================ -->
+    <!-- COMPONENTS                                                   -->
+    <!-- ============================================================ -->
+
+    <!-- Main application files - harvested from publish output -->
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+
+      <!-- Primary EXE -->
+      <Component Id="MainExecutable" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+        <File Id="NintexFormsGenerator.exe"
+              Source="$(var.PublishDir)\NintexFormsGenerator.exe"
+              KeyPath="yes" />
+      </Component>
+
+      <!-- Config file if present -->
+      <Component Id="AppConfig" Guid="B2C3D4E5-F6A7-8901-BCDE-F12345678901" NeverOverwrite="yes">
+        <File Id="NintexFormsGenerator.exe.config"
+              Source="$(var.PublishDir)\NintexFormsGenerator.exe.config"
+              KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+
+    <!-- Dynamically harvested DLLs and supporting files -->
+    <ComponentGroup Id="HarvestedComponents" Directory="INSTALLFOLDER" />
+
+    <!-- Start Menu shortcut -->
+    <ComponentGroup Id="ShortcutComponents" Directory="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcut" Guid="C3D4E5F6-A7B8-9012-CDEF-123456789012">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="Nintex Forms Generator"
+                  Description="Convert InfoPath forms to K2 SmartForms and NAC"
+                  Target="[INSTALLFOLDER]NintexFormsGenerator.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RemoveFolder Id="CleanUpStartMenu" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\andyhayes.ai\FormsGenerator"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Desktop shortcut -->
+    <ComponentGroup Id="DesktopShortcutComponents" Directory="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="D4E5F6A7-B8C9-0123-DEFA-234567890123">
+        <Shortcut Id="DesktopShortcut"
+                  Name="Nintex Forms Generator"
+                  Description="Convert InfoPath forms to K2 SmartForms and NAC"
+                  Target="[INSTALLFOLDER]NintexFormsGenerator.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\andyhayes.ai\FormsGenerator"
+                       Name="DesktopShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- ============================================================ -->
+    <!-- FEATURES                                                     -->
+    <!-- ============================================================ -->
+    <Feature Id="ProductFeature" Title="Nintex Forms Generator" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentGroupRef Id="HarvestedComponents" />
+      <ComponentGroupRef Id="ShortcutComponents" />
+    </Feature>
+
+    <Feature Id="DesktopShortcutFeature" Title="Desktop Shortcut" Level="1">
+      <ComponentGroupRef Id="DesktopShortcutComponents" />
+    </Feature>
+
+  </Package>
+</Wix>

@@ -736,77 +736,11 @@ namespace FormGenerator.Views
 
         #region Nintex Generation
 
+        // NAC/Nintex generation - Generate button removed for v1, download exports JSON directly
         public async Task GenerateNintex()
         {
-            try
-            {
-                _mainWindow.GenerateNintexButton.IsEnabled = false;
-                _mainWindow.UpdateStatus("Generating Nintex forms...");
-                _mainWindow.NintexGenerationLog.Text = "Starting Nintex form generation...\n\n";
-
-                // Check analysis results
-                if (_mainWindow._allAnalysisResults == null || !_mainWindow._allAnalysisResults.Any())
-                {
-                    MessageBox.Show("Please analyze forms first before generating Nintex forms.",
-                                   "No Analysis Results",
-                                   MessageBoxButton.OK,
-                                   MessageBoxImage.Warning);
-                    return;
-                }
-
-                var platform = (_mainWindow.NintexPlatformCombo.SelectedItem as ComboBoxItem)?.Content.ToString();
-                _mainWindow.NintexGenerationLog.Text += $"Target Platform: {platform}\n";
-                _mainWindow.NintexGenerationLog.Text += $"Form Name: {_mainWindow.NintexFormNameTextBox.Text}\n";
-                _mainWindow.NintexGenerationLog.Text += $"Description: {_mainWindow.NintexDescriptionTextBox.Text}\n\n";
-
-                // Process options
-                _mainWindow.NintexGenerationLog.Text += "Options:\n";
-                if (_mainWindow.IncludeValidationRulesCheckBox.IsChecked == true)
-                    _mainWindow.NintexGenerationLog.Text += "  ✓ Include Validation Rules\n";
-                if (_mainWindow.IncludeConditionalLogicCheckBox.IsChecked == true)
-                    _mainWindow.NintexGenerationLog.Text += "  ✓ Include Conditional Logic\n";
-                if (_mainWindow.IncludeCalculationsCheckBox.IsChecked == true)
-                    _mainWindow.NintexGenerationLog.Text += "  ✓ Include Calculations\n";
-                if (_mainWindow.GenerateWorkflowCheckBox.IsChecked == true)
-                    _mainWindow.NintexGenerationLog.Text += "  ✓ Generate Associated Workflow\n";
-
-                _mainWindow.NintexGenerationLog.Text += "\nLayout: " +
-                    (_mainWindow.ResponsiveLayoutRadio.IsChecked == true ? "Responsive" : "Fixed") + "\n";
-
-                _mainWindow.NintexGenerationLog.Text += "Export Format: " +
-                    (_mainWindow.NintexJsonRadio.IsChecked == true ? "JSON" : "XML") + "\n\n";
-
-                // Simulate generation
-                foreach (var form in _mainWindow._allAnalysisResults)
-                {
-                    _mainWindow.NintexGenerationLog.Text += $"Processing: {form.Key}\n";
-                    await Task.Delay(500);
-
-                    _mainWindow.NintexGenerationLog.Text += "  - Converting controls...\n";
-                    await Task.Delay(300);
-
-                    _mainWindow.NintexGenerationLog.Text += "  - Applying rules...\n";
-                    await Task.Delay(300);
-
-                    _mainWindow.NintexGenerationLog.Text += "  - Generating layout...\n";
-                    await Task.Delay(300);
-                }
-
-                _mainWindow.NintexGenerationLog.Text += "\n✅ Nintex forms generated successfully!\n";
-                _mainWindow.NintexGenerationLog.Text += $"Forms created: {_mainWindow._allAnalysisResults.Count}\n";
-
-                _mainWindow.UpdateStatus("Nintex forms generated successfully", MessageSeverity.Info);
-                _mainWindow.DownloadNintexButton.IsEnabled = true;
-            }
-            catch (Exception ex)
-            {
-                _mainWindow.NintexGenerationLog.Text += $"\n❌ Error: {ex.Message}\n";
-                _mainWindow.UpdateStatus($"Nintex generation failed: {ex.Message}", MessageSeverity.Error);
-            }
-            finally
-            {
-                _mainWindow.GenerateNintexButton.IsEnabled = true;
-            }
+            await Task.CompletedTask;
+            // Generate step not needed in v1 - download exports directly
         }
 
         public async Task DownloadNintex()
@@ -816,7 +750,7 @@ namespace FormGenerator.Views
                 // Check if we have analysis results
                 if (_mainWindow._allAnalysisResults == null || !_mainWindow._allAnalysisResults.Any())
                 {
-                    MessageBox.Show("Please analyze forms first before generating Nintex forms.",
+                    MessageBox.Show("Please analyze forms first before exporting Nintex forms.",
                                    "No Analysis Results",
                                    MessageBoxButton.OK,
                                    MessageBoxImage.Warning);
@@ -826,10 +760,8 @@ namespace FormGenerator.Views
                 var dialog = new SaveFileDialog
                 {
                     Title = "Save Nintex Forms Package",
-                    Filter = _mainWindow.NintexJsonRadio.IsChecked == true
-                        ? "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
-                        : "XML Files (*.xml)|*.xml|All Files (*.*)|*.*",
-                    FileName = $"{_mainWindow.NintexFormNameTextBox.Text}_NintexPackage"
+                    Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                    FileName = "NintexForms_Export"
                 };
 
                 if (dialog.ShowDialog() == true)
@@ -841,7 +773,7 @@ namespace FormGenerator.Views
                     int successCount = 0;
                     int failCount = 0;
 
-                    // Convert each analyzed form - save each to separate file (like NAC Example does)
+                    // Convert each analyzed form
                     foreach (var formResult in _mainWindow._allAnalysisResults)
                     {
                         try
@@ -853,37 +785,33 @@ namespace FormGenerator.Views
 
                             if (rebuildResult.Success)
                             {
-                                // Get the form-definition.json directly from artifacts
                                 var formJson = rebuildResult.Artifacts["form-definition.json"];
 
-                                // Generate output filename
                                 var outputFileName = dialog.FileName.Replace(".json", $"_{formName}_nintex.json");
                                 if (_mainWindow._allAnalysisResults.Count == 1)
                                 {
-                                    // If only one form, use the original filename
                                     outputFileName = dialog.FileName;
                                 }
 
-                                // Write directly (no wrapping) - this is what NAC Example does
                                 await NetFrameworkCompatibility.WriteAllTextAsync(outputFileName, formJson);
 
-                                _mainWindow.NintexGenerationLog.Text += $"    ✅ Saved to: {Path.GetFileName(outputFileName)}\n";
+                                _mainWindow.NintexGenerationLog.Text += $"    Saved to: {Path.GetFileName(outputFileName)}\n";
                                 successCount++;
                             }
                             else
                             {
-                                _mainWindow.NintexGenerationLog.Text += $"    ❌ Conversion failed: {rebuildResult.ErrorMessage}\n";
+                                _mainWindow.NintexGenerationLog.Text += $"    Conversion failed: {rebuildResult.ErrorMessage}\n";
                                 failCount++;
                             }
                         }
                         catch (Exception formEx)
                         {
-                            _mainWindow.NintexGenerationLog.Text += $"    ❌ Error: {formEx.Message}\n";
+                            _mainWindow.NintexGenerationLog.Text += $"    Error: {formEx.Message}\n";
                             failCount++;
                         }
                     }
 
-                    _mainWindow.NintexGenerationLog.Text += $"\n✅ Conversion complete!\n";
+                    _mainWindow.NintexGenerationLog.Text += $"\nConversion complete!\n";
                     _mainWindow.NintexGenerationLog.Text += $"   Converted: {successCount} forms\n";
                     if (failCount > 0)
                         _mainWindow.NintexGenerationLog.Text += $"   Failed: {failCount} forms\n";
@@ -900,8 +828,7 @@ namespace FormGenerator.Views
             }
             catch (Exception ex)
             {
-                _mainWindow.NintexGenerationLog.Text += $"\n❌ Download failed: {ex.Message}\n";
-                _mainWindow.NintexGenerationLog.Text += $"Stack trace: {ex.StackTrace}\n";
+                _mainWindow.NintexGenerationLog.Text += $"\nDownload failed: {ex.Message}\n";
                 _mainWindow.UpdateStatus($"Nintex download failed: {ex.Message}", MessageSeverity.Error);
 
                 MessageBox.Show($"Download failed:\n{ex.Message}",
@@ -1103,12 +1030,17 @@ namespace FormGenerator.Views
                     _mainWindow.K2GenerationLog.Text += $"   Views: {result.ViewsCreated}\n";
                     _mainWindow.K2GenerationLog.Text += $"   Forms: {result.FormsCreated}\n";
 
-                    // Build proper K2 form URL
+                    // Build K2 form URLs for each generated form
                     var cleanServerName = serverName; // Already cleaned above
                     var formPath = _mainWindow.K2FolderTextBox.Text.TrimStart('/');
-                    var formUrl = $"https://{cleanServerName}/Runtime/Runtime/Form/{result.FormName}";
+                    var formNames = result.FormName.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
 
-                    _mainWindow.K2GenerationLog.Text += $"\nK2 Form URL: {formUrl}\n";
+                    _mainWindow.K2GenerationLog.Text += $"\nK2 Form URLs:\n";
+                    foreach (var name in formNames)
+                    {
+                        var formUrl = $"https://{cleanServerName}/Runtime/Runtime/Form/{name.Trim()}";
+                        _mainWindow.K2GenerationLog.Text += $"   {name.Trim()}: {formUrl}\n";
+                    }
                     _mainWindow.K2GenerationLog.Text += $"Category Path: {formPath}\n";
                 }
                 else
@@ -1118,10 +1050,9 @@ namespace FormGenerator.Views
                         _mainWindow.K2GenerationLog.Text += $"   Details: {result.ErrorDetails}\n";
                 }
 
-                _mainWindow.K2GenerationLog.Text += "\n✅ K2 SmartForms generated successfully!\n";
-                _mainWindow.UpdateStatus("K2 SmartForms generated successfully", MessageSeverity.Info);
-                _mainWindow.DeployK2Button.IsEnabled = true;
-                _mainWindow.ExportK2PackageButton.IsEnabled = true;
+                _mainWindow.K2GenerationLog.Text += $"\n✅ K2 SmartForms generation complete ({result.FormsCreated} form(s))!\n";
+                _mainWindow.UpdateStatus($"K2 SmartForms generated successfully ({result.FormsCreated} form(s))", MessageSeverity.Info);
+                // Deploy and Export buttons removed for v1 release
             }
             catch (Exception ex)
             {
@@ -1173,11 +1104,7 @@ namespace FormGenerator.Views
                     _mainWindow.K2GenerationLog.Text += "  - Adding SmartForms...\n";
                     await Task.Delay(300);
 
-                    if (_mainWindow.GenerateWorkflowK2CheckBox.IsChecked == true)
-                    {
-                        _mainWindow.K2GenerationLog.Text += "  - Adding Workflow...\n";
-                        await Task.Delay(300);
-                    }
+                    // Workflow generation not available in v1
 
                     // Create a mock file
                     await NetFrameworkCompatibility.WriteAllTextAsync(dialog.FileName, "K2 Package Content");

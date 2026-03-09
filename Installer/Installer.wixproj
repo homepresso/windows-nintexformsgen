@@ -1,0 +1,17 @@
+<Project Sdk="WixToolset.Sdk/4.0.5">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>NintexFormsGenerator-Setup</OutputName>
+  </PropertyGroup>
+
+  <!--
+    PublishDir is passed in from the build script.
+    It points to the folder containing the built application files.
+  -->
+  <PropertyGroup>
+    <PublishDir Condition="'$(PublishDir)' == ''">..\FormGenerator\bin\Release\net48\</PublishDir>
+    <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
+  </PropertyGroup>
+
+</Project>

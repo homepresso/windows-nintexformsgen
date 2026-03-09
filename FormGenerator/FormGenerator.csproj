@@ -7,6 +7,19 @@
     <LangVersion>latest</LangVersion>
     <UseWPF>true</UseWPF>
     <ImplicitUsings>disable</ImplicitUsings>
+
+    <!-- Product metadata -->
+    <AssemblyName>NintexFormsGenerator</AssemblyName>
+    <RootNamespace>FormGenerator</RootNamespace>
+    <Product>Nintex Forms Generator</Product>
+    <Company>andyhayes.ai</Company>
+    <Authors>andyhayes.ai</Authors>
+    <Description>Converts InfoPath forms to K2 SmartForms and Nintex Automation Cloud forms</Description>
+    <Copyright>Copyright © andyhayes.ai 2026</Copyright>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

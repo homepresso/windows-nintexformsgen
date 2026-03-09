@@ -322,6 +322,7 @@ namespace FormGenerator.Writers.K2.RuleBuilders
             parameter.SetAttribute("SourceType", "Value");
             parameter.SetAttribute("TargetInstanceID", targetViewInstance.AreaItemId);
             parameter.SetAttribute("TargetID", "display");
+            parameter.SetAttribute("TargetName", "display");
             parameter.SetAttribute("TargetDisplayName", targetViewInstance.ViewName);
             parameter.SetAttribute("TargetType", "ViewProperty");
 
