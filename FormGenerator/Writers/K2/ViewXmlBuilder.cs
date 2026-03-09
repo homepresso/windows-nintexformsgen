@@ -29,6 +29,32 @@ namespace K2SmartObjectGenerator
         private JObject _conditionalVisibility;
         private JArray _dynamicSections;
 
+        /// <summary>
+        /// Stores context data for each view so rules can be applied in phase 2 after deployment.
+        /// Key = viewName, Value = context needed to build rules for that view.
+        /// </summary>
+        private readonly Dictionary<string, ViewRuleContext> _pendingRuleContexts = new Dictionary<string, ViewRuleContext>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Context data needed to apply rules to a deployed view in phase 2.
+        /// </summary>
+        public class ViewRuleContext
+        {
+            public string ViewName { get; set; }
+            public string ViewGuid { get; set; }
+            public Dictionary<string, string> ControlIdMap { get; set; }
+            public Dictionary<string, string> ControlToFieldMap { get; set; }
+            public JArray DynamicSections { get; set; }
+            public JObject ConditionalVisibility { get; set; }
+            public JArray Controls { get; set; }
+            public Dictionary<string, string> JsonToK2ControlIdMap { get; set; }
+        }
+
+        /// <summary>
+        /// Returns all pending rule contexts for views that need rules applied.
+        /// </summary>
+        public Dictionary<string, ViewRuleContext> PendingRuleContexts => _pendingRuleContexts;
+
         public ViewXmlBuilder(ServerConnectionManager connectionManager,
                              Dictionary<string, Dictionary<string, FieldInfo>> smoFieldMappings,
                              SmartObjectGenerator smoGenerator,
@@ -74,7 +100,7 @@ namespace K2SmartObjectGenerator
 
             // Continue with the rest of the existing code using finalControls
             XmlElement root = doc.CreateElement("SourceCode.Forms");
-            root.SetAttribute("Version", "29");
+            root.SetAttribute("Version", "31");
             doc.AppendChild(root);
 
             XmlElement views = doc.CreateElement("Views");
@@ -84,9 +110,8 @@ namespace K2SmartObjectGenerator
             string viewGuid = Guid.NewGuid().ToString();
             view.SetAttribute("ID", viewGuid);
             view.SetAttribute("Type", "Capture");
-            view.SetAttribute("RenderVersion", "3");
             view.SetAttribute("IsUserModified", "True");
-            view.SetAttribute("SOID", smoGuid);
+            view.SetAttribute("RenderVersion", "3");
             views.AppendChild(view);
 
             XmlHelper.AddElement(doc, view, "Name", viewName);
@@ -148,7 +173,81 @@ namespace K2SmartObjectGenerator
             string displayName = !string.IsNullOrEmpty(viewTitle) ? viewTitle : viewName;
             XmlHelper.AddElement(doc, view, "DisplayName", displayName);
 
+            // Store view context for phase 2 rule application
+            StoreViewRuleContext(viewName, viewGuid, controlIdMap, controlToFieldMap,
+                dynamicSections, conditionalVisibility, finalControls);
+
             return doc;
+        }
+
+        /// <summary>
+        /// Deduplicates Event elements by SourceID to prevent K2 Form.EventInstance unique constraint violations.
+        /// K2's Form.EventInstance table has a unique index on (ContextID, EventID, InstanceID, SubFormID, SubFormInstanceID, StateID).
+        /// When multiple Event elements share the same SourceID (e.g., from both CreateEventsWithRules and AddInfoPathRulesToEvents),
+        /// K2 treats them as duplicate events and the deploy fails.
+        /// This method merges handlers from duplicate events into the first event with that SourceID.
+        /// </summary>
+        private void DeduplicateEventsBySourceId(XmlDocument doc, XmlElement events)
+        {
+            var eventsBySourceId = new Dictionary<string, XmlElement>(StringComparer.OrdinalIgnoreCase);
+            var duplicates = new List<XmlElement>();
+
+            foreach (XmlNode child in events.ChildNodes)
+            {
+                if (child is XmlElement eventEl && eventEl.Name == "Event")
+                {
+                    string sourceId = eventEl.GetAttribute("SourceID");
+                    string sourceType = eventEl.GetAttribute("SourceType");
+                    string eventType = eventEl.GetAttribute("Type");
+
+                    // Only deduplicate User events with Control source.
+                    // System events (Calculate, ApplyStyle, Validate) should remain separate from User events.
+                    // K2 allows both a System OnChange and User OnChange for the same SourceID.
+                    if (string.IsNullOrEmpty(sourceId) ||
+                        !string.Equals(sourceType, "Control", StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(eventType, "User", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (eventsBySourceId.ContainsKey(sourceId))
+                    {
+                        // Duplicate found - merge handlers from this event into the first one
+                        XmlElement firstEvent = eventsBySourceId[sourceId];
+                        var firstHandlers = firstEvent.SelectSingleNode("Handlers") as XmlElement;
+                        var dupeHandlers = eventEl.SelectSingleNode("Handlers") as XmlElement;
+
+                        if (dupeHandlers != null && firstHandlers != null)
+                        {
+                            foreach (XmlNode handler in dupeHandlers.ChildNodes)
+                            {
+                                firstHandlers.AppendChild(doc.ImportNode(handler, true));
+                            }
+                        }
+                        else if (dupeHandlers != null && firstHandlers == null)
+                        {
+                            firstEvent.AppendChild(doc.ImportNode(dupeHandlers, true));
+                        }
+
+                        duplicates.Add(eventEl);
+                        string sourceName = eventEl.GetAttribute("SourceName");
+                        Console.WriteLine($"    [DEDUP] Merged duplicate event for SourceID '{sourceName}' into existing event");
+                    }
+                    else
+                    {
+                        eventsBySourceId[sourceId] = eventEl;
+                    }
+                }
+            }
+
+            // Remove the duplicate event elements
+            foreach (var dupe in duplicates)
+            {
+                events.RemoveChild(dupe);
+            }
+
+            if (duplicates.Count > 0)
+            {
+                Console.WriteLine($"    [DEDUP] Removed {duplicates.Count} duplicate event(s) to prevent EventInstance constraint violations");
+            }
         }
 
         /// <summary>
@@ -174,10 +273,19 @@ namespace K2SmartObjectGenerator
                 };
 
                 // Initialize the control resolver with all available maps
+                // IMPORTANT: Disable global fallback for InfoPath rules - these rules must only
+                // reference controls that exist in THIS view. Cross-view rules would reference
+                // control GUIDs from other views, causing EventInstance errors on deploy.
                 context.ControlResolver = new K2ControlResolver(
                     context.ControlIdMap,
                     context.ControlToFieldMap,
-                    context.JsonToK2ControlIdMap);
+                    context.JsonToK2ControlIdMap)
+                {
+                    AllowGlobalFallback = false,
+                    // Wire up the InfoPath-to-K2 name map so the resolver can translate
+                    // InfoPath binding names (e.g., "isRoundTrip") to K2 control names (e.g., "ISROUNDTRIP")
+                    InfoPathToK2NameMap = _infoPathFormDef?.InfoPathToK2NameMap
+                };
 
                 var orchestrator = new K2InfoPathRuleOrchestrator();
                 orchestrator.AddInfoPathRules(doc, events, _infoPathFormDef, context);
@@ -185,6 +293,143 @@ namespace K2SmartObjectGenerator
             catch (Exception ex)
             {
                 Console.WriteLine($"WARNING: InfoPath rule generation failed (form generation continues): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Stores view context data for phase 2 rule application.
+        /// Called after the structural view XML is built but before deployment.
+        /// </summary>
+        private void StoreViewRuleContext(string viewName, string viewGuid,
+            Dictionary<string, string> controlIdMap, Dictionary<string, string> controlToFieldMap,
+            JArray dynamicSections, JObject conditionalVisibility, JArray controls)
+        {
+            // IMPORTANT: controlIdMap is case-SENSITIVE and contains both "EMAIL" and "email" as separate entries.
+            // We must use indexer (not constructor) to copy to case-insensitive dictionaries to avoid
+            // "An item with the same key has already been added" exceptions.
+            _pendingRuleContexts[viewName] = new ViewRuleContext
+            {
+                ViewName = viewName,
+                ViewGuid = viewGuid,
+                ControlIdMap = CopyCaseInsensitive(controlIdMap),
+                ControlToFieldMap = CopyCaseInsensitive(controlToFieldMap),
+                DynamicSections = dynamicSections,
+                ConditionalVisibility = conditionalVisibility,
+                Controls = controls,
+                JsonToK2ControlIdMap = CopyCaseInsensitive(_jsonToK2ControlIdMap)
+            };
+            Console.WriteLine($"    Stored rule context for phase 2: {viewName} ({controlIdMap.Count} controls)");
+        }
+
+        /// <summary>
+        /// Copies a dictionary to a case-insensitive dictionary using indexer (not constructor)
+        /// to safely handle source dictionaries that contain case-variant duplicate keys
+        /// like "EMAIL" and "email" which are separate keys in a case-sensitive dictionary.
+        /// </summary>
+        private static Dictionary<string, string> CopyCaseInsensitive(Dictionary<string, string> source)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (source != null)
+            {
+                foreach (var kvp in source)
+                {
+                    result[kvp.Key] = kvp.Value; // Indexer overwrites silently, doesn't throw
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Phase 2: Applies rule events to an already-deployed view's XML.
+        /// Fetches the deployed XML, parses it, adds visibility/conditional/InfoPath rules,
+        /// deduplicates events, and returns the modified XML ready for re-deployment.
+        /// </summary>
+        public string ApplyRulesToDeployedView(string deployedViewXml, ViewRuleContext context)
+        {
+            if (string.IsNullOrEmpty(deployedViewXml) || context == null)
+                return deployedViewXml;
+
+            try
+            {
+                XmlDocument doc = new XmlDocument();
+                doc.PreserveWhitespace = false;
+                doc.LoadXml(deployedViewXml);
+
+                // Find the Events element in the deployed XML
+                var eventsNode = doc.SelectSingleNode("//Events") as XmlElement;
+                if (eventsNode == null)
+                {
+                    Console.WriteLine($"    WARNING: No Events element found in deployed view XML for '{context.ViewName}'");
+                    return deployedViewXml;
+                }
+
+                // Read the actual viewGuid from the deployed XML (K2 may have assigned it)
+                var viewNode = doc.SelectSingleNode("//View") as XmlElement;
+                string deployedViewGuid = viewNode?.GetAttribute("ID") ?? context.ViewGuid;
+                string viewName = context.ViewName;
+
+                // Build controlEventMap from existing USER events so rule merging works correctly.
+                // IMPORTANT: Only include User events (Type="User"), NOT System events (Type="System").
+                // K2 allows both a System OnChange and User OnChange for the same control.
+                // System events handle internal actions (Calculate, ApplyStyle, Validate),
+                // while User events handle custom rules (visibility, data transfer, etc.).
+                // Merging User handlers into System events would break K2's event processing.
+                var controlEventMap = new Dictionary<string, XmlElement>(StringComparer.OrdinalIgnoreCase);
+                foreach (XmlNode child in eventsNode.ChildNodes)
+                {
+                    if (child is XmlElement eventEl && eventEl.Name == "Event")
+                    {
+                        string eventType = eventEl.GetAttribute("Type");
+                        string sourceType = eventEl.GetAttribute("SourceType");
+                        string sourceId = eventEl.GetAttribute("SourceID");
+                        if (string.Equals(eventType, "User", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(sourceType, "Control", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrEmpty(sourceId))
+                        {
+                            controlEventMap[sourceId] = eventEl;
+                        }
+                    }
+                }
+
+                Console.WriteLine($"    Phase 2: Adding rules to deployed view '{viewName}' (existing events: {eventsNode.ChildNodes.Count}, controls with events: {controlEventMap.Count})");
+
+                // Safety check: if User events already exist, rules were already applied to this view
+                // (can happen if Phase 2 runs multiple times due to concurrent form deployments).
+                // Return the XML unchanged to prevent duplicate rules.
+                if (controlEventMap.Count > 0)
+                {
+                    Console.WriteLine($"    Phase 2: View '{viewName}' already has {controlEventMap.Count} User events - skipping to prevent duplicates");
+                    return deployedViewXml;
+                }
+
+                // Temporarily set the instance-level JsonToK2ControlIdMap so AddInfoPathRulesToEvents
+                // uses the correct map for this view's context
+                var savedMap = _jsonToK2ControlIdMap;
+                _jsonToK2ControlIdMap = context.JsonToK2ControlIdMap ?? new Dictionary<string, string>();
+
+                // Add visibility and conditional visibility rules
+                _rulesBuilder.AddRuleEvents(doc, eventsNode, deployedViewGuid, viewName,
+                    context.ControlIdMap, context.DynamicSections, context.ConditionalVisibility,
+                    context.Controls, context.JsonToK2ControlIdMap, controlEventMap);
+
+                // Add InfoPath rules
+                AddInfoPathRulesToEvents(doc, eventsNode, deployedViewGuid, viewName,
+                    context.ControlIdMap, context.ControlToFieldMap);
+
+                // Restore the map
+                _jsonToK2ControlIdMap = savedMap;
+
+                // Deduplicate events
+                DeduplicateEventsBySourceId(doc, eventsNode);
+
+                Console.WriteLine($"    Phase 2: Rules applied to '{viewName}' (final events: {eventsNode.ChildNodes.Count})");
+
+                return doc.OuterXml;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    WARNING: Failed to apply rules to deployed view '{context.ViewName}': {ex.Message}");
+                return deployedViewXml;
             }
         }
 
@@ -733,7 +978,7 @@ namespace K2SmartObjectGenerator
                         Console.WriteLine($"        Mapped grid position {gridPosition} -> {k2ControlId}");
                     }
 
-                    // Map by field name
+                    // Map by field name AND binding-derived field name
                     if (!string.IsNullOrEmpty(name))
                     {
                         controlIdMap[name] = k2ControlId;
@@ -745,17 +990,58 @@ namespace K2SmartObjectGenerator
                         controlIdMap[nameNoUnderscore] = k2ControlId;
                         controlIdMap[nameNoUnderscore.ToUpper()] = k2ControlId;
 
+                        // BINDING PIPELINE: Also map by binding-derived field name
+                        // This ensures rules referencing binding names can find the control
+                        string bindingVal = control["Binding"]?.Value<string>();
+                        string bindingField = NameSanitizer.ExtractFieldNameFromBinding(bindingVal);
+                        if (!string.IsNullOrEmpty(bindingField))
+                        {
+                            string sanitizedBinding = NameSanitizer.SanitizePropertyName(bindingField);
+                            if (!controlIdMap.ContainsKey(bindingField))
+                                controlIdMap[bindingField] = k2ControlId;
+                            if (!controlIdMap.ContainsKey(bindingField.ToUpper()))
+                                controlIdMap[bindingField.ToUpper()] = k2ControlId;
+                            if (!controlIdMap.ContainsKey(sanitizedBinding))
+                                controlIdMap[sanitizedBinding] = k2ControlId;
+                            if (!controlIdMap.ContainsKey(sanitizedBinding.ToUpper()))
+                                controlIdMap[sanitizedBinding.ToUpper()] = k2ControlId;
+                            Console.WriteLine($"        [BINDING MAP] Also mapped binding '{bindingField}' -> {k2ControlId}");
+                        }
+
                         // Track control mapping for data-bound controls
                         if (IsDataBoundControl(k2ControlType))
                         {
                             string fieldName = NameSanitizer.SanitizePropertyName(name);
                             string controlDisplayName = GetControlTypeDisplayName(k2ControlType);
 
-                            // Get the actual control name from the control element
-                            XmlNodeList nameNodes = controlElement.GetElementsByTagName("Name");
-                            if (nameNodes.Count > 0)
+                            // Get the actual control name from the ControlName property's Value element
+                            // Note: GetElementsByTagName("Name") would incorrectly return the property name "ControlName"
+                            // instead of the actual control display name, so we use XPath to get the Value instead
+                            XmlNode controlNameValueNode = controlElement.SelectSingleNode("Properties/Property[Name='ControlName']/Value");
+                            if (controlNameValueNode != null && !string.IsNullOrEmpty(controlNameValueNode.InnerText))
                             {
-                                controlDisplayName = nameNodes[0].InnerText;
+                                controlDisplayName = controlNameValueNode.InnerText;
+                            }
+
+                            // Resolve SmartObject property name and display name from FieldInfo
+                            string smoPropertyName = fieldName; // default to field name
+                            string smoDisplayName = controlDisplayName; // default to control display name
+                            string bindingForSmo = control?["Binding"]?.Value<string>();
+                            string bindingLeafForSmo = NameSanitizer.ExtractFieldNameFromBinding(bindingForSmo);
+                            if (!string.IsNullOrEmpty(bindingLeafForSmo) && _smoFieldMappings != null && _smoFieldMappings.ContainsKey(smoName))
+                            {
+                                string sanitizedBinding = NameSanitizer.SanitizePropertyName(bindingLeafForSmo);
+                                FieldInfo fieldInfo = null;
+                                if (_smoFieldMappings[smoName].ContainsKey(sanitizedBinding))
+                                    fieldInfo = _smoFieldMappings[smoName][sanitizedBinding];
+                                else if (_smoFieldMappings[smoName].ContainsKey(sanitizedBinding.ToUpper()))
+                                    fieldInfo = _smoFieldMappings[smoName][sanitizedBinding.ToUpper()];
+
+                                if (fieldInfo != null)
+                                {
+                                    smoPropertyName = fieldInfo.FieldName; // SmartObject property Name (e.g., "NONSMOKINGROOM")
+                                    smoDisplayName = fieldInfo.DisplayName; // SmartObject property DisplayName (e.g., "Non-smoking hotel room required")
+                                }
                             }
 
                             viewControlMappings[fieldName] = new ViewGenerator.ControlMapping
@@ -764,10 +1050,12 @@ namespace K2SmartObjectGenerator
                                 ControlName = controlDisplayName,
                                 ControlType = k2ControlType,
                                 FieldName = fieldName,
-                                DataType = GetControlDataType(k2ControlType)
+                                DataType = GetControlDataType(k2ControlType),
+                                SmoPropertyName = smoPropertyName,
+                                SmoDisplayName = smoDisplayName
                             };
 
-                            Console.WriteLine($"        Tracked control mapping: {fieldName} -> {controlDisplayName} (ID: {k2ControlId})");
+                            Console.WriteLine($"        Tracked control mapping: {fieldName} -> {controlDisplayName} (SmoProperty: {smoPropertyName}, ID: {k2ControlId})");
                         }
                     }
 
@@ -785,6 +1073,117 @@ namespace K2SmartObjectGenerator
                 controlIdMap[$"JSON_{mapping.Key}"] = mapping.Value;
             }
 
+            // Map section CTRL IDs from dynamicSections
+            // Section CTRL IDs (like CTRL353, CTRL338) are container references that need to map to the Section control
+            if (_dynamicSections != null && _dynamicSections.Count > 0)
+            {
+                string dynSectionGuid = controlIdMap.ContainsKey("Section") ? controlIdMap["Section"] : null;
+                if (!string.IsNullOrEmpty(dynSectionGuid))
+                {
+                    foreach (JObject section in _dynamicSections)
+                    {
+                        string ctrlId = section["CtrlId"]?.Value<string>();
+                        if (!string.IsNullOrEmpty(ctrlId) && !_jsonToK2ControlIdMap.ContainsKey(ctrlId))
+                        {
+                            // Map section CTRL ID to the Section control GUID
+                            // This allows visibility rules that target sections to find them
+                            _jsonToK2ControlIdMap[ctrlId] = dynSectionGuid;
+                            Console.WriteLine($"        Mapped section CTRL ID {ctrlId} -> Section {dynSectionGuid}");
+                        }
+                    }
+                }
+            }
+
+            // Create hidden DataLabel controls for calculated fields that don't have K2 controls.
+            // These are fields like filterDepartureDate that exist in InfoPath's data model
+            // as calculated values but are not visible UI controls. They need K2 controls so
+            // that visibility rules and expressions can reference them.
+            int hiddenControlsCreated = 0;
+            if (_infoPathFormDef?.ConditionalRules != null)
+            {
+                var calcFields = _infoPathFormDef.ConditionalRules
+                    .Where(r => r != null &&
+                           string.Equals(r.Type, "Calculation", StringComparison.OrdinalIgnoreCase) &&
+                           !string.IsNullOrEmpty(r.TargetField))
+                    .Select(r => r.TargetField)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (string calcFieldName in calcFields)
+                {
+                    // Check if a control already exists for this field
+                    bool exists = controlIdMap.ContainsKey(calcFieldName) ||
+                                  controlIdMap.ContainsKey(calcFieldName.ToUpper()) ||
+                                  controlIdMap.ContainsKey(NameSanitizer.SanitizePropertyName(calcFieldName));
+
+                    if (!exists)
+                    {
+                        string hiddenControlId = Guid.NewGuid().ToString();
+                        string hiddenFieldId = Guid.NewGuid().ToString();
+
+                        XmlElement hiddenControl = doc.CreateElement("Control");
+                        hiddenControl.SetAttribute("ID", hiddenControlId);
+                        hiddenControl.SetAttribute("FieldID", hiddenFieldId);
+                        hiddenControl.SetAttribute("Type", "DataLabel");
+
+                        XmlElement hiddenProps = doc.CreateElement("Properties");
+
+                        XmlElement ctrlNameProp = doc.CreateElement("Property");
+                        XmlHelper.AddElement(doc, ctrlNameProp, "Name", "ControlName");
+                        XmlHelper.AddElement(doc, ctrlNameProp, "DisplayValue", calcFieldName);
+                        XmlHelper.AddElement(doc, ctrlNameProp, "NameValue", "Data Label");
+                        XmlHelper.AddElement(doc, ctrlNameProp, "Value", calcFieldName);
+                        hiddenProps.AppendChild(ctrlNameProp);
+
+                        XmlElement dataTypeProp = doc.CreateElement("Property");
+                        XmlHelper.AddElement(doc, dataTypeProp, "Name", "DataType");
+                        XmlHelper.AddElement(doc, dataTypeProp, "DisplayValue", "Text");
+                        XmlHelper.AddElement(doc, dataTypeProp, "Value", "Text");
+                        hiddenProps.AppendChild(dataTypeProp);
+
+                        XmlElement litValProp = doc.CreateElement("Property");
+                        XmlHelper.AddElement(doc, litValProp, "Name", "LiteralVal");
+                        XmlHelper.AddElement(doc, litValProp, "DisplayValue", "false");
+                        XmlHelper.AddElement(doc, litValProp, "Value", "false");
+                        hiddenProps.AppendChild(litValProp);
+
+                        XmlElement sanitizeProp = doc.CreateElement("Property");
+                        XmlHelper.AddElement(doc, sanitizeProp, "Name", "SanitizeHtml");
+                        XmlHelper.AddElement(doc, sanitizeProp, "DisplayValue", "false");
+                        XmlHelper.AddElement(doc, sanitizeProp, "Value", "false");
+                        hiddenProps.AppendChild(sanitizeProp);
+
+                        // Note: Do NOT set IsVisible=false on these DataLabel controls.
+                        // Fields like REPORTDATE, SUBTOTAL, TOTAL etc. are real data fields
+                        // that need to be visible for data binding to work correctly in K2.
+
+                        hiddenControl.AppendChild(hiddenProps);
+
+                        XmlElement hiddenStyles = doc.CreateElement("Styles");
+                        XmlElement hiddenStyle = doc.CreateElement("Style");
+                        hiddenStyle.SetAttribute("IsDefault", "True");
+                        hiddenStyles.AppendChild(hiddenStyle);
+                        hiddenControl.AppendChild(hiddenStyles);
+
+                        XmlHelper.AddElement(doc, hiddenControl, "Name", calcFieldName);
+                        XmlHelper.AddElement(doc, hiddenControl, "DisplayName", calcFieldName);
+                        XmlHelper.AddElement(doc, hiddenControl, "NameValue", calcFieldName);
+
+                        controlsElement.AppendChild(hiddenControl);
+
+                        // Register in controlIdMap so visibility rules and expressions can find it
+                        controlIdMap[calcFieldName] = hiddenControlId;
+                        controlIdMap[calcFieldName.ToUpper()] = hiddenControlId;
+                        string sanitized = NameSanitizer.SanitizePropertyName(calcFieldName);
+                        controlIdMap[sanitized] = hiddenControlId;
+                        controlIdMap[sanitized.ToUpper()] = hiddenControlId;
+
+                        hiddenControlsCreated++;
+                        Console.WriteLine($"      Created hidden DataLabel control for calculated field '{calcFieldName}' -> {hiddenControlId}");
+                    }
+                }
+            }
+
             // Register the control mappings for this view using the static service
             if (viewControlMappings.Count > 0)
             {
@@ -797,6 +1196,7 @@ namespace K2SmartObjectGenerator
             Console.WriteLine($"      JSON control IDs mapped: {jsonControlIdToK2Id.Count}");
             Console.WriteLine($"      Control names mapped: {controlIdMap.Count}");
             Console.WriteLine($"      Data controls tracked: {viewControlMappings.Count}");
+            Console.WriteLine($"      Hidden calc field controls: {hiddenControlsCreated}");
             Console.WriteLine($"      Columns created: {maxColumn}");
             Console.WriteLine($"      Rows created: {maxRow}");
 
@@ -1037,8 +1437,9 @@ namespace K2SmartObjectGenerator
 
                     XmlElement cell = doc.CreateElement("Cell");
                     cell.SetAttribute("ID", cellId);
-                    cell.SetAttribute("ColumnSpan", columnSpan.ToString());
-                    cell.SetAttribute("RowSpan", "1");
+                    // Only set ColumnSpan when > 1 (K2 strips default "1" during normalization)
+                    if (columnSpan > 1)
+                        cell.SetAttribute("ColumnSpan", columnSpan.ToString());
 
                     cellElements[cellKey] = cell;
 
@@ -1098,9 +1499,34 @@ namespace K2SmartObjectGenerator
 
                         if (!string.IsNullOrEmpty(controlId))
                         {
-                            XmlElement controlRef = doc.CreateElement("Control");
-                            controlRef.SetAttribute("ID", controlId);
-                            cell.AppendChild(controlRef);
+                            // GUARD: Prevent duplicate Control expression elements in the same cell.
+                            // This can happen when two InfoPath controls share the same grid position
+                            // (e.g., a DropDown and a DatePicker in the same table cell). The last control
+                            // registered in controlIdMap wins, causing both iterations to resolve to the
+                            // same controlId. Duplicate expressions cause K2 runtime "ExtenderControl not
+                            // registered" errors for Calendar/DatePicker controls.
+                            bool alreadyPlaced = false;
+                            foreach (XmlNode existingChild in cell.ChildNodes)
+                            {
+                                if (existingChild is XmlElement existingCtrl &&
+                                    existingCtrl.Name == "Control" &&
+                                    existingCtrl.GetAttribute("ID") == controlId)
+                                {
+                                    alreadyPlaced = true;
+                                    break;
+                                }
+                            }
+
+                            if (alreadyPlaced)
+                            {
+                                Console.WriteLine($"        SKIPPING duplicate expression for control {name} ({controlType}) - ID {controlId} already placed in cell {cellKey}");
+                            }
+                            else
+                            {
+                                XmlElement controlRef = doc.CreateElement("Control");
+                                controlRef.SetAttribute("ID", controlId);
+                                cell.AppendChild(controlRef);
+                            }
 
                             string columnLetter = GetColumnLetter(colNum);
 
@@ -1161,7 +1587,7 @@ namespace K2SmartObjectGenerator
 
             // Continue with the rest of the existing code using finalControls
             XmlElement root = doc.CreateElement("SourceCode.Forms");
-            root.SetAttribute("Version", "29");
+            root.SetAttribute("Version", "31");
             doc.AppendChild(root);
 
             XmlElement views = doc.CreateElement("Views");
@@ -1171,9 +1597,8 @@ namespace K2SmartObjectGenerator
             string viewGuid = Guid.NewGuid().ToString();
             view.SetAttribute("ID", viewGuid);
             view.SetAttribute("Type", "Capture");
-            view.SetAttribute("RenderVersion", "3");
             view.SetAttribute("IsUserModified", "True");
-            view.SetAttribute("SOID", smoGuid);
+            view.SetAttribute("RenderVersion", "3");
             views.AppendChild(view);
 
             XmlHelper.AddElement(doc, view, "Name", viewName);
@@ -1235,14 +1660,19 @@ namespace K2SmartObjectGenerator
             string displayName = !string.IsNullOrEmpty(viewTitle) ? viewTitle : viewName;
             XmlHelper.AddElement(doc, view, "DisplayName", displayName);
 
+            // Store view context for phase 2 rule application
+            StoreViewRuleContext(viewName, viewGuid, controlIdMap, controlToFieldMap,
+                dynamicSections, conditionalVisibility, finalControls);
+
             return doc;
         }
         private string GetControlDataType(string k2ControlType)
         {
             switch (k2ControlType)
             {
+                case "DatePicker":
                 case "Calendar":
-                    return "DateTime";
+                    return "Date";  // Live K2 uses "Date" not "DateTime"
                 case "CheckBox":
                     return "YesNo";
                 case "TextArea":
@@ -1254,6 +1684,8 @@ namespace K2SmartObjectGenerator
                     return "Image";
                 case "SharePointHyperLink":
                     return "Hyperlink";
+                case "NumericTextBox":
+                    return "Number";  // Live K2 pattern: DataType=Number
                 default:
                     return "Text";
             }
@@ -1434,13 +1866,44 @@ namespace K2SmartObjectGenerator
                 FieldInfo fieldInfo = null;
                 string sanitizedFieldName = NameSanitizer.SanitizePropertyName(name);
 
-                if (_smoFieldMappings[smoName].ContainsKey(sanitizedFieldName))
+                // PRIMARY: Use binding-derived field name (matches SmartObject field names directly)
+                // This is the deterministic pipeline: InfoPath binding -> SmartObject field name
+                string binding = controlDef?["Binding"]?.Value<string>();
+                string bindingFieldName = NameSanitizer.ExtractFieldNameFromBinding(binding);
+
+                if (!string.IsNullOrEmpty(bindingFieldName))
                 {
-                    fieldInfo = _smoFieldMappings[smoName][sanitizedFieldName];
+                    string sanitizedBinding = NameSanitizer.SanitizePropertyName(bindingFieldName);
+                    if (_smoFieldMappings[smoName].ContainsKey(sanitizedBinding))
+                    {
+                        fieldInfo = _smoFieldMappings[smoName][sanitizedBinding];
+                        Console.WriteLine($"        [BINDING PIPELINE] Resolved '{name}' via binding '{binding}' -> field '{sanitizedBinding}'");
+                    }
+                    else if (_smoFieldMappings[smoName].ContainsKey(sanitizedBinding.ToUpper()))
+                    {
+                        fieldInfo = _smoFieldMappings[smoName][sanitizedBinding.ToUpper()];
+                        Console.WriteLine($"        [BINDING PIPELINE] Resolved '{name}' via binding '{binding}' -> field '{sanitizedBinding.ToUpper()}'");
+                    }
                 }
-                else if (_smoFieldMappings[smoName].ContainsKey(sanitizedFieldName.ToUpper()))
+
+                // SECONDARY: Fall back to control name (for cases where binding is absent or name matches directly)
+                if (fieldInfo == null)
                 {
-                    fieldInfo = _smoFieldMappings[smoName][sanitizedFieldName.ToUpper()];
+                    if (_smoFieldMappings[smoName].ContainsKey(sanitizedFieldName))
+                    {
+                        fieldInfo = _smoFieldMappings[smoName][sanitizedFieldName];
+                        Console.WriteLine($"        [NAME MATCH] Resolved '{name}' directly via control name -> field '{sanitizedFieldName}'");
+                    }
+                    else if (_smoFieldMappings[smoName].ContainsKey(sanitizedFieldName.ToUpper()))
+                    {
+                        fieldInfo = _smoFieldMappings[smoName][sanitizedFieldName.ToUpper()];
+                        Console.WriteLine($"        [NAME MATCH] Resolved '{name}' directly via control name -> field '{sanitizedFieldName.ToUpper()}'");
+                    }
+                }
+
+                if (fieldInfo == null)
+                {
+                    Console.WriteLine($"        WARNING: Could not resolve field for control '{name}' (binding='{binding}') in SmartObject '{smoName}'");
                 }
 
                 if (fieldInfo != null)
@@ -1487,8 +1950,8 @@ namespace K2SmartObjectGenerator
             styles.AppendChild(style);
             control.AppendChild(styles);
 
-            // Apply InfoPath formatting if this is a TextBox or Calendar control (after Styles element is created)
-            if ((k2ControlType == "TextBox" || k2ControlType == "Calendar") && controlDef != null)
+            // Apply InfoPath formatting if this is a TextBox or Calendar/DatePicker control (after Styles element is created)
+            if ((k2ControlType == "TextBox" || k2ControlType == "Calendar" || k2ControlType == "DatePicker") && controlDef != null)
             {
                 string boundProp = controlDef["AdditionalProperties"]?["boundProp"]?.ToString();
                 string datafmt = controlDef["AdditionalProperties"]?["datafmt"]?.ToString();
@@ -1694,6 +2157,22 @@ namespace K2SmartObjectGenerator
 
                 if (!string.IsNullOrEmpty(lookupSmoGuid))
                 {
+                    // Resolve the JSON column name from the binding for use as the LookupType filter.
+                    // The SmartObject data was populated using JSON ColumnName (e.g., "category"),
+                    // NOT the control name (e.g., "ITEMIZEDEXPENSECATEGORY").
+                    // The binding "my:category" -> field "category" gives us the correct key.
+                    string lookupParameter = originalName; // fallback to control name
+                    string binding = controlDef?["Binding"]?.Value<string>();
+                    if (!string.IsNullOrEmpty(binding))
+                    {
+                        string bindingFieldName = NameSanitizer.ExtractFieldNameFromBinding(binding);
+                        if (!string.IsNullOrEmpty(bindingFieldName))
+                        {
+                            lookupParameter = bindingFieldName;
+                            Console.WriteLine($"        [BINDING PIPELINE] Resolved LookupParameter from binding '{binding}' -> '{lookupParameter}'");
+                        }
+                    }
+
                     // Track this lookup SmartObject with the parameter info
                     lookupSmartObjects[originalName] = new LookupInfo
                     {
@@ -1701,11 +2180,11 @@ namespace K2SmartObjectGenerator
                         SmartObjectGuid = lookupSmoGuid,
                         ControlId = controlGuid,
                         ControlName = uniqueName,
-                        LookupParameter = originalName  // Store the field name as the parameter for filtering
+                        LookupParameter = lookupParameter  // Use JSON column name to match SmartObject LookupType
                     };
 
                     Console.WriteLine($"        Successfully binding dropdown '{originalName}' to consolidated lookup");
-                    Console.WriteLine($"        LookupParameter set to: {originalName}");
+                    Console.WriteLine($"        LookupParameter set to: {lookupParameter}");
 
                     // Add DataSourceType property
                     XmlElement dataSourceTypeProp = doc.CreateElement("Property");
@@ -1821,8 +2300,9 @@ namespace K2SmartObjectGenerator
                     AddTextAreaProperties(doc, properties, controlToFieldMap, controlGuid, fieldMap);
                     break;
 
+                case "DatePicker":
                 case "Calendar":
-                    AddCalendarProperties(doc, properties, controlToFieldMap, controlGuid, fieldMap, controlDef);
+                    AddDatePickerProperties(doc, properties, controlToFieldMap, controlGuid, fieldMap, controlDef);
                     break;
 
                 case "CheckBox":
@@ -2125,14 +2605,17 @@ namespace K2SmartObjectGenerator
             AddProperty(doc, properties, "Rows", "5");
         }
 
-        private void AddCalendarProperties(XmlDocument doc, XmlElement properties,
+        /// <summary>
+        /// DatePicker properties - matches live K2 pattern:
+        /// DataType=Date, WaterMarkText="Select a date"
+        /// </summary>
+        private void AddDatePickerProperties(XmlDocument doc, XmlElement properties,
                                           Dictionary<string, string> controlToFieldMap,
                                           string controlGuid, Dictionary<string, FieldInfo> fieldMap,
                                           JObject controlDef = null)
         {
             AddFieldBinding(doc, properties, controlToFieldMap, controlGuid, fieldMap);
-            AddProperty(doc, properties, "DataType", "datetime");
-            AddProperty(doc, properties, "CalendarPicker", "datePicker");
+            AddProperty(doc, properties, "DataType", "Date");  // Live K2 uses "Date" not "datetime"
             AddProperty(doc, properties, "WaterMarkText", "Select a date");
 
             // Apply InfoPath date formatting if available
@@ -2147,7 +2630,7 @@ namespace K2SmartObjectGenerator
                     bool applied = K2FormatBuilder.ApplyFormattingToControl(controlElement, datafmt, boundProp);
                     if (applied)
                     {
-                        Console.WriteLine($"        Applied InfoPath date formatting to Calendar: datafmt='{datafmt}', boundProp='{boundProp}'");
+                        Console.WriteLine($"        Applied InfoPath date formatting to DatePicker: datafmt='{datafmt}', boundProp='{boundProp}'");
                     }
                 }
             }
@@ -2276,7 +2759,11 @@ namespace K2SmartObjectGenerator
                 XmlElement field = doc.CreateElement("Field");
                 field.SetAttribute("ID", kvp.Key);
                 field.SetAttribute("Type", "ObjectProperty");
-                field.SetAttribute("DataType", kvp.Value.DataType);
+                // K2 Version 31 expects Title-cased DataType (e.g. "Text" not "text")
+                string dataType = kvp.Value.DataType;
+                if (!string.IsNullOrEmpty(dataType) && char.IsLower(dataType[0]))
+                    dataType = char.ToUpper(dataType[0]) + dataType.Substring(1);
+                field.SetAttribute("DataType", dataType);
 
                 XmlHelper.AddElement(doc, field, "Name", kvp.Value.DisplayName);
                 XmlHelper.AddElement(doc, field, "FieldName", kvp.Value.FieldName);
@@ -2302,63 +2789,72 @@ namespace K2SmartObjectGenerator
         {
             XmlElement lookupSource = doc.CreateElement("Source");
             string lookupSourceGuid = Guid.NewGuid().ToString();
+            string smoDisplayName = lookup.SmartObjectName.Replace("_", " ");
 
             lookupSource.SetAttribute("ID", lookupSourceGuid);
             lookupSource.SetAttribute("SourceType", "Object");
             lookupSource.SetAttribute("SourceID", lookup.SmartObjectGuid);
             lookupSource.SetAttribute("SourceName", lookup.SmartObjectName);
-            lookupSource.SetAttribute("SourceDisplayName", lookup.SmartObjectName.Replace("_", " "));
+            lookupSource.SetAttribute("SourceDisplayName", smoDisplayName);
             lookupSource.SetAttribute("ContextType", "External");
             lookupSource.SetAttribute("ContextID", lookup.ControlId);
             lookupSource.SetAttribute("ValidationStatus", "Auto");
             lookupSource.SetAttribute("ValidationMessages",
-                $"SourceObject,Object,Auto,{lookup.SmartObjectGuid},{lookup.SmartObjectName},{lookup.SmartObjectName.Replace("_", " ")}");
+                $"SourceObject,Object,Auto,{lookup.SmartObjectGuid},{lookup.SmartObjectName},{smoDisplayName}");
 
             XmlHelper.AddElement(doc, lookupSource, "Name", lookup.SmartObjectName);
 
             // Add Fields for lookup SmartObject
+            // K2 uses fully qualified field names: "{SmartObject DisplayName}.{FieldDisplayName}"
             XmlElement lookupFields = doc.CreateElement("Fields");
 
             // ID field
-            AddLookupField(doc, lookupFields, "ID", "ID", "autonumber");
+            AddLookupField(doc, lookupFields, smoDisplayName, "ID", "ID", "Autonumber");
 
             // Value field
-            AddLookupField(doc, lookupFields, "Value", "Value", "text");
+            AddLookupField(doc, lookupFields, smoDisplayName, "Value", "Value", "Text");
 
             // DisplayText field
-            AddLookupField(doc, lookupFields, "Display Text", "DisplayText", "Text");
+            AddLookupField(doc, lookupFields, smoDisplayName, "Display Text", "DisplayText", "Text");
 
-            // Sort Order field
-            AddLookupField(doc, lookupFields, "Sort Order", "SortOrder", "Number", true);
+            // LookupType field
+            AddLookupField(doc, lookupFields, smoDisplayName, "Lookup Type", "LookupType", "Text");
 
-            // IsActive field
-            AddLookupField(doc, lookupFields, "Is Active", "IsActive", "YesNo", true);
+            // IsDefault field
+            AddLookupField(doc, lookupFields, smoDisplayName, "Is Default", "IsDefault", "YesNo");
+
+            // Order field
+            AddLookupField(doc, lookupFields, smoDisplayName, "Order", "Order", "Number");
 
             lookupSource.AppendChild(lookupFields);
-            XmlHelper.AddElement(doc, lookupSource, "DisplayName", lookup.SmartObjectName.Replace("_", " "));
+            XmlHelper.AddElement(doc, lookupSource, "DisplayName", smoDisplayName);
 
             return lookupSource;
         }
 
-        private void AddLookupField(XmlDocument doc, XmlElement parent, string displayName,
-                                   string fieldName, string dataType, bool isMissing = false)
+        /// <summary>
+        /// Creates a Field element for a lookup source using K2's qualified naming convention.
+        /// K2 expects field Names in the format "{SmartObject DisplayName}.{Field DisplayName}"
+        /// (e.g., "Travel Request Lookups.ID", "Travel Request Lookups.Display Text").
+        /// </summary>
+        private void AddLookupField(XmlDocument doc, XmlElement parent, string smoDisplayName,
+                                   string fieldDisplayName, string fieldName, string dataType)
         {
             XmlElement field = doc.CreateElement("Field");
             string fieldGuid = Guid.NewGuid().ToString();
             field.SetAttribute("ID", fieldGuid);
             field.SetAttribute("Type", "ObjectProperty");
+            // K2 Version 31 expects Title-cased DataType
+            if (!string.IsNullOrEmpty(dataType) && char.IsLower(dataType[0]))
+                dataType = char.ToUpper(dataType[0]) + dataType.Substring(1);
             field.SetAttribute("DataType", dataType);
 
-            if (isMissing)
-            {
-                field.SetAttribute("ValidationStatus", "Missing");
-                field.SetAttribute("ValidationMessages",
-                    $"FieldProperty,ObjectProperty,Missing,,{fieldName},{displayName}");
-            }
+            // K2 uses fully qualified names: "SmartObject DisplayName.Field DisplayName"
+            string qualifiedName = $"{smoDisplayName}.{fieldDisplayName}";
 
-            XmlHelper.AddElement(doc, field, "Name", displayName);
+            XmlHelper.AddElement(doc, field, "Name", qualifiedName);
             XmlHelper.AddElement(doc, field, "FieldName", fieldName);
-            XmlHelper.AddElement(doc, field, "FieldDisplayName", displayName);
+            XmlHelper.AddElement(doc, field, "FieldDisplayName", fieldDisplayName);
             parent.AppendChild(field);
         }
 
@@ -2409,9 +2905,10 @@ namespace K2SmartObjectGenerator
         private bool IsDataBoundControl(string k2ControlType)
         {
             string[] dataBoundTypes = {
-                "TextBox", "TextArea", "HTMLEditor", "Calendar", "CheckBox",
+                "TextBox", "TextArea", "HTMLEditor", "DatePicker", "Calendar", "CheckBox",
                 "DropDown", "AutoComplete", "RadioButtonList", "CheckBoxList",
-                "Picker", "FilePostBack", "ImagePostBack", "SharePointHyperLink"
+                "Picker", "FilePostBack", "ImagePostBack", "SharePointHyperLink",
+                "NumericTextBox"
             };
             return dataBoundTypes.Contains(k2ControlType);
         }
@@ -2438,6 +2935,9 @@ namespace K2SmartObjectGenerator
                 case "FilePostBack": return "File Attachment";
                 case "ImagePostBack": return "Image Attachment";
                 case "ToolBarButton": return "ToolBar Button";
+                case "DatePicker": return "Date Picker";
+                case "NumericTextBox": return "Numeric Text Box";
+                case "DataLabel": return "Data Label";
                 default: return k2ControlType;
             }
         }
@@ -2467,7 +2967,7 @@ namespace K2SmartObjectGenerator
                     return "TextArea";
                 case "datepicker":
                 case "dtpicker":
-                    return "Calendar";
+                    return "Calendar";  // K2 Management API requires "Calendar" for deployment (runtime shows "DatePicker")
                 case "dropdown":
                     return "DropDown";
                 case "combobox":
@@ -2730,8 +3230,7 @@ namespace K2SmartObjectGenerator
             {
                 XmlElement cell = doc.CreateElement("Cell");
                 cell.SetAttribute("ID", cellGuids[i]);
-                cell.SetAttribute("ColumnSpan", "1");
-                cell.SetAttribute("RowSpan", "1");
+                // K2 strips default ColumnSpan="1" and RowSpan="1" during normalization
 
                 if (i == 0)
                 {

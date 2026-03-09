@@ -50,8 +50,8 @@ namespace FormGenerator.Services
                 AddPropertyElement(doc, propertiesElement, "RuleFriendlyName", rule.FriendlyName, rule.FriendlyName, null);
             }
 
-            // K2 expects lowercase location values (e.g., "view" not "View")
-            string normalizedLocation = (rule.Location ?? "view").ToLowerInvariant();
+            // K2 uses PascalCase location values (e.g., "View" not "view") - verified from live K2 XML
+            string normalizedLocation = rule.Location ?? "View";
             AddPropertyElement(doc, propertiesElement, "Location", normalizedLocation, normalizedLocation, null);
 
             // Handlers
@@ -281,7 +281,7 @@ namespace FormGenerator.Services
 
         private void BuildSimpleBlankExpression(XmlDocument doc, XmlElement parent, K2Condition condition)
         {
-            var isBlankElement = doc.CreateElement("IsEmpty");
+            var isBlankElement = doc.CreateElement("IsBlank");
             parent.AppendChild(isBlankElement);
 
             var item = doc.CreateElement("Item");
@@ -295,7 +295,7 @@ namespace FormGenerator.Services
 
         private void BuildSimpleNotBlankExpression(XmlDocument doc, XmlElement parent, K2Condition condition)
         {
-            var isNotBlankElement = doc.CreateElement("IsNotEmpty");
+            var isNotBlankElement = doc.CreateElement("IsNotBlank");
             parent.AppendChild(isNotBlankElement);
 
             var item = doc.CreateElement("Item");
@@ -427,12 +427,16 @@ namespace FormGenerator.Services
                 paramElement.SetAttribute("SourceID", mapping.SourceId);
             if (!string.IsNullOrEmpty(mapping.SourceName))
                 paramElement.SetAttribute("SourceName", mapping.SourceName);
+            if (!string.IsNullOrEmpty(mapping.SourceDisplayName))
+                paramElement.SetAttribute("SourceDisplayName", mapping.SourceDisplayName);
 
             paramElement.SetAttribute("TargetType", GetTargetTypeName(mapping.TargetType));
             paramElement.SetAttribute("TargetID", mapping.TargetId ?? "");
 
             if (!string.IsNullOrEmpty(mapping.TargetName))
                 paramElement.SetAttribute("TargetName", mapping.TargetName);
+            if (!string.IsNullOrEmpty(mapping.TargetDisplayName))
+                paramElement.SetAttribute("TargetDisplayName", mapping.TargetDisplayName);
             if (!string.IsNullOrEmpty(mapping.TargetInstanceId))
                 paramElement.SetAttribute("TargetInstanceID", mapping.TargetInstanceId);
 

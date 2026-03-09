@@ -36,12 +36,12 @@ namespace FormGenerator.Writers.K2.RuleBuilders
 
             var props = doc.CreateElement("Properties");
 
-            // ViewID property with NameValue and DisplayValue
+            // ViewID property - K2 Designer order: Name, DisplayValue, NameValue, Value
             var viewIdProp = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, viewIdProp, "Name", "ViewID");
+            XmlHelper.AddElement(doc, viewIdProp, "DisplayValue", viewName);
             XmlHelper.AddElement(doc, viewIdProp, "NameValue", viewName);
             XmlHelper.AddElement(doc, viewIdProp, "Value", viewGuid);
-            XmlHelper.AddElement(doc, viewIdProp, "DisplayValue", viewName);
             props.AppendChild(viewIdProp);
 
             // RuleFriendlyName
@@ -81,7 +81,7 @@ namespace FormGenerator.Writers.K2.RuleBuilders
             XmlHelper.AddElement(doc, nameProp, "Value", handlerName);
             props.AppendChild(nameProp);
 
-            // Location property - reference shows "view" (lowercase)
+            // Location property - K2 Designer uses lowercase "view" for handlers
             var locationProp = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, locationProp, "Name", "Location");
             XmlHelper.AddElement(doc, locationProp, "Value", "view");
@@ -122,9 +122,9 @@ namespace FormGenerator.Writers.K2.RuleBuilders
 
             var viewProp = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, viewProp, "Name", "ViewID");
+            XmlHelper.AddElement(doc, viewProp, "DisplayValue", viewName);
             XmlHelper.AddElement(doc, viewProp, "NameValue", viewName);
             XmlHelper.AddElement(doc, viewProp, "Value", viewGuid);
-            XmlHelper.AddElement(doc, viewProp, "DisplayValue", viewName);
             props.AppendChild(viewProp);
 
             action.AppendChild(props);
@@ -180,7 +180,7 @@ namespace FormGenerator.Writers.K2.RuleBuilders
 
             action.AppendChild(props);
 
-            // Parameter: source and target are both controls
+            // Parameter: source and target are both controls (control-to-control transfer)
             var parameters = doc.CreateElement("Parameters");
             var parameter = doc.CreateElement("Parameter");
             parameter.SetAttribute("SourceID", sourceControlId);
@@ -221,9 +221,9 @@ namespace FormGenerator.Writers.K2.RuleBuilders
 
             var viewProp = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, viewProp, "Name", "ViewID");
+            XmlHelper.AddElement(doc, viewProp, "DisplayValue", viewName);
             XmlHelper.AddElement(doc, viewProp, "NameValue", viewName);
             XmlHelper.AddElement(doc, viewProp, "Value", viewGuid);
-            XmlHelper.AddElement(doc, viewProp, "DisplayValue", viewName);
             props.AppendChild(viewProp);
 
             action.AppendChild(props);
@@ -231,10 +231,15 @@ namespace FormGenerator.Writers.K2.RuleBuilders
             // Parameters
             var parameters = doc.CreateElement("Parameters");
             var parameter = doc.CreateElement("Parameter");
-            parameter.SetAttribute("SourceType", sourceType);
 
+            // K2 Designer pattern: Value-type transfers use SourceID="Sources"
             if (!string.IsNullOrEmpty(sourceId))
                 parameter.SetAttribute("SourceID", sourceId);
+            else if (sourceType == "Value")
+                parameter.SetAttribute("SourceID", "Sources");
+
+            parameter.SetAttribute("SourceType", sourceType);
+
             if (!string.IsNullOrEmpty(sourceName))
             {
                 parameter.SetAttribute("SourceName", sourceName);

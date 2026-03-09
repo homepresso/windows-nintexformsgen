@@ -62,6 +62,29 @@
         }
 
         /// <summary>
+        /// Extracts the leaf field name from an InfoPath binding path.
+        /// This is the SINGLE SOURCE OF TRUTH for deriving SmartObject field names from bindings.
+        /// e.g., "my:category" -> "category", "/my:myFields/my:field1" -> "field1"
+        /// </summary>
+        public static string ExtractFieldNameFromBinding(string binding)
+        {
+            if (string.IsNullOrEmpty(binding)) return null;
+
+            // Take last segment of path
+            var parts = binding.Split('/');
+            var lastPart = parts[parts.Length - 1];
+
+            // Remove namespace prefix (e.g., "my:")
+            if (lastPart.Contains(':'))
+            {
+                var colonParts = lastPart.Split(':');
+                lastPart = colonParts[colonParts.Length - 1];
+            }
+
+            return string.IsNullOrEmpty(lastPart) ? null : lastPart;
+        }
+
+        /// <summary>
         /// Sanitizes SmartObject names to match K2's internal naming rules
         /// Similar to SanitizePropertyName but preserves original casing
         /// </summary>

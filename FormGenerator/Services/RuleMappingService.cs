@@ -1194,23 +1194,52 @@ namespace FormGenerator.Services
 
         /// <summary>
         /// Extract the source/trigger field name from a condition expression.
-        /// e.g., "my:category='Entertainment'" -> "my:category"
-        ///       "not((../my:category != 'Gifts'))" -> "../my:category"
+        /// Returns the LEAF field name (the actual control field, not parent groups).
+        /// e.g., "my:preferences/my:seatLocation='Aisle'" -> "seatLocation"
+        ///       "my:category='Entertainment'" -> "category"
+        ///       "not((../my:category != 'Gifts'))" -> "category"
+        ///       "my:isRoundTrip='true'" -> "isRoundTrip"
         ///       "." -> null (self-reference, not a named field)
         /// </summary>
         private string ExtractSourceFieldFromCondition(string condition)
         {
             if (string.IsNullOrEmpty(condition)) return null;
 
-            // Match patterns like my:fieldName or ../my:fieldName at the start (before operator)
+            // Match the full XPath field reference (e.g., my:preferences/my:seatLocation)
+            // then extract the LEAF segment (last my:xxx before the operator)
             var match = System.Text.RegularExpressions.Regex.Match(condition,
-                @"(?:not\s*\(\s*\(?\s*)?(?:\.\./)?(?:my:[\w/]+:)*(my:[\w]+(?:/my:[\w]+)*)",
+                @"(?:not\s*\(\s*\(?\s*)?(?:\.\./)?(?:my:[\w]+(?:/my:[\w]+)*)",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
             if (match.Success)
             {
-                // Return the full XPath so the resolver can strip it
-                return match.Groups[1].Value;
+                string fullPath = match.Value;
+                // Strip any leading not( wrapper
+                fullPath = System.Text.RegularExpressions.Regex.Replace(fullPath, @"^not\s*\(\s*\(?\s*", "");
+                fullPath = fullPath.TrimStart('.', '/');
+
+                // Take the last my:xxx segment (the leaf field)
+                string[] segments = fullPath.Split('/');
+                string lastSegment = segments[segments.Length - 1];
+                // Strip the my: prefix to get the plain field name
+                return lastSegment.Replace("my:", "");
+            }
+
+            // Fallback: try matching plain field names without my: prefix
+            // Handles conditions like "category != 'Gifts'" or "not((category = 'value'))"
+            var plainMatch = System.Text.RegularExpressions.Regex.Match(condition,
+                @"(?:not\s*\(\s*\(?\s*)?(?:\.\./)*([a-zA-Z_][\w]*)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (plainMatch.Success)
+            {
+                string fieldName = plainMatch.Groups[1].Value;
+                // Skip common XPath functions and operators that aren't field names
+                string[] skipWords = { "not", "and", "or", "true", "false", "string", "number", "contains", "starts", "normalize", "translate", "substring", "concat", "function" };
+                if (!Array.Exists(skipWords, w => w.Equals(fieldName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return fieldName;
+                }
             }
 
             return null;

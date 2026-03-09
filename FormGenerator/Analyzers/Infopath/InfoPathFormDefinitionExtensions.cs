@@ -261,6 +261,8 @@ namespace FormGenerator.Analyzers.InfoPath
                     ColumnName = d.ColumnName,
                     d.Type,
                     d.DisplayName,
+                    // Data type information from InfoPath metadata
+                    DataType = d.DataType,
                     // Section context - INCLUDING REPEATING SECTION NAME
                     Section = !string.IsNullOrEmpty(d.RepeatingSection) ? d.RepeatingSection : null,
                     RepeatingSectionName = d.IsRepeating ? d.RepeatingSection : null,  // ADD THIS FOR CLARITY
@@ -285,9 +287,11 @@ namespace FormGenerator.Analyzers.InfoPath
                     ds.ConditionField,
                     ds.ConditionValue,
                     ds.Controls,
+                    ds.FieldNames,
                     ds.IsVisible
                 }).ToList(),
                 ConditionalVisibility = formDef.ConditionalVisibility,
+                InfoPathToK2NameMap = formDef.InfoPathToK2NameMap,
                 Metadata = new
                 {
                     formDef.Metadata.TotalControls,

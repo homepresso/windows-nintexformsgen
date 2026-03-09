@@ -13,12 +13,108 @@ namespace K2SmartObjectGenerator
         private HashSet<string> _usedEventIds;
         private HashSet<string> _usedHandlerIds;
 
+        // Maps K2 control GUIDs to their deployed K2 display names (e.g., "ROUNDTRIP CheckBox")
+        // Built from the deployed XML during Phase 2 so rules use actual K2 control names.
+        private Dictionary<string, string> _deployedControlNameMap;
+        private string _deployedViewDisplayName;
+
         public ViewRulesBuilder()
         {
             _usedEventIds = new HashSet<string>();
             _usedHandlerIds = new HashSet<string>();
+            _deployedControlNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Builds a map from control GUID to K2 control display name by parsing the deployed view XML.
+        /// Also extracts the view's deployed display name.
+        /// </summary>
+        private void BuildDeployedControlNameMap(XmlDocument doc, string fallbackViewName)
+        {
+            _deployedControlNameMap.Clear();
+            _deployedViewDisplayName = fallbackViewName;
+
+            try
+            {
+                // Get the view display name
+                var viewNode = doc.SelectSingleNode("//View") as XmlElement;
+                if (viewNode != null)
+                {
+                    var viewDisplayNameNode = viewNode.SelectSingleNode("DisplayName");
+                    if (viewDisplayNameNode != null && !string.IsNullOrEmpty(viewDisplayNameNode.InnerText))
+                    {
+                        _deployedViewDisplayName = viewDisplayNameNode.InnerText;
+                    }
+                    else
+                    {
+                        var viewNameNode = viewNode.SelectSingleNode("Name");
+                        if (viewNameNode != null && !string.IsNullOrEmpty(viewNameNode.InnerText))
+                        {
+                            _deployedViewDisplayName = viewNameNode.InnerText;
+                        }
+                    }
+                }
+
+                // Build control GUID → display name map
+                var controls = doc.GetElementsByTagName("Control");
+                foreach (XmlElement ctrl in controls)
+                {
+                    string id = ctrl.GetAttribute("ID");
+                    if (string.IsNullOrEmpty(id)) continue;
+
+                    // First try the Name child element
+                    var nameNode = ctrl.SelectSingleNode("Name");
+                    string controlName = nameNode?.InnerText;
+
+                    // Fall back to ControlName property
+                    if (string.IsNullOrEmpty(controlName))
+                    {
+                        var propsNode = ctrl.SelectSingleNode("Properties");
+                        if (propsNode != null)
+                        {
+                            foreach (XmlNode prop in propsNode.ChildNodes)
+                            {
+                                var propName = prop.SelectSingleNode("Name");
+                                if (propName?.InnerText == "ControlName")
+                                {
+                                    controlName = prop.SelectSingleNode("Value")?.InnerText;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(controlName) && !_deployedControlNameMap.ContainsKey(id))
+                    {
+                        _deployedControlNameMap[id] = controlName;
+                    }
+                }
+
+                Console.WriteLine($"    Built deployed control name map: {_deployedControlNameMap.Count} controls, view display name: '{_deployedViewDisplayName}'");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    WARNING: Failed to build control name map: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gets the K2 deployed display name for a control, falling back to the provided name.
+        /// </summary>
+        private string GetDeployedControlName(string controlId, string fallbackName)
+        {
+            if (!string.IsNullOrEmpty(controlId) && _deployedControlNameMap.TryGetValue(controlId, out string deployedName))
+            {
+                return deployedName;
+            }
+            return fallbackName;
+        }
+
+        /// <summary>
+        /// Creates the full events section with structural events AND rule events.
+        /// This is the legacy method kept for backward compatibility.
+        /// For two-phase deployment, use CreateStructuralEvents() first, then AddRuleEvents() after deploy.
+        /// </summary>
         public XmlElement CreateEventsWithRules(XmlDocument doc, string viewGuid, string viewName,
                                                Dictionary<string, string> controlIdMap,
                                                Dictionary<string, string> controlToFieldMap,
@@ -27,13 +123,34 @@ namespace K2SmartObjectGenerator
                                                JArray dynamicSections, JObject conditionalVisibility,
                                                JArray controls, Dictionary<string, string> jsonToK2ControlIdMap)
         {
-            XmlElement events = doc.CreateElement("Events");
-
-            // Track which control SourceIDs already have events to prevent duplicates
-            // K2 Form.EventInstance has a unique constraint on (ContextID, EventID, ...)
-            // where EventID maps to the event's SourceID. Two events with the same SourceID
-            // will cause a duplicate key error on deploy.
+            // Phase 1: Create structural events only
             var controlEventMap = new Dictionary<string, XmlElement>(StringComparer.OrdinalIgnoreCase);
+            XmlElement events = CreateStructuralEvents(doc, viewGuid, viewName, controlIdMap,
+                controlToFieldMap, fieldMap, lookupSmartObjects, dynamicSections, controls,
+                jsonToK2ControlIdMap, controlEventMap);
+
+            // Phase 2: Add rule events on top
+            AddRuleEvents(doc, events, viewGuid, viewName, controlIdMap,
+                dynamicSections, conditionalVisibility, controls, jsonToK2ControlIdMap, controlEventMap);
+
+            return events;
+        }
+
+        /// <summary>
+        /// Creates ONLY structural events: Init (data loading) + OnChange (data binding).
+        /// These are required for the view to function and should be deployed FIRST.
+        /// Rule events (visibility, conditional, InfoPath) are added later via AddRuleEvents().
+        /// </summary>
+        public XmlElement CreateStructuralEvents(XmlDocument doc, string viewGuid, string viewName,
+                                               Dictionary<string, string> controlIdMap,
+                                               Dictionary<string, string> controlToFieldMap,
+                                               Dictionary<string, FieldInfo> fieldMap,
+                                               Dictionary<string, LookupInfo> lookupSmartObjects,
+                                               JArray dynamicSections,
+                                               JArray controls, Dictionary<string, string> jsonToK2ControlIdMap,
+                                               Dictionary<string, XmlElement> controlEventMap)
+        {
+            XmlElement events = doc.CreateElement("Events");
 
             // Create standard Init event with visibility initialization
             XmlElement initEvent = CreateInitEvent(doc, viewGuid, viewName, controlIdMap,
@@ -56,11 +173,27 @@ namespace K2SmartObjectGenerator
                 }
             }
 
-            // Now add visibility rules
+            return events;
+        }
+
+        /// <summary>
+        /// Adds rule events (visibility + conditional visibility) to an existing events section.
+        /// Called in phase 2 AFTER the view has been deployed with structural events.
+        /// Works on either freshly-built XML or XML fetched back from K2 via GetViewDefinition().
+        /// </summary>
+        public void AddRuleEvents(XmlDocument doc, XmlElement events, string viewGuid, string viewName,
+                                  Dictionary<string, string> controlIdMap,
+                                  JArray dynamicSections, JObject conditionalVisibility,
+                                  JArray controls, Dictionary<string, string> jsonToK2ControlIdMap,
+                                  Dictionary<string, XmlElement> controlEventMap)
+        {
+            // Build the deployed control name map from the XML so we can use actual K2 control names
+            BuildDeployedControlNameMap(doc, viewName);
+
+            // Add visibility rules for dynamic sections
             if (dynamicSections != null && dynamicSections.Count > 0)
             {
                 Console.WriteLine($"    Processing {dynamicSections.Count} dynamic sections for visibility rules");
-                FixDynamicSectionControlIds(dynamicSections);
                 AddVisibilityRules(doc, events, dynamicSections, controlIdMap, viewGuid, viewName,
                     controls, jsonToK2ControlIdMap, controlEventMap);
             }
@@ -72,8 +205,6 @@ namespace K2SmartObjectGenerator
                 AddConditionalVisibilityRules(doc, events, conditionalVisibility, controlIdMap,
                     viewGuid, viewName, controlEventMap);
             }
-
-            return events;
         }
 
         private XmlElement CreateInitEvent(XmlDocument doc, string viewGuid, string viewName,
@@ -95,6 +226,28 @@ namespace K2SmartObjectGenerator
             initEvent.SetAttribute("SourceDisplayName", viewName);
 
             XmlHelper.AddElement(doc, initEvent, "Name", "Init");
+
+            // Add Properties element with ViewID, RuleFriendlyName, and Location
+            XmlElement eventProps = doc.CreateElement("Properties");
+
+            XmlElement evtViewIdProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, evtViewIdProp, "Name", "ViewID");
+            XmlHelper.AddElement(doc, evtViewIdProp, "DisplayValue", viewName);
+            XmlHelper.AddElement(doc, evtViewIdProp, "NameValue", viewName);
+            XmlHelper.AddElement(doc, evtViewIdProp, "Value", viewGuid);
+            eventProps.AppendChild(evtViewIdProp);
+
+            XmlElement evtRuleFriendlyProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, evtRuleFriendlyProp, "Name", "RuleFriendlyName");
+            XmlHelper.AddElement(doc, evtRuleFriendlyProp, "Value", $"When the View '{viewName}' executed Initialized");
+            eventProps.AppendChild(evtRuleFriendlyProp);
+
+            XmlElement evtLocationProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, evtLocationProp, "Name", "Location");
+            XmlHelper.AddElement(doc, evtLocationProp, "Value", viewName);
+            eventProps.AppendChild(evtLocationProp);
+
+            initEvent.AppendChild(eventProps);
 
             XmlElement handlers = doc.CreateElement("Handlers");
             XmlElement handler = doc.CreateElement("Handler");
@@ -172,10 +325,18 @@ namespace K2SmartObjectGenerator
             }
 
             // Add initial visibility actions based on checkbox default values
-            if (dynamicSections != null && dynamicSections.Count > 0)
+            // Skip for item views - item views are shown/hidden as a whole via AreaItem visibility,
+            // not by hiding individual controls. Section-level visibility rules (e.g., itemPosition)
+            // are InfoPath-specific and don't apply in K2's item/list view pattern.
+            bool isItemView = viewName.EndsWith("_Item", StringComparison.OrdinalIgnoreCase);
+            if (dynamicSections != null && dynamicSections.Count > 0 && !isItemView)
             {
                 AddInitialVisibilityActions(doc, actions, dynamicSections, controls, controlIdMap,
                     viewGuid, viewName, jsonToK2ControlIdMap);
+            }
+            else if (isItemView)
+            {
+                Console.WriteLine("        Skipping initial visibility actions for item view (controls always visible)");
             }
 
             handler.AppendChild(actions);
@@ -241,11 +402,12 @@ namespace K2SmartObjectGenerator
                 XmlHelper.AddElement(doc, filterProp, "Name", "Filter");
 
                 // Create filter XML for LookupType = parameter value
-                string filterXml = $@"<Filter isSimple=""True""><Equals>" +
+                // K2 requires PropertyExpressions (Equals) to be wrapped in a LogicalExpression (And)
+                string filterXml = $@"<Filter isSimple=""True""><And><Equals>" +
                     $@"<Item SourceType=""ObjectProperty"" SourceID=""LookupType"" DataType=""Text"" " +
                     $@"SourceName=""LookupType"" SourceDisplayName=""Lookup Type"">LookupType</Item>" +
                     $@"<Item SourceType=""Value""><SourceValue>{lookup.LookupParameter}</SourceValue></Item>" +
-                    $@"</Equals></Filter>";
+                    $@"</Equals></And></Filter>";
 
                 XmlHelper.AddElement(doc, filterProp, "Value", filterXml);
                 executeProps.AppendChild(filterProp);
@@ -283,15 +445,16 @@ namespace K2SmartObjectGenerator
 
             HashSet<string> processedTriggers = new HashSet<string>();
 
-            NormalizeDynamicSectionControlIds(dynamicSections);
-
             foreach (JObject section in dynamicSections)
             {
                 string ctrlId = section["CtrlId"]?.Value<string>();
                 string conditionField = section["ConditionField"]?.Value<string>();
                 JArray controlsToToggle = section["Controls"] as JArray;
+                JArray fieldNames = section["FieldNames"] as JArray;
 
-                if (controlsToToggle == null || controlsToToggle.Count == 0)
+                // Skip sections with no controls AND no field names
+                if ((controlsToToggle == null || controlsToToggle.Count == 0) &&
+                    (fieldNames == null || fieldNames.Count == 0))
                     continue;
 
                 string triggerControlId = null;
@@ -569,18 +732,26 @@ namespace K2SmartObjectGenerator
             {
                 string ctrlId = section["CtrlId"]?.Value<string>();
                 string conditionField = section["ConditionField"]?.Value<string>();
+                string conditionValue = section["ConditionValue"]?.Value<string>();
                 JArray controlsToToggle = section["Controls"] as JArray;
+                JArray fieldNames = section["FieldNames"] as JArray;
 
-                if (controlsToToggle == null || controlsToToggle.Count == 0)
+                Console.WriteLine($"      --- Section CtrlId={ctrlId}, ConditionField={conditionField}, ConditionValue={conditionValue}");
+                Console.WriteLine($"          Controls: [{(controlsToToggle != null ? string.Join(", ", controlsToToggle.Select(c => c.Value<string>())) : "null")}]");
+                Console.WriteLine($"          FieldNames: [{(fieldNames != null ? string.Join(", ", fieldNames.Select(f => f.Value<string>())) : "null")}]");
+
+                if ((controlsToToggle == null || controlsToToggle.Count == 0) &&
+                    (fieldNames == null || fieldNames.Count == 0))
                 {
-                    Console.WriteLine($"      Skipping section with no controls to toggle");
+                    Console.WriteLine($"      Skipping section with no controls and no field names to toggle");
                     continue;
                 }
 
                 List<string> allSectionControls = GetAllControlsInSection(dynamicSections, section,
                     controls, controlIdMap, jsonToK2ControlIdMap);
 
-                Console.WriteLine($"      Section has {controlsToToggle.Count} explicit controls, " +
+                int explicitCount = controlsToToggle != null ? controlsToToggle.Count : 0;
+                Console.WriteLine($"      Section has {explicitCount} explicit controls + {(fieldNames != null ? fieldNames.Count : 0)} field names, " +
                                  $"expanded to {allSectionControls.Count} total controls (including labels)");
 
                 if (allSectionControls.Count == 0)
@@ -592,8 +763,50 @@ namespace K2SmartObjectGenerator
                 string triggerControlId = null;
                 string triggerFieldName = null;
 
-                // Determine the trigger control
-                if (!string.IsNullOrEmpty(ctrlId))
+                // Strategy 1: Use conditionField FIRST to find the actual data control (e.g. checkbox).
+                // The section's CtrlId (e.g., CTRL57) often maps to a K2 Section layout control,
+                // NOT the data checkbox. conditionField (e.g., "isRoundTrip") points to the actual
+                // data field that controls visibility.
+                if (!string.IsNullOrEmpty(conditionField))
+                {
+                    triggerFieldName = conditionField.ToUpper();
+
+                    // Try to find a data control matching conditionField
+                    foreach (JObject ctrl in controls)
+                    {
+                        string name = ctrl["Name"]?.Value<string>();
+
+                        if (name?.ToUpper() == triggerFieldName ||
+                            (conditionField.StartsWith("is") && name?.ToUpper() == conditionField.Substring(2).ToUpper()))
+                        {
+                            string controlCtrlId = ctrl["CtrlId"]?.Value<string>();
+                            if (!string.IsNullOrEmpty(controlCtrlId) && jsonToK2ControlIdMap.ContainsKey(controlCtrlId))
+                            {
+                                triggerControlId = jsonToK2ControlIdMap[controlCtrlId];
+                                break;
+                            }
+                        }
+                    }
+
+                    // Also try controlIdMap (which maps K2 field names to K2 control GUIDs)
+                    if (string.IsNullOrEmpty(triggerControlId))
+                    {
+                        triggerControlId = FindControlIdByFieldName(triggerFieldName, controlIdMap);
+                    }
+
+                    // Also try with "is" prefix stripped (e.g., "isRoundTrip" -> "ROUNDTRIP")
+                    if (string.IsNullOrEmpty(triggerControlId) && conditionField.StartsWith("is") && conditionField.Length > 2)
+                    {
+                        triggerControlId = FindControlIdByFieldName(conditionField.Substring(2).ToUpper(), controlIdMap);
+                        if (!string.IsNullOrEmpty(triggerControlId))
+                        {
+                            triggerFieldName = conditionField.Substring(2).ToUpper();
+                        }
+                    }
+                }
+
+                // Strategy 2: Fall back to ctrlId only if conditionField didn't resolve
+                if (string.IsNullOrEmpty(triggerControlId) && !string.IsNullOrEmpty(ctrlId))
                 {
                     if (jsonToK2ControlIdMap.ContainsKey(ctrlId))
                     {
@@ -615,29 +828,17 @@ namespace K2SmartObjectGenerator
                     }
                 }
 
-                if (string.IsNullOrEmpty(triggerControlId) && !string.IsNullOrEmpty(conditionField))
+                // Final name resolution: reverse-lookup the K2 control name from controlIdMap
+                // to ensure we use the actual K2 control name, not a JSON artifact
+                if (!string.IsNullOrEmpty(triggerControlId))
                 {
-                    triggerFieldName = conditionField.ToUpper();
-
-                    foreach (JObject ctrl in controls)
+                    foreach (var kvp in controlIdMap)
                     {
-                        string name = ctrl["Name"]?.Value<string>();
-
-                        if (name?.ToUpper() == triggerFieldName ||
-                            (conditionField.StartsWith("is") && name?.ToUpper() == conditionField.Substring(2).ToUpper()))
+                        if (kvp.Value == triggerControlId)
                         {
-                            string controlCtrlId = ctrl["CtrlId"]?.Value<string>();
-                            if (!string.IsNullOrEmpty(controlCtrlId) && jsonToK2ControlIdMap.ContainsKey(controlCtrlId))
-                            {
-                                triggerControlId = jsonToK2ControlIdMap[controlCtrlId];
-                                break;
-                            }
+                            triggerFieldName = kvp.Key;
+                            break;
                         }
-                    }
-
-                    if (string.IsNullOrEmpty(triggerControlId))
-                    {
-                        triggerControlId = FindControlIdByFieldName(triggerFieldName, controlIdMap);
                     }
                 }
 
@@ -710,6 +911,10 @@ namespace K2SmartObjectGenerator
                                                        Dictionary<string, string> controlIdMap,
                                                        string viewGuid, string viewName)
         {
+            // Use deployed K2 control name for display (e.g., "ROUNDTRIP CheckBox" instead of "ROUNDTRIP")
+            string k2ControlName = GetDeployedControlName(checkboxControlId, checkboxFieldName);
+            string viewDisplayName = _deployedViewDisplayName ?? viewName;
+
             XmlElement eventElement = doc.CreateElement("Event");
             string eventGuid = Guid.NewGuid().ToString();
             eventElement.SetAttribute("ID", eventGuid);
@@ -717,8 +922,8 @@ namespace K2SmartObjectGenerator
             eventElement.SetAttribute("Type", "User");
             eventElement.SetAttribute("SourceID", checkboxControlId);
             eventElement.SetAttribute("SourceType", "Control");
-            eventElement.SetAttribute("SourceName", checkboxFieldName);
-            eventElement.SetAttribute("SourceDisplayName", checkboxFieldName);
+            eventElement.SetAttribute("SourceName", k2ControlName);
+            eventElement.SetAttribute("SourceDisplayName", k2ControlName);
             eventElement.SetAttribute("IsExtended", "True");
 
             XmlHelper.AddElement(doc, eventElement, "Name", "OnChange");
@@ -734,7 +939,7 @@ namespace K2SmartObjectGenerator
 
             XmlElement ruleFriendlyName = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, ruleFriendlyName, "Name", "RuleFriendlyName");
-            XmlHelper.AddElement(doc, ruleFriendlyName, "Value", $"When {checkboxFieldName} is Changed");
+            XmlHelper.AddElement(doc, ruleFriendlyName, "Value", $"When {k2ControlName} is Changed");
             props.AppendChild(ruleFriendlyName);
 
             XmlElement locationProp = doc.CreateElement("Property");
@@ -748,15 +953,22 @@ namespace K2SmartObjectGenerator
 
             // Handler for checkbox = True (show all controls)
             XmlElement trueHandler = CreateSectionHandler(doc, checkboxControlId, checkboxFieldName,
-                true, allControlIds, viewGuid, viewName);
+                true, allControlIds, viewGuid, viewName, controlIdMap);
             if (trueHandler != null)
                 handlers.AppendChild(trueHandler);
 
             // Handler for checkbox = False (hide all controls)
             XmlElement falseHandler = CreateSectionHandler(doc, checkboxControlId, checkboxFieldName,
-                false, allControlIds, viewGuid, viewName);
+                false, allControlIds, viewGuid, viewName, controlIdMap);
             if (falseHandler != null)
                 handlers.AppendChild(falseHandler);
+
+            // If no handlers resolved, don't create an empty event (would cause K2 errors)
+            if (handlers.ChildNodes.Count == 0)
+            {
+                Console.WriteLine($"      WARNING: No handlers resolved for visibility event on '{checkboxFieldName}' - skipping event creation");
+                return null;
+            }
 
             eventElement.AppendChild(handlers);
             return eventElement;
@@ -764,7 +976,8 @@ namespace K2SmartObjectGenerator
 
         private XmlElement CreateSectionHandler(XmlDocument doc, string checkboxControlId,
                                                string checkboxFieldName, bool checkForTrue,
-                                               JArray controlIds, string viewGuid, string viewName)
+                                               JArray controlIds, string viewGuid, string viewName,
+                                               Dictionary<string, string> controlIdMap = null)
         {
             XmlElement handler = doc.CreateElement("Handler");
             handler.SetAttribute("ID", Guid.NewGuid().ToString());
@@ -779,7 +992,7 @@ namespace K2SmartObjectGenerator
 
             XmlElement locationProp = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, locationProp, "Name", "Location");
-            XmlHelper.AddElement(doc, locationProp, "Value", "view");
+            XmlHelper.AddElement(doc, locationProp, "Value", "view");  // Must be lowercase per K2 reference
             handlerProps.AppendChild(locationProp);
 
             handler.AppendChild(handlerProps);
@@ -804,22 +1017,26 @@ namespace K2SmartObjectGenerator
 
             condition.AppendChild(condProps);
 
-            // Create expression
+            // Create expression - Equals goes directly in Expressions (no And wrapper)
+            // Reference: checkbox-visibility.xml shows <Expressions><Equals>...</Equals></Expressions>
             XmlElement expressions = doc.CreateElement("Expressions");
             XmlElement equals = doc.CreateElement("Equals");
+
+            // Use deployed K2 control names for accurate display
+            string k2CheckboxName = GetDeployedControlName(checkboxControlId, checkboxFieldName);
 
             XmlElement sourceItem = doc.CreateElement("Item");
             sourceItem.SetAttribute("SourceType", "Control");
             sourceItem.SetAttribute("SourceID", checkboxControlId);
-            sourceItem.SetAttribute("SourceName", checkboxFieldName);
-            sourceItem.SetAttribute("SourceDisplayName", checkboxFieldName);
+            sourceItem.SetAttribute("SourceName", k2CheckboxName);
+            sourceItem.SetAttribute("SourceDisplayName", k2CheckboxName);
             sourceItem.SetAttribute("DataType", "Text");
             equals.AppendChild(sourceItem);
 
             XmlElement valueItem = doc.CreateElement("Item");
             valueItem.SetAttribute("SourceType", "Value");
             valueItem.SetAttribute("DataType", "Text");
-            valueItem.InnerText = checkForTrue ? "True" : "False";
+            valueItem.InnerText = checkForTrue ? "true" : "false";
             equals.AppendChild(valueItem);
 
             expressions.AppendChild(equals);
@@ -835,13 +1052,39 @@ namespace K2SmartObjectGenerator
                 if (!string.IsNullOrEmpty(controlId))
                 {
                     bool makeVisible = checkForTrue;
+                    // Use deployed K2 control name; fall back to reverse lookup from controlIdMap
+                    string targetName = GetDeployedControlName(controlId, null);
+                    if (string.IsNullOrEmpty(targetName))
+                    {
+                        targetName = $"Control_{controlId}";
+                        if (controlIdMap != null)
+                        {
+                            foreach (var kvp in controlIdMap)
+                            {
+                                if (kvp.Value == controlId)
+                                {
+                                    targetName = kvp.Key;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     XmlElement action = CreateTransferAction(doc, controlId,
-                        $"Control_{controlId}", makeVisible, viewGuid, viewName);
+                        targetName, makeVisible, viewGuid, viewName);
                     actions.AppendChild(action);
                 }
             }
 
-            handler.AppendChild(actions);
+            // Only append if we have at least one action - empty Actions can cause red errors in K2
+            if (actions.ChildNodes.Count > 0)
+            {
+                handler.AppendChild(actions);
+            }
+            else
+            {
+                Console.WriteLine($"      WARNING: No actions resolved for section handler (checkForTrue={checkForTrue}) - handler will have empty actions");
+                return null;
+            }
             return handler;
         }
 
@@ -869,6 +1112,13 @@ namespace K2SmartObjectGenerator
                 XmlElement hideHandler = CreateSimpleVisibilityHandler(doc, controlId, fieldName,
                     affectedControls, controlIdMap, false, viewGuid, viewName);
 
+                // Skip if neither handler resolved any actions
+                if (showHandler == null && hideHandler == null)
+                {
+                    Console.WriteLine($"        Skipping conditional visibility for {fieldName} - no target controls resolved");
+                    continue;
+                }
+
                 // Check if there's already an event for this control
                 if (controlEventMap != null && controlEventMap.ContainsKey(controlId))
                 {
@@ -880,20 +1130,24 @@ namespace K2SmartObjectGenerator
                         handlersNode = doc.CreateElement("Handlers");
                         existingEvent.AppendChild(handlersNode);
                     }
-                    handlersNode.AppendChild(showHandler);
-                    handlersNode.AppendChild(hideHandler);
+                    if (showHandler != null) handlersNode.AppendChild(showHandler);
+                    if (hideHandler != null) handlersNode.AppendChild(hideHandler);
                     Console.WriteLine($"        Merged conditional visibility rule into existing event for field: {fieldName}");
                 }
                 else
                 {
-                    // Create new event
+                    // Create new event - use deployed K2 control and view names
+                    string k2ControlName = GetDeployedControlName(controlId, fieldName);
+                    string viewDisplayName = _deployedViewDisplayName ?? viewName;
+
                     XmlElement changeEvent = doc.CreateElement("Event");
                     changeEvent.SetAttribute("ID", Guid.NewGuid().ToString());
                     changeEvent.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
                     changeEvent.SetAttribute("Type", "User");
                     changeEvent.SetAttribute("SourceID", controlId);
                     changeEvent.SetAttribute("SourceType", "Control");
-                    changeEvent.SetAttribute("SourceName", fieldName);
+                    changeEvent.SetAttribute("SourceName", k2ControlName);
+                    changeEvent.SetAttribute("SourceDisplayName", k2ControlName);
                     changeEvent.SetAttribute("IsExtended", "True");
 
                     XmlHelper.AddElement(doc, changeEvent, "Name", "OnChange");
@@ -901,20 +1155,26 @@ namespace K2SmartObjectGenerator
                     XmlElement props = doc.CreateElement("Properties");
                     XmlElement viewIdProp = doc.CreateElement("Property");
                     XmlHelper.AddElement(doc, viewIdProp, "Name", "ViewID");
+                    XmlHelper.AddElement(doc, viewIdProp, "NameValue", viewName);
                     XmlHelper.AddElement(doc, viewIdProp, "Value", viewGuid);
                     XmlHelper.AddElement(doc, viewIdProp, "DisplayValue", viewName);
                     props.AppendChild(viewIdProp);
 
                     XmlElement ruleName = doc.CreateElement("Property");
                     XmlHelper.AddElement(doc, ruleName, "Name", "RuleFriendlyName");
-                    XmlHelper.AddElement(doc, ruleName, "Value", $"When {fieldName} is Changed");
+                    XmlHelper.AddElement(doc, ruleName, "Value", $"When {k2ControlName} is Changed");
                     props.AppendChild(ruleName);
+
+                    XmlElement locationProp = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, locationProp, "Name", "Location");
+                    XmlHelper.AddElement(doc, locationProp, "Value", viewName);
+                    props.AppendChild(locationProp);
 
                     changeEvent.AppendChild(props);
 
                     XmlElement handlers = doc.CreateElement("Handlers");
-                    handlers.AppendChild(showHandler);
-                    handlers.AppendChild(hideHandler);
+                    if (showHandler != null) handlers.AppendChild(showHandler);
+                    if (hideHandler != null) handlers.AppendChild(hideHandler);
 
                     changeEvent.AppendChild(handlers);
                     events.AppendChild(changeEvent);
@@ -941,6 +1201,12 @@ namespace K2SmartObjectGenerator
             XmlHelper.AddElement(doc, handlerName, "Name", "HandlerName");
             XmlHelper.AddElement(doc, handlerName, "Value", "IfLogicalHandler");
             handlerProps.AppendChild(handlerName);
+
+            XmlElement handlerLocationProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, handlerLocationProp, "Name", "Location");
+            XmlHelper.AddElement(doc, handlerLocationProp, "Value", "view");
+            handlerProps.AppendChild(handlerLocationProp);
+
             handler.AppendChild(handlerProps);
 
             // Create condition
@@ -950,19 +1216,44 @@ namespace K2SmartObjectGenerator
             condition.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
 
             XmlElement condProps = doc.CreateElement("Properties");
+
+            XmlElement condLocationProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, condLocationProp, "Name", "Location");
+            XmlHelper.AddElement(doc, condLocationProp, "Value", "View");
+            condProps.AppendChild(condLocationProp);
+
             XmlElement condName = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, condName, "Name", "Name");
-            XmlHelper.AddElement(doc, condName, "Value", showControls ? "SimpleNotEmptyCondition" : "SimpleEmptyCondition");
+            XmlHelper.AddElement(doc, condName, "Value", "SimpleEqualControlCondition");
             condProps.AppendChild(condName);
             condition.AppendChild(condProps);
 
+            // Create expression - comparison goes directly in Expressions (no And wrapper)
+            // Reference: checkbox-visibility.xml shows <Expressions><Equals>...</Equals></Expressions>
+            // BOTH handlers use <Equals> - the show handler checks =true, the hide handler checks =false
             XmlElement expressions = doc.CreateElement("Expressions");
+            XmlElement equalsWrapper = doc.CreateElement("Equals");
+
+            // Use deployed K2 control name for display
+            string k2SourceName = GetDeployedControlName(controlId, fieldName);
+
             XmlElement sourceItem = doc.CreateElement("Item");
             sourceItem.SetAttribute("SourceType", "Control");
             sourceItem.SetAttribute("SourceID", controlId);
-            sourceItem.SetAttribute("SourceName", fieldName);
+            sourceItem.SetAttribute("SourceName", k2SourceName);
+            sourceItem.SetAttribute("SourceDisplayName", k2SourceName);
             sourceItem.SetAttribute("DataType", "Text");
-            expressions.AppendChild(sourceItem);
+            equalsWrapper.AppendChild(sourceItem);
+
+            // Compare against "true" or "false" (not empty string)
+            // Reference: checkbox-visibility.xml shows <Item SourceType="Value" DataType="Text">true</Item>
+            XmlElement comparisonValue = doc.CreateElement("Item");
+            comparisonValue.SetAttribute("SourceType", "Value");
+            comparisonValue.SetAttribute("DataType", "Text");
+            comparisonValue.InnerText = showControls ? "true" : "false";
+            equalsWrapper.AppendChild(comparisonValue);
+
+            expressions.AppendChild(equalsWrapper);
 
             condition.AppendChild(expressions);
             conditions.AppendChild(condition);
@@ -976,13 +1267,24 @@ namespace K2SmartObjectGenerator
                 string targetControlId = FindControlIdByFieldName(controlName.Value<string>(), controlIdMap);
                 if (!string.IsNullOrEmpty(targetControlId))
                 {
+                    // Use deployed K2 control name for display
+                    string k2TargetName = GetDeployedControlName(targetControlId, controlName.Value<string>());
                     XmlElement action = CreateTransferAction(doc, targetControlId,
-                        controlName.Value<string>(), showControls, viewGuid, viewName);
+                        k2TargetName, showControls, viewGuid, viewName);
                     actions.AppendChild(action);
                 }
             }
 
-            handler.AppendChild(actions);
+            // Only append if we have at least one action - empty Actions can cause red errors in K2
+            if (actions.ChildNodes.Count > 0)
+            {
+                handler.AppendChild(actions);
+            }
+            else
+            {
+                Console.WriteLine($"      WARNING: No actions resolved for conditional visibility handler (showControls={showControls}) - returning null");
+                return null;
+            }
             return handler;
         }
 
@@ -990,11 +1292,13 @@ namespace K2SmartObjectGenerator
                                                string targetControlName, bool makeVisible,
                                                string viewGuid, string viewName)
         {
+            string viewDisplayName = _deployedViewDisplayName ?? viewName;
+
             XmlElement action = doc.CreateElement("Action");
             action.SetAttribute("ID", Guid.NewGuid().ToString());
             action.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
             action.SetAttribute("Type", "Transfer");
-            action.SetAttribute("ExecutionType", "Parallel");
+            action.SetAttribute("ExecutionType", "Synchronous");
 
             XmlElement props = doc.CreateElement("Properties");
 
@@ -1044,6 +1348,61 @@ namespace K2SmartObjectGenerator
         {
             List<string> sectionControlIds = new List<string>();
 
+            // PRIMARY PATH: Use FieldNames for deterministic resolution.
+            // The analysis phase resolves CtrlIds to field names. Since K2 has no sections,
+            // we look up each field's K2 control directly by name from the controlIdMap.
+            JArray fieldNames = section["FieldNames"] as JArray;
+            if (fieldNames != null && fieldNames.Count > 0)
+            {
+                foreach (var fn in fieldNames)
+                {
+                    string fieldName = fn.Value<string>();
+                    if (string.IsNullOrEmpty(fieldName)) continue;
+
+                    // Look up the field control in controlIdMap (try exact, then uppercase)
+                    string resolvedId = null;
+                    if (controlIdMap.ContainsKey(fieldName))
+                        resolvedId = controlIdMap[fieldName];
+                    else if (controlIdMap.ContainsKey(fieldName.ToUpper()))
+                        resolvedId = controlIdMap[fieldName.ToUpper()];
+
+                    if (!string.IsNullOrEmpty(resolvedId) && !sectionControlIds.Contains(resolvedId))
+                    {
+                        sectionControlIds.Add(resolvedId);
+                        Console.WriteLine($"        Resolved field '{fieldName}' -> {resolvedId}");
+                    }
+
+                    // Also find the label for this field
+                    if (allControls != null)
+                    {
+                        foreach (JObject control in allControls)
+                        {
+                            string controlType = control["Type"]?.Value<string>();
+                            string name = control["Name"]?.Value<string>();
+
+                            if (controlType?.Equals("Label", StringComparison.OrdinalIgnoreCase) == true &&
+                                name?.Equals(fieldName, StringComparison.OrdinalIgnoreCase) == true)
+                            {
+                                string gridPos = control["GridPosition"]?.Value<string>();
+                                if (!string.IsNullOrEmpty(gridPos) && controlIdMap.ContainsKey(gridPos))
+                                {
+                                    string labelId = controlIdMap[gridPos];
+                                    if (!sectionControlIds.Contains(labelId))
+                                    {
+                                        sectionControlIds.Add(labelId);
+                                        Console.WriteLine($"        Found label for {fieldName} at {gridPos} -> {labelId}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (sectionControlIds.Count > 0)
+                    return sectionControlIds;
+            }
+
+            // FALLBACK: Use Controls (CtrlIds) for backward compatibility
             JArray controlsToToggle = section["Controls"] as JArray;
             if (controlsToToggle == null || controlsToToggle.Count == 0)
                 return sectionControlIds;
@@ -1053,166 +1412,62 @@ namespace K2SmartObjectGenerator
                 string jsonControlId = controlRef.Value<string>();
                 string resolvedControlId = null;
 
+                // Try direct CtrlId -> K2 control ID lookup
                 if (jsonToK2ControlIdMap.ContainsKey(jsonControlId))
                 {
                     resolvedControlId = jsonToK2ControlIdMap[jsonControlId];
-                    sectionControlIds.Add(resolvedControlId);
+                    if (!sectionControlIds.Contains(resolvedControlId))
+                        sectionControlIds.Add(resolvedControlId);
                     Console.WriteLine($"        Found control {jsonControlId} -> {resolvedControlId}");
                 }
 
+                // Try JSON_ prefix lookup
                 string jsonKey = $"JSON_{jsonControlId}";
-                if (controlIdMap.ContainsKey(jsonKey))
+                if (string.IsNullOrEmpty(resolvedControlId) && controlIdMap.ContainsKey(jsonKey))
                 {
                     resolvedControlId = controlIdMap[jsonKey];
                     if (!sectionControlIds.Contains(resolvedControlId))
                         sectionControlIds.Add(resolvedControlId);
                 }
 
-                // Find the field name for this control to locate its label
-                string fieldName = null;
-                foreach (JObject control in allControls)
-                {
-                    string ctrlId = control["CtrlId"]?.Value<string>();
-                    if (ctrlId == jsonControlId)
-                    {
-                        fieldName = control["Name"]?.Value<string>();
-                        break;
-                    }
-                }
-
-                // Find labels with matching field names
-                if (!string.IsNullOrEmpty(fieldName))
+                // Try to find control by CtrlId in allControls and use its Name for lookup
+                if (string.IsNullOrEmpty(resolvedControlId) && allControls != null)
                 {
                     foreach (JObject control in allControls)
                     {
-                        string controlType = control["Type"]?.Value<string>();
-                        string name = control["Name"]?.Value<string>();
-
-                        if (controlType?.ToLower() == "label" &&
-                            name?.ToUpper() == fieldName.ToUpper())
+                        string ctrlId = control["CtrlId"]?.Value<string>();
+                        if (ctrlId == jsonControlId)
                         {
-                            string gridPos = control["GridPosition"]?.Value<string>();
-                            if (!string.IsNullOrEmpty(gridPos) && controlIdMap.ContainsKey(gridPos))
+                            string controlName = control["Name"]?.Value<string>();
+                            if (!string.IsNullOrEmpty(controlName))
                             {
-                                string labelId = controlIdMap[gridPos];
-                                if (!sectionControlIds.Contains(labelId))
-                                {
-                                    sectionControlIds.Add(labelId);
-                                    Console.WriteLine($"        Found label for {fieldName} at {gridPos} -> {labelId}");
-                                }
+                                if (controlIdMap.ContainsKey(controlName))
+                                    resolvedControlId = controlIdMap[controlName];
+                                else if (controlIdMap.ContainsKey(controlName.ToUpper()))
+                                    resolvedControlId = controlIdMap[controlName.ToUpper()];
+
+                                if (!string.IsNullOrEmpty(resolvedControlId))
+                                    Console.WriteLine($"        Resolved control {jsonControlId} by Name '{controlName}' -> {resolvedControlId}");
+                                else
+                                    Console.WriteLine($"        WARNING: Control {jsonControlId} (Name: {controlName}) not in controlIdMap");
                             }
+                            break;
                         }
+                    }
+
+                    if (string.IsNullOrEmpty(resolvedControlId))
+                    {
+                        Console.WriteLine($"        WARNING: Control {jsonControlId} not found in any control map - may be a section container");
                     }
                 }
-            }
 
-            // Special handling for return date/time controls (they're in row 10)
-            if (controlsToToggle.Any(c => c.Value<string>() == "CTRL58" || c.Value<string>() == "CTRL59"))
-            {
-                foreach (JObject control in allControls)
+                if (!string.IsNullOrEmpty(resolvedControlId) && !sectionControlIds.Contains(resolvedControlId))
                 {
-                    string gridPos = control["GridPosition"]?.Value<string>();
-                    if (!string.IsNullOrEmpty(gridPos))
-                    {
-                        int rowNum = ExtractRowNumber(gridPos);
-                        if (rowNum == 10 && controlIdMap.ContainsKey(gridPos))
-                        {
-                            string controlId = controlIdMap[gridPos];
-                            if (!sectionControlIds.Contains(controlId))
-                            {
-                                sectionControlIds.Add(controlId);
-                                Console.WriteLine($"        Including row 10 control at {gridPos} -> {controlId}");
-                            }
-                        }
-                    }
+                    sectionControlIds.Add(resolvedControlId);
                 }
             }
 
             return sectionControlIds;
-        }
-
-        private void FixDynamicSectionControlIds(JArray dynamicSections)
-        {
-            foreach (JObject section in dynamicSections)
-            {
-                string ctrlId = section["CtrlId"]?.Value<string>();
-                JArray controls = section["Controls"] as JArray;
-
-                if (ctrlId == "CTRL32" && controls != null)
-                {
-                    bool hasCtrl33 = false;
-                    bool hasCtrl34 = false;
-
-                    for (int i = 0; i < controls.Count; i++)
-                    {
-                        string controlId = controls[i].Value<string>();
-                        if (controlId == "CTRL33") hasCtrl33 = true;
-                        if (controlId == "CTRL34") hasCtrl34 = true;
-                    }
-
-                    if (hasCtrl33 && hasCtrl34)
-                    {
-                        controls.Clear();
-                        controls.Add("CTRL58"); // RETURNDATE
-                        controls.Add("CTRL59"); // RETURNTIME
-                        Console.WriteLine($"      Fixed control IDs for CTRL32 section: CTRL33/34 -> CTRL58/59");
-                    }
-                }
-            }
-        }
-
-        private void NormalizeDynamicSectionControlIds(JArray dynamicSections)
-        {
-            if (dynamicSections == null) return;
-
-            Dictionary<string, string> controlIdReplacements = new Dictionary<string, string>
-            {
-                { "CTRL33", "CTRL58" }, // RETURNDATE
-                { "CTRL34", "CTRL59" }  // RETURNTIME
-            };
-
-            foreach (JObject section in dynamicSections)
-            {
-                if (section == null) continue;
-
-                JArray controls = section["Controls"] as JArray;
-                if (controls == null || controls.Count == 0) continue;
-
-                JArray correctedControls = new JArray();
-                bool hasChanges = false;
-
-                foreach (var control in controls)
-                {
-                    if (control == null || control.Type != JTokenType.String)
-                    {
-                        correctedControls.Add(control);
-                        continue;
-                    }
-
-                    string controlId = control.Value<string>();
-                    if (string.IsNullOrEmpty(controlId))
-                    {
-                        correctedControls.Add(control);
-                        continue;
-                    }
-
-                    if (controlIdReplacements.ContainsKey(controlId))
-                    {
-                        correctedControls.Add(controlIdReplacements[controlId]);
-                        hasChanges = true;
-                        Console.WriteLine($"      Normalizing control ID: {controlId} -> {controlIdReplacements[controlId]}");
-                    }
-                    else
-                    {
-                        correctedControls.Add(controlId);
-                    }
-                }
-
-                if (hasChanges)
-                {
-                    section["Controls"] = correctedControls;
-                }
-            }
         }
 
         private string FindControlIdByFieldName(string fieldName, Dictionary<string, string> controlIdMap)

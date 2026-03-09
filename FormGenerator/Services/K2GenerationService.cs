@@ -177,6 +177,33 @@ namespace FormGenerator.Services
                 var originalConsoleOut = Console.Out;
                 var consoleWriter = new System.IO.StringWriter();
                 System.Threading.Timer? consoleFlushTimer = null;
+                // Lock object to prevent race condition between timer callback
+                // and FlushConsoleBuffer. Without this, both can call ToString()
+                // simultaneously, causing duplicate output and wasted memory.
+                var consoleLock = new object();
+
+                // Helper to synchronously flush buffered Console output.
+                // Called at form boundaries to prevent interleaving between forms.
+                void FlushConsoleBuffer()
+                {
+                    if (!EnableVerboseLogging) return;
+                    lock (consoleLock)
+                    {
+                        var output = consoleWriter.ToString();
+                        if (!string.IsNullOrEmpty(output))
+                        {
+                            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                            foreach (var line in lines)
+                            {
+                                OnStatusUpdate($"[Console] {line}");
+                            }
+                            // Clear content AND trim excess capacity to release memory
+                            var sb = consoleWriter.GetStringBuilder();
+                            sb.Clear();
+                            sb.Capacity = 0;
+                        }
+                    }
+                }
 
                 // Only redirect console if verbose logging is enabled
                 if (EnableVerboseLogging)
@@ -196,16 +223,20 @@ namespace FormGenerator.Services
                         // Create a background task to flush console output periodically
                         consoleFlushTimer = new System.Threading.Timer(_ =>
                         {
-                            var output = consoleWriter.ToString();
-                            if (!string.IsNullOrEmpty(output))
+                            lock (consoleLock)
                             {
-                                // Split by lines and send each line
-                                var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-                                foreach (var line in lines)
+                                var output = consoleWriter.ToString();
+                                if (!string.IsNullOrEmpty(output))
                                 {
-                                    OnStatusUpdate($"[Console] {line}");
+                                    var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                                    foreach (var line in lines)
+                                    {
+                                        OnStatusUpdate($"[Console] {line}");
+                                    }
+                                    var sb = consoleWriter.GetStringBuilder();
+                                    sb.Clear();
+                                    sb.Capacity = 0;
                                 }
-                                consoleWriter.GetStringBuilder().Clear();
                             }
                         }, null, 500, 500); // Flush every 500ms
                     }
@@ -292,157 +323,193 @@ namespace FormGenerator.Services
                     _logger.Debug($"Registry AFTER Clear - SmartObjects: {registryAfter.SmartObjects}, Views: {registryAfter.Views}, Forms: {registryAfter.Forms}");
                     _logger.Info("✓ Registry cleared successfully");
 
-                    // 4. Convert form definitions to JSON
+                    // 4. Convert form definitions to JSON (combines all uploaded forms)
                     _logger.LogSubSection("Form Definition Preparation");
                     _logger.Info($"Converting {request.FormDefinitions.Count} form definition(s) to JSON...");
-                    string jsonContent = ConvertFormDefinitionsToJson(request.FormDefinitions);
-                    _logger.Debug($"JSON Content Length: {jsonContent.Length} characters");
+                    string combinedJsonContent = ConvertFormDefinitionsToJson(request.FormDefinitions);
+                    _logger.Debug($"JSON Content Length: {combinedJsonContent.Length} characters");
 
-                    // 4.5. Extract form metadata for later use
-                    JObject formData = JObject.Parse(jsonContent);
-                    string formDisplayName = formData.Properties().First().Name;
-                    // PERFORMANCE FIX: Use proper name sanitization to match SmartObject names
-                    string formName = K2SmartObjectGenerator.Utilities.NameSanitizer.SanitizeSmartObjectName(formDisplayName);
-                    // Normalize path to use forward slashes for K2 category paths
-                    string targetFolder = _config.Form.TargetFolder.Replace("\\", "/");
-                    string targetCategory = $"{targetFolder}/{formDisplayName}";
+                    // Parse combined JSON to discover all form root properties
+                    JObject allFormsData = JObject.Parse(combinedJsonContent);
+                    var formProperties = allFormsData.Properties().ToList();
+                    int totalForms = formProperties.Count;
+                    _logger.Info($"Found {totalForms} form(s) to generate");
 
-                    _logger.Info($"Form Name (sanitized): {formName}");
-                    _logger.Verbose($"Form Display Name: {formDisplayName}");
-                    _logger.Verbose($"Target Category: {targetCategory}");
+                    // Track all generated form names for the result
+                    var generatedFormNames = new List<string>();
 
-                    // 5. Optional cleanup
-                    if (request.ForceCleanup)
+                    // ════════════════════════════════════════════════
+                    // MULTI-FORM LOOP: Process each form independently
+                    // ════════════════════════════════════════════════
+                    for (int formIndex = 0; formIndex < totalForms; formIndex++)
                     {
-                        _logger.LogSubSection("Cleanup Phase");
-                        _logger.Info("Cleaning up existing K2 objects...");
-                        OnProgressUpdate(new K2GenerationProgress { Stage = "Cleanup", PercentComplete = 10 });
-                        _logger.Verbose("Starting cleanup of Forms, Views, and SmartObjects...");
-                        PerformCleanup(jsonContent);
-                        _logger.Info("✓ Cleanup completed");
-                    }
+                        // Flush any remaining console output from previous form before starting next
+                        if (formIndex > 0) FlushConsoleBuffer();
 
-                    // 6. Generate SmartObjects
-                    _logger.LogSection("SMARTOBJECT GENERATION");
-                    _logger.Info("Starting SmartObject generation...");
-                    OnProgressUpdate(new K2GenerationProgress { Stage = "SmartObjects", PercentComplete = 25 });
-                    _logger.Verbose("Initializing SmartObjectGenerator...");
-                    _logger.Debug($"Passing configuration and connection to SmartObjectGenerator");
+                        var formProperty = formProperties[formIndex];
+                        string formDisplayName = formProperty.Name;
+                        string formName = K2SmartObjectGenerator.Utilities.NameSanitizer.SanitizeSmartObjectName(formDisplayName);
+                        string targetFolder = _config.Form.TargetFolder.Replace("\\", "/");
+                        string targetCategory = $"{targetFolder}/{formDisplayName}";
 
-                    var smoGenerator = new SmartObjectGenerator(_connectionManager, _config);
-                    _logger.Verbose("Calling GenerateSmartObjectsFromJsonAsync...");
-                    await smoGenerator.GenerateSmartObjectsFromJsonAsync(jsonContent);
+                        _logger.LogSection($"FORM {formIndex + 1} OF {totalForms}: {formDisplayName}");
+                        _logger.Info($"Form Name (sanitized): {formName}");
+                        _logger.Verbose($"Form Display Name: {formDisplayName}");
+                        _logger.Verbose($"Target Category: {targetCategory}");
 
-                    result.SmartObjectsCreated = SmartObjectViewRegistry.GetSmartObjectCount();
-                    _logger.Info($"✓ Created {result.SmartObjectsCreated} SmartObjects");
-                    _logger.Debug($"Main SmartObjects: {SmartObjectViewRegistry.GetSmartObjectCount(SmartObjectViewRegistry.SmartObjectType.Main)}");
-                    _logger.Debug($"Child SmartObjects: {SmartObjectViewRegistry.GetSmartObjectCount(SmartObjectViewRegistry.SmartObjectType.Child)}");
-                    _logger.Debug($"Lookup SmartObjects: {SmartObjectViewRegistry.GetSmartObjectCount(SmartObjectViewRegistry.SmartObjectType.Lookup)}");
+                        // Create per-form JSON (single root property) for the generators
+                        var singleFormJson = new JObject();
+                        singleFormJson[formDisplayName] = formProperty.Value;
+                        string jsonContent = singleFormJson.ToString();
 
-                    // 7. Generate Views
-                    _logger.LogSection("VIEW GENERATION");
-                    _logger.Info("Starting View generation...");
-                    OnProgressUpdate(new K2GenerationProgress { Stage = "Views", PercentComplete = 50 });
-                    _logger.Verbose("Initializing ViewGenerator with field mappings...");
-                    _logger.Debug($"Field mappings count: {smoGenerator.FieldMappings.Count}");
+                        // Calculate progress offsets for this form within the overall pipeline
+                        int formBasePercent = (formIndex * 100) / totalForms;
+                        int formRangePercent = 100 / totalForms;
 
-                    // Extract InfoPathFormDefinition for rule generation
-                    InfoPathFormDefinition infoPathFormDef = null;
-                    if (request.FormDefinitions != null && request.FormDefinitions.Count > 0)
-                    {
-                        var firstDef = request.FormDefinitions.Values.FirstOrDefault();
-                        infoPathFormDef = firstDef?.FormDefinition as InfoPathFormDefinition;
-                        if (infoPathFormDef != null)
-                            _logger.Info($"InfoPath form definition available for rule generation ({infoPathFormDef.FormName})");
-                    }
+                        // 5. Optional cleanup (per form)
+                        if (request.ForceCleanup)
+                        {
+                            _logger.LogSubSection($"Cleanup Phase ({formDisplayName})");
+                            _logger.Info("Cleaning up existing K2 objects...");
+                            OnProgressUpdate(new K2GenerationProgress { Stage = $"Cleanup ({formDisplayName})", PercentComplete = formBasePercent + (formRangePercent * 10 / 100) });
+                            PerformCleanup(jsonContent);
+                            _logger.Info("✓ Cleanup completed");
+                        }
 
-                    var viewGenerator = new ViewGenerator(_connectionManager, smoGenerator.FieldMappings, smoGenerator, _config, infoPathFormDef);
-                    _logger.Verbose("Calling GenerateViewsFromJson...");
-                    viewGenerator.GenerateViewsFromJson(jsonContent);
+                        // 6. Generate SmartObjects
+                        _logger.LogSubSection($"SmartObject Generation ({formDisplayName})");
+                        _logger.Info("Starting SmartObject generation...");
+                        OnProgressUpdate(new K2GenerationProgress { Stage = $"SmartObjects ({formDisplayName})", PercentComplete = formBasePercent + (formRangePercent * 25 / 100) });
 
-                    result.ViewsCreated = SmartObjectViewRegistry.GetViewCount();
-                    _logger.Info($"✓ Created {result.ViewsCreated} Views");
-                    _logger.Verbose($"ViewTitles collected: {viewGenerator.ViewTitles.Count}");
-                    _logger.Debug($"Capture Views: {SmartObjectViewRegistry.GetViewCount(SmartObjectViewRegistry.ViewType.Capture)}");
-                    _logger.Debug($"Item Views: {SmartObjectViewRegistry.GetViewCount(SmartObjectViewRegistry.ViewType.Item)}");
-                    _logger.Debug($"List Views: {SmartObjectViewRegistry.GetViewCount(SmartObjectViewRegistry.ViewType.List)}");
+                        var smoGenerator = new SmartObjectGenerator(_connectionManager, _config);
+                        await smoGenerator.GenerateSmartObjectsFromJsonAsync(jsonContent);
 
-                    // 8. Generate Forms with verification and retry
-                    _logger.LogSection("FORM GENERATION");
+                        _logger.Info($"✓ SmartObjects created for {formDisplayName}");
 
-                    // Validate that views were created before attempting form generation
-                    if (result.ViewsCreated == 0)
-                    {
-                        _logger.Error("❌ Cannot generate forms: No views were created");
-                        _logger.Warning("This usually means views from a previous run are still in use or checked out");
-                        _logger.Warning("Please manually delete existing forms and views in K2 Designer before regenerating");
-                        throw new InvalidOperationException("Cannot generate forms without views. Please clean up existing artifacts in K2 Designer (Forms→Views→SmartObjects) and try again.");
-                    }
+                        // 7. Generate Views
+                        _logger.LogSubSection($"View Generation ({formDisplayName})");
+                        _logger.Info("Starting View generation...");
+                        OnProgressUpdate(new K2GenerationProgress { Stage = $"Views ({formDisplayName})", PercentComplete = formBasePercent + (formRangePercent * 50 / 100) });
 
-                    _logger.Info("Starting Form generation...");
-                    OnProgressUpdate(new K2GenerationProgress { Stage = "Forms", PercentComplete = 75 });
-                    _logger.Verbose($"Initializing FormGenerator with theme: {request.FormTheme}");
-                    _logger.Debug($"Passing {viewGenerator.ViewTitles.Count} view titles to form generator");
+                        // Find the matching InfoPathFormDefinition for this specific form
+                        InfoPathFormDefinition infoPathFormDef = null;
+                        if (request.FormDefinitions != null)
+                        {
+                            // Try matching by form name (with and without spaces)
+                            foreach (var defKvp in request.FormDefinitions)
+                            {
+                                var candidateDef = defKvp.Value?.FormDefinition as InfoPathFormDefinition;
+                                if (candidateDef != null)
+                                {
+                                    string candidateName = candidateDef.FormName?.Replace(" ", "_");
+                                    if (string.Equals(candidateName, formName, StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(candidateDef.FormName, formDisplayName, StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(defKvp.Key, formDisplayName, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        infoPathFormDef = candidateDef;
+                                        break;
+                                    }
+                                }
+                            }
+                            // Fallback: if only one form definition, use it
+                            if (infoPathFormDef == null && request.FormDefinitions.Count == 1)
+                            {
+                                infoPathFormDef = request.FormDefinitions.Values.First()?.FormDefinition as InfoPathFormDefinition;
+                            }
+                            if (infoPathFormDef != null)
+                                _logger.Info($"InfoPath form definition matched for rule generation ({infoPathFormDef.FormName})");
+                            else
+                                _logger.Warning($"No InfoPath form definition found for '{formDisplayName}' - rules may be limited");
+                        }
 
-                    var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, request.FormTheme, smoGenerator, infoPathFormDef);
+                        var viewGenerator = new ViewGenerator(_connectionManager, smoGenerator.FieldMappings, smoGenerator, _config, infoPathFormDef);
+                        viewGenerator.GenerateViewsFromJson(jsonContent);
 
-                    // Form name was already extracted earlier for category creation
-                    _logger.Verbose("Calling GenerateFormsFromJson...");
-                    formGenerator.GenerateFormsFromJson(jsonContent, viewGenerator.ViewTitles);
-                    _logger.Info("✓ Form generation completed");
+                        _logger.Info($"✓ Views created for {formDisplayName}");
+                        _logger.Verbose($"ViewTitles collected: {viewGenerator.ViewTitles.Count}");
 
-                    // 9. Register everything
-                    _logger.LogSubSection("Form Registration");
-                    _logger.Info("Registering forms in SmartObjectViewRegistry...");
-                    var allSmartObjects = new List<string> { formName };
-                    allSmartObjects.AddRange(SmartObjectViewRegistry.GetChildSmartObjects(formName));
+                        // 8. Generate Forms
+                        _logger.LogSubSection($"Form Generation ({formDisplayName})");
 
-                    var lookupSmo = $"{formName}_Lookups";
-                    if (SmartObjectViewRegistry.SmartObjectExists(lookupSmo))
-                    {
-                        allSmartObjects.Add(lookupSmo);
-                        _logger.Verbose($"Added lookup SmartObject: {lookupSmo}");
-                    }
+                        // Validate views exist before form generation
+                        int viewCountForForm = SmartObjectViewRegistry.GetViewCount();
+                        if (viewCountForForm == 0)
+                        {
+                            _logger.Error($"❌ Cannot generate form for {formDisplayName}: No views were created");
+                            _logger.Warning("Skipping this form and continuing with next...");
+                            continue;
+                        }
 
-                    _logger.Verbose($"Total SmartObjects to register: {allSmartObjects.Count}");
-                    if (_logger != null && K2LoggingConfiguration.ShouldLog(K2LogLevel.Debug))
-                    {
+                        _logger.Info("Starting Form generation...");
+                        OnProgressUpdate(new K2GenerationProgress { Stage = $"Forms ({formDisplayName})", PercentComplete = formBasePercent + (formRangePercent * 75 / 100) });
+                        _logger.Debug($"Passing {viewGenerator.ViewTitles.Count} view titles to form generator");
+                        _logger.Debug($"Passing {viewGenerator.ViewGridPositions.Count} view grid positions to form generator");
+
+                        var formGenerator = new K2SmartObjectGenerator.FormGenerator(_connectionManager, request.FormTheme, smoGenerator, infoPathFormDef);
+                        formGenerator.GenerateFormsFromJson(jsonContent, viewGenerator.ViewTitles, viewGenerator.ViewGridPositions);
+                        _logger.Info($"✓ Form generation completed for {formDisplayName}");
+
+                        // 9. Register this form
+                        _logger.LogSubSection($"Form Registration ({formDisplayName})");
+                        var allSmartObjects = new List<string> { formName };
+                        allSmartObjects.AddRange(SmartObjectViewRegistry.GetChildSmartObjects(formName));
+
+                        var lookupSmo = $"{formName}_Lookups";
+                        if (SmartObjectViewRegistry.SmartObjectExists(lookupSmo))
+                        {
+                            allSmartObjects.Add(lookupSmo);
+                            _logger.Verbose($"Added lookup SmartObject: {lookupSmo}");
+                        }
+
+                        _logger.Verbose($"Total SmartObjects for {formDisplayName}: {allSmartObjects.Count}");
+
+                        var formViews = new List<string>();
                         foreach (var smo in allSmartObjects)
                         {
-                            _logger.Debug($"  • SmartObject: {smo}");
+                            var views = SmartObjectViewRegistry.GetViewsForSmartObject(smo);
+                            formViews.AddRange(views);
                         }
+
+                        SmartObjectViewRegistry.RegisterForm(formName, formViews, allSmartObjects);
+                        _logger.Info($"✓ Form '{formName}' registered ({allSmartObjects.Count} SmartObjects, {formViews.Count} views)");
+
+                        generatedFormNames.Add(formName);
+
+                        // ── Memory cleanup: release generator objects between forms ──
+                        // Each generator holds large data structures (XML documents, JSON,
+                        // field mappings, SmartObject schemas) and they cross-reference
+                        // each other (ViewGenerator→SmartObjectGenerator, FormGenerator→
+                        // SmartObjectGenerator). Without explicit cleanup, all generators
+                        // from ALL forms stay alive until the loop ends, causing memory
+                        // to grow linearly with the number of forms.
+                        smoGenerator = null;
+                        viewGenerator = null;
+                        formGenerator = null;
+                        infoPathFormDef = null;
+                        singleFormJson = null;
+                        jsonContent = null;
+
+                        // Flush console buffer at form boundary to prevent interleaving
+                        // between forms in multi-form generation. Without this, the 500ms
+                        // timer-based flush causes log lines from different forms to mix.
+                        FlushConsoleBuffer();
                     }
+                    // ════════════════════════════════════════════════
+                    // END MULTI-FORM LOOP
+                    // ════════════════════════════════════════════════
 
-                    var formViews = new List<string>();
-                    foreach (var smo in allSmartObjects)
-                    {
-                        var views = SmartObjectViewRegistry.GetViewsForSmartObject(smo);
-                        formViews.AddRange(views);
-                        _logger.Verbose($"SmartObject '{smo}' has {views.Count} view(s)");
-                    }
-
-                    _logger.Verbose($"Total form views: {formViews.Count}");
-                    if (_logger != null && K2LoggingConfiguration.ShouldLog(K2LogLevel.Debug))
-                    {
-                        foreach (var view in formViews)
-                        {
-                            _logger.Debug($"  • View: {view}");
-                        }
-                    }
-
-                    SmartObjectViewRegistry.RegisterForm(formName, formViews, allSmartObjects);
-                    _logger.Info($"✓ Form '{formName}' registered in registry");
-
+                    // Aggregate results across all forms
+                    result.SmartObjectsCreated = SmartObjectViewRegistry.GetSmartObjectCount();
+                    result.ViewsCreated = SmartObjectViewRegistry.GetViewCount();
                     result.FormsCreated = SmartObjectViewRegistry.GetFormCount();
-                    _logger.Info($"✓ Registry reports {result.FormsCreated} form(s) created");
 
                     // 10. Generate summary
                     _logger.LogSection("GENERATION COMPLETE");
                     OnProgressUpdate(new K2GenerationProgress { Stage = "Complete", PercentComplete = 100 });
 
                     result.Success = true;
-                    result.Message = "K2 artifacts generated successfully";
-                    result.FormName = formName;
+                    result.Message = $"K2 artifacts generated successfully for {generatedFormNames.Count} form(s)";
+                    result.FormName = string.Join(", ", generatedFormNames);
                     result.GeneratedArtifacts = GetGeneratedArtifactsSummary();
 
                     _logger.Info("════════════════════════════════════════════════");
@@ -681,6 +748,175 @@ namespace FormGenerator.Services
         private void OnProgressUpdate(K2GenerationProgress progress)
         {
             ProgressUpdate?.Invoke(this, progress);
+        }
+
+        /// <summary>
+        /// Re-saves all views by reading K2's normalized XML and re-deploying it.
+        /// This simulates opening a view in K2 Designer and saving it, which
+        /// fixes AreaItemView,View,Warning validation issues.
+        /// </summary>
+        private void ResaveAllViews(string formName)
+        {
+            var allSmartObjects = new List<string> { formName };
+            allSmartObjects.AddRange(SmartObjectViewRegistry.GetChildSmartObjects(formName));
+
+            var lookupSmo = $"{formName}_Lookups";
+            if (SmartObjectViewRegistry.SmartObjectExists(lookupSmo))
+                allSmartObjects.Add(lookupSmo);
+
+            var allViewNames = new List<string>();
+            foreach (var smo in allSmartObjects)
+            {
+                var views = SmartObjectViewRegistry.GetViewsForSmartObject(smo);
+                allViewNames.AddRange(views);
+            }
+
+            if (allViewNames.Count == 0)
+            {
+                Console.WriteLine("    No views found to re-save");
+                return;
+            }
+
+            Console.WriteLine($"    Re-saving {allViewNames.Count} views...");
+
+            using (SourceCode.Forms.Management.FormsManager formsManager = new SourceCode.Forms.Management.FormsManager())
+            {
+                formsManager.CreateConnection();
+                formsManager.Connection.Open(_connectionManager.ConnectionString.ConnectionString);
+
+                foreach (string viewName in allViewNames)
+                {
+                    try
+                    {
+                        // Step 1: Read the view XML as K2 has stored it (normalized)
+                        string viewXml = formsManager.GetViewDefinition(viewName);
+                        if (string.IsNullOrEmpty(viewXml))
+                        {
+                            Console.WriteLine($"      SKIP: Could not read view '{viewName}'");
+                            continue;
+                        }
+
+                        // Step 2: Parse to get the view GUID
+                        System.Xml.XmlDocument doc = new System.Xml.XmlDocument();
+                        doc.LoadXml(viewXml);
+                        System.Xml.XmlNodeList viewNodes = doc.GetElementsByTagName("View");
+                        if (viewNodes.Count == 0)
+                        {
+                            Console.WriteLine($"      SKIP: No View element in '{viewName}'");
+                            continue;
+                        }
+
+                        System.Xml.XmlElement viewElement = (System.Xml.XmlElement)viewNodes[0];
+                        string viewIdStr = viewElement.GetAttribute("ID");
+
+                        // Step 3: Check out the view
+                        if (Guid.TryParse(viewIdStr, out Guid viewGuid))
+                        {
+                            try { formsManager.CheckOutView(viewGuid); }
+                            catch { /* Already checked out or not needed */ }
+                        }
+
+                        // Step 4: Get the category path for re-deployment
+                        string categoryPath = null;
+                        var viewInfo = SmartObjectViewRegistry.GetViewInfo(viewName);
+                        if (viewInfo?.Metadata != null)
+                            categoryPath = viewInfo.Metadata.Category;
+
+                        if (string.IsNullOrEmpty(categoryPath))
+                            categoryPath = $"Generated\\{formName}\\Views";
+
+                        // Step 5: Re-deploy K2's own XML back (false = update existing)
+                        formsManager.DeployViews(viewXml, categoryPath, false);
+
+                        // Step 6: Check in the view
+                        if (viewGuid != Guid.Empty)
+                        {
+                            try { formsManager.CheckInView(viewGuid); }
+                            catch { /* Ignore check-in errors */ }
+                        }
+
+                        Console.WriteLine($"      Re-saved: {viewName}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"      WARNING: Failed to re-save view '{viewName}': {ex.Message}");
+                    }
+                }
+            }
+
+            Console.WriteLine($"    View re-save complete");
+        }
+
+        /// <summary>
+        /// Re-saves all forms by reading K2's normalized XML and re-deploying it.
+        /// This simulates opening a form in K2 Designer and saving it.
+        /// Combined with removing IsGenerated and setting IsUserModified, this
+        /// should fix AreaItemView,View,Warning validation issues.
+        /// </summary>
+        private void ResaveAllForms(string formName)
+        {
+            var allFormNames = SmartObjectViewRegistry.GetAllFormNames();
+
+            if (allFormNames.Count == 0)
+            {
+                Console.WriteLine("    No forms found to re-save");
+                return;
+            }
+
+            Console.WriteLine($"    Re-saving {allFormNames.Count} forms...");
+
+            using (SourceCode.Forms.Management.FormsManager formsManager = new SourceCode.Forms.Management.FormsManager())
+            {
+                formsManager.CreateConnection();
+                formsManager.Connection.Open(_connectionManager.ConnectionString.ConnectionString);
+
+                foreach (string fName in allFormNames)
+                {
+                    try
+                    {
+                        // Step 1: Read the form XML as K2 has stored it (normalized)
+                        string formXml = formsManager.GetFormDefinition(fName);
+                        if (string.IsNullOrEmpty(formXml))
+                        {
+                            Console.WriteLine($"      SKIP: Could not read form '{fName}'");
+                            continue;
+                        }
+
+                        // Step 2: Parse and ensure IsGenerated is removed and IsUserModified is set
+                        System.Xml.XmlDocument doc = new System.Xml.XmlDocument();
+                        doc.LoadXml(formXml);
+                        System.Xml.XmlNodeList formNodes = doc.GetElementsByTagName("Form");
+                        if (formNodes.Count > 0)
+                        {
+                            System.Xml.XmlElement formElement = (System.Xml.XmlElement)formNodes[0];
+
+                            // Remove IsGenerated (K2 AutoGenerator artifact)
+                            if (formElement.HasAttribute("IsGenerated"))
+                            {
+                                formElement.RemoveAttribute("IsGenerated");
+                                Console.WriteLine($"      Removed IsGenerated from '{fName}'");
+                            }
+
+                            // Set IsUserModified to True
+                            formElement.SetAttribute("IsUserModified", "True");
+                        }
+
+                        // Step 3: Get the category path for re-deployment
+                        string categoryPath = $"Generated\\{formName}\\Forms";
+
+                        // Step 4: Re-deploy K2's normalized XML back (false = update existing)
+                        formsManager.DeployForms(doc.OuterXml, categoryPath, false);
+
+                        Console.WriteLine($"      Re-saved: {fName}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"      WARNING: Failed to re-save form '{fName}': {ex.Message}");
+                    }
+                }
+            }
+
+            Console.WriteLine($"    Form re-save complete");
         }
     }
 

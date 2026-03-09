@@ -1,0 +1,463 @@
+<!--
+  ============================================================================
+  K2 SMARTFORMS LIVE XML PATTERNS - EXTRACTED FROM PURCHASE ORDERS APP
+  ============================================================================
+
+  Source: k2trial.safalo.com K2 Designer
+  Extracted: 2026-03-07
+  Views: PO.Header.ItemView, PO.OrderItems.ListView
+  Form:  PO.PurchaseOrder_Home.Form
+
+  These patterns were extracted from a working K2 Purchase Orders application
+  using SourceCode.Forms.Designers.View.viewDefinitionXML.xml and
+  SourceCode.Forms.Designers.Form.definitionXml.xml
+
+  KEY FINDINGS:
+  1. View XML root: <SourceCode.Forms Version="31"><Views><View ID="..." Type="Capture|List">
+  2. Form XML root: <SourceCode.Forms Version="31"><Forms><Form ID="..." Type="">
+  3. Events section contains System events (auto) and User events (custom rules)
+  4. Conditions use expression elements: IsNotBlank, Equals, NotEquals, etc.
+  5. Actions: Transfer, Execute, Calculate, ApplyStyle, ShowMessage
+  6. Expressions (calculations): Sum, Multiply, ListSum at View level
+  7. Handler blocks contain Conditions + Actions
+  8. .xml property on viewDefinitionXML gives the proper XML string
+  ============================================================================
+-->
+
+<!-- ========================================================================
+     PATTERN: VIEW-LEVEL INIT EVENT (System + User pair)
+     K2 creates a System Init event automatically, then User Init for custom rules
+     ======================================================================== -->
+
+<!-- System Init Event (auto-generated, contains default Calculate/ApplyStyle) -->
+<Event ID="{GUID}" DefinitionID="{GUID}"
+       Type="System"
+       SourceID="{VIEW_ID}" SourceType="View"
+       SourceName="{VIEW_NAME}" SourceDisplayName="{VIEW_NAME}">
+  <Name>Init</Name>
+  <Handlers>
+    <Handler ID="{GUID}" DefinitionID="{GUID}">
+      <Actions>
+        <Action ID="{GUID}" DefinitionID="{GUID}" Type="Calculate" ExecutionType="Synchronous"/>
+        <Action ID="{GUID}" DefinitionID="{GUID}" Type="ApplyStyle" ExecutionType="Synchronous"/>
+      </Actions>
+    </Handler>
+  </Handlers>
+</Event>
+
+<!-- User Init Event (custom rules triggered on view initialize) -->
+<Event ID="{GUID}" DefinitionID="{GUID}"
+       Type="User"
+       SourceID="{VIEW_ID}" SourceType="View"
+       SourceName="Init" SourceDisplayName="Initializing">
+  <Name>Init</Name>
+  <Properties>
+    <Property><Name>RuleFriendlyName</Name><Value>When the view executed Initialize</Value></Property>
+    <Property><Name>Location</Name><Value>{VIEW_NAME}</Value></Property>
+    <Property><Name>ViewID</Name><Value>{VIEW_ID}</Value></Property>
+  </Properties>
+  <Handlers>
+    <!-- Handler WITHOUT conditions (always executes) -->
+    <Handler ID="{GUID}" DefinitionID="{GUID}">
+      <Actions>
+        <Action ID="{GUID}" DefinitionID="{GUID}" Type="Transfer" ExecutionType="Synchronous">
+          <Properties>
+            <Property><Name>ViewID</Name><DisplayValue>{VIEW_NAME}</DisplayValue><NameValue>{VIEW_NAME}</NameValue><Value>{VIEW_ID}</Value></Property>
+          </Properties>
+          <Parameters>
+            <Parameter SourceID="{SOURCE_CONTROL_ID}" SourceType="Control" SourceName="{SOURCE_CONTROL_NAME}" SourceDisplayName="{SOURCE_CONTROL_NAME}" TargetID="{TARGET_FIELD_ID}" TargetType="ViewField"/>
+          </Parameters>
+        </Action>
+      </Actions>
+    </Handler>
+    <!-- Handler WITH conditions (conditional execution) -->
+    <Handler ID="{GUID}" DefinitionID="{GUID}">
+      <Conditions>
+        <Condition ID="{GUID}" DefinitionID="{GUID}">
+          <Properties>
+            <Property><Name>Location</Name><Value>View</Value></Property>
+            <Property><Name>Name</Name><Value>SimpleNotBlankViewParameterCondition</Value></Property>
+          </Properties>
+          <Expressions>
+            <IsNotBlank>
+              <Item SourceType="ViewParameter" SourceID="{PARAM_NAME}" SourceName="{PARAM_NAME}" DataType="Text"/>
+            </IsNotBlank>
+          </Expressions>
+        </Condition>
+      </Conditions>
+      <Actions>
+        <Action ID="{GUID}" DefinitionID="{GUID}" Type="Execute" ExecutionType="Synchronous">
+          <Properties>
+            <Property><Name>Location</Name><Value>View</Value></Property>
+            <Property><Name>ControlID</Name><DisplayValue>{CONTROL_NAME}</DisplayValue><NameValue>{CONTROL_NAME}</NameValue><Value>{CONTROL_ID}</Value></Property>
+            <Property><Name>Method</Name><DisplayValue>{METHOD_NAME}</DisplayValue><NameValue>{METHOD_NAME}</NameValue><Value>{METHOD_NAME}</Value></Property>
+            <Property><Name>ViewID</Name><NameValue>{VIEW_NAME}</NameValue><Value>{VIEW_ID}</Value><DisplayValue>{VIEW_NAME}</DisplayValue></Property>
+            <Property><Name>ObjectID</Name><DisplayValue>{SMARTOBJECT_NAME}</DisplayValue><NameValue>{SMARTOBJECT_SYSTEM_NAME}</NameValue><Value>{SMARTOBJECT_GUID}</Value></Property>
+          </Properties>
+          <Parameters>
+            <Parameter SourceID="{PARAM_SOURCE_ID}" SourceType="ViewParameter" SourceName="{PARAM_NAME}" SourceDisplayName="{PARAM_NAME}" TargetID="{METHOD_PARAM_ID}" TargetType="MethodParameter" TargetName="{METHOD_PARAM_NAME}" TargetDisplayName="{METHOD_PARAM_NAME}" TargetPath="{METHOD_PARAM_NAME}"/>
+          </Parameters>
+          <Results>
+            <Result SourceID="{RESULT_FIELD_ID}" SourceType="MethodResult" SourceName="{RESULT_FIELD_NAME}" SourceDisplayName="{RESULT_FIELD_NAME}" TargetID="{TARGET_CONTROL_ID}" TargetType="ControlProperty" TargetName="{TARGET_CONTROL_NAME}" TargetDisplayName="{TARGET_CONTROL_NAME}"/>
+          </Results>
+        </Action>
+      </Actions>
+    </Handler>
+  </Handlers>
+</Event>
+
+
+<!-- ========================================================================
+     PATTERN: SYSTEM ONCHANGE EVENT (auto-generated for each control)
+     K2 creates these automatically for every control on the view
+     ======================================================================== -->
+<Event ID="{GUID}" DefinitionID="{GUID}"
+       Type="System"
+       SourceID="{CONTROL_ID}" SourceType="Control"
+       SourceName="{CONTROL_NAME}" SourceDisplayName="{CONTROL_NAME}">
+  <Name>OnChange</Name>
+  <Handlers>
+    <Handler ID="{GUID}" DefinitionID="{GUID}">
+      <Actions>
+        <Action ID="{GUID}" DefinitionID="{GUID}" Type="Calculate" ExecutionType="Synchronous"/>
+        <Action ID="{GUID}" DefinitionID="{GUID}" Type="ApplyStyle" ExecutionType="Synchronous"/>
+      </Actions>
+    </Handler>
+  </Handlers>
+</Event>
+
+
+<!-- ========================================================================
+     PATTERN: TRANSFER ACTION (Control-to-ViewField data binding)
+     Maps control values to view fields for persistence
+     ======================================================================== -->
+<Action ID="{GUID}" DefinitionID="{GUID}" Type="Transfer" ExecutionType="Synchronous">
+  <Properties>
+    <Property><Name>ViewID</Name><DisplayValue>{VIEW_NAME}</DisplayValue><NameValue>{VIEW_NAME}</NameValue><Value>{VIEW_ID}</Value></Property>
+  </Properties>
+  <Parameters>
+    <!-- Multiple Parameter elements for multi-field transfer -->
+    <Parameter SourceID="{CONTROL_ID_1}" SourceType="Control" SourceName="{CONTROL_NAME_1}" SourceDisplayName="{CONTROL_NAME_1}" TargetID="{FIELD_ID_1}" TargetType="ViewField"/>
+    <Parameter SourceID="{CONTROL_ID_2}" SourceType="Control" SourceName="{CONTROL_NAME_2}" SourceDisplayName="{CONTROL_NAME_2}" TargetID="{FIELD_ID_2}" TargetType="ViewField"/>
+  </Parameters>
+</Action>
+
+
+<!-- ========================================================================
+     PATTERN: EXECUTE ACTION (SmartObject method call)
+     Calls a SmartObject method with parameters and maps results
+     ======================================================================== -->
+<Action ID="{GUID}" DefinitionID="{GUID}" Type="Execute" ExecutionType="Synchronous" IsEnabled="True">
+  <Properties>
+    <Property><Name>Location</Name><Value>View</Value></Property>
+    <Property><Name>ControlID</Name><DisplayValue>{CONTROL_NAME}</DisplayValue><NameValue>{CONTROL_NAME}</NameValue><Value>{CONTROL_ID}</Value></Property>
+    <Property><Name>Method</Name><DisplayValue>GetList</DisplayValue><NameValue>GetList</NameValue><Value>GetList</Value></Property>
+    <Property><Name>ViewID</Name><NameValue>{VIEW_NAME}</NameValue><Value>{VIEW_ID}</Value><DisplayValue>{VIEW_NAME}</DisplayValue></Property>
+    <Property><Name>ObjectID</Name><DisplayValue>{SMARTOBJECT_DISPLAY_NAME}</DisplayValue><NameValue>{SMARTOBJECT_SYSTEM_NAME}</NameValue><Value>{SMARTOBJECT_GUID}</Value></Property>
+  </Properties>
+  <Parameters>
+    <Parameter SourceID="{SOURCE_ID}" SourceType="ViewParameter" SourceName="{PARAM_NAME}" SourceDisplayName="{PARAM_NAME}" TargetID="{METHOD_PARAM_ID}" TargetType="MethodParameter" TargetName="{METHOD_PARAM_NAME}" TargetDisplayName="{METHOD_PARAM_NAME}" TargetPath="{METHOD_PARAM_NAME}"/>
+  </Parameters>
+  <Results>
+    <Result SourceID="{RESULT_FIELD_ID}" SourceType="MethodResult" SourceName="{FIELD_NAME}" SourceDisplayName="{FIELD_NAME}" TargetID="{CONTROL_ID}" TargetType="ControlProperty" TargetName="{CONTROL_NAME}" TargetDisplayName="{CONTROL_NAME}"/>
+  </Results>
+</Action>
+
+
+<!-- ========================================================================
+     PATTERN: CONDITION WITH ISNOTBLANK EXPRESSION
+     Checks if a ViewParameter or Control value is not blank
+     ======================================================================== -->
+<Conditions>
+  <Condition ID="{GUID}" DefinitionID="{GUID}">
+    <Properties>
+      <Property><Name>Location</Name><Value>View</Value></Property>
+      <Property><Name>Name</Name><Value>SimpleNotBlankViewParameterCondition</Value></Property>
+    </Properties>
+    <Expressions>
+      <IsNotBlank>
+        <Item SourceType="ViewParameter" SourceID="{PARAM_NAME}" SourceName="{PARAM_NAME}" DataType="Text"/>
+      </IsNotBlank>
+    </Expressions>
+  </Condition>
+</Conditions>
+
+<!-- Condition with Equals expression (control value check) -->
+<Conditions>
+  <Condition ID="{GUID}" DefinitionID="{GUID}">
+    <Properties>
+      <Property><Name>Location</Name><Value>View</Value></Property>
+      <Property><Name>Name</Name><Value>SimpleEqualControlCondition</Value></Property>
+    </Properties>
+    <Expressions>
+      <Equals>
+        <Item SourceType="Control" SourceID="{CONTROL_ID}" SourceName="{CONTROL_NAME}" SourceDisplayName="{CONTROL_NAME}" DataType="Text"/>
+        <Item SourceType="Value"><Value>true</Value></Item>
+      </Equals>
+    </Expressions>
+  </Condition>
+</Conditions>
+
+
+<!-- ========================================================================
+     PATTERN: CALCULATION EXPRESSIONS (View-level, not inside Events)
+     These are defined at the View level, referenced by Calculate actions
+     ======================================================================== -->
+
+<!-- Sum Expression: Aggregates a field across rows (non-list) -->
+<Expression ID="{GUID}">
+  <Name>GrandTotal</Name>
+  <DisplayValue>Sum( Total )</DisplayValue>
+  <Sum>
+    <Item SourceType="ViewField" SourceID="{FIELD_ID}" SourceName="Total" SourceDisplayName="Total" DataType="Text"/>
+  </Sum>
+</Expression>
+
+<!-- Multiply Expression: Row-level calculation (Quantity * UnitCost) -->
+<Expression ID="{GUID}">
+  <Name>ItemTotal</Name>
+  <DisplayValue>Quantity Text Box * Unit Cost Text Box</DisplayValue>
+  <Multiply>
+    <Item SourceType="Control" SourceID="{QUANTITY_CONTROL_ID}" SourceName="Quantity Text Box" SourceDisplayName="Quantity Text Box" DataType="Number"/>
+    <Item SourceType="Control" SourceID="{UNITCOST_CONTROL_ID}" SourceName="Unit Cost Text Box" SourceDisplayName="Unit Cost Text Box" DataType="Number"/>
+  </Multiply>
+</Expression>
+
+<!-- ListSum Expression: Aggregate across list rows -->
+<Expression ID="{GUID}">
+  <Name>Sum</Name>
+  <DisplayValue>List Sum( Total )</DisplayValue>
+  <ListSum>
+    <Item SourceType="ViewField" SourceID="{FIELD_ID}" SourceName="Total" SourceDisplayName="Total" DataType="Text"/>
+  </ListSum>
+</Expression>
+
+
+<!-- ========================================================================
+     PATTERN: FORM XML STRUCTURE (Form wrapping multiple views)
+     ======================================================================== -->
+<!--
+Form XML accessed via: SourceCode.Forms.Designers.Form.definitionXml.xml
+
+Root structure:
+<SourceCode.Forms Version="31">
+  <Forms>
+    <Form ID="{FORM_GUID}" Type="">
+      <Name>{FORM_NAME}</Name>
+      <Controls>
+        <Control ID="{FORM_GUID}" Type="Form">...</Control>
+        <Control ID="{TAB_GUID}" Type="Tab">...</Control>
+        <Control ID="{VIEW_INSTANCE_GUID}" Type="View">
+          <Properties>
+            <Property><Name>ViewID</Name><Value>{ACTUAL_VIEW_GUID}</Value></Property>
+            <Property><Name>ViewName</Name><Value>{VIEW_NAME}</Value></Property>
+          </Properties>
+        </Control>
+      </Controls>
+      <Canvas>
+        <Sections>
+          <Section ID="{GUID}" Type="Header">...</Section>
+          <Section ID="{GUID}" Type="Body">
+            <Control ID="{TAB_GUID}" LayoutType="Tabs">
+              <Tabs>
+                <Tab ID="{GUID}">
+                  <Control ID="{GUID}" LayoutType="Views">
+                    <ViewArea>
+                      <AreaItems>
+                        <Item ID="{VIEW_INSTANCE_GUID}">
+                          <Control ID="{VIEW_INSTANCE_GUID}"/>
+                        </Item>
+                      </AreaItems>
+                    </ViewArea>
+                  </Control>
+                </Tab>
+              </Tabs>
+            </Control>
+          </Section>
+        </Sections>
+      </Canvas>
+      <Events>
+        <!-- Form-level events follow same Event/Handler/Conditions/Actions pattern -->
+        <Event Type="User" SourceType="Form">
+          <Name>Init</Name>
+          <Properties>
+            <Property><Name>RuleFriendlyName</Name><Value>When the form is Initializing</Value></Property>
+          </Properties>
+        </Event>
+      </Events>
+    </Form>
+  </Forms>
+</SourceCode.Forms>
+-->
+
+
+<!-- ========================================================================
+     PATTERN: VIEW CONTROL DEFINITION (inside <Controls> section)
+     Each control type has specific properties
+     ======================================================================== -->
+
+<!-- Label control -->
+<Control ID="{GUID}" Type="Label">
+  <DisplayName>{LABEL_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{LABEL_NAME}</DisplayValue><Value>{LABEL_NAME}</Value></Property>
+    <Property><Name>LiteralVal</Name><Value>false</Value></Property>
+    <Property><Name>Text</Name><Value>{LABEL_TEXT}</Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{LABEL_NAME}</Name>
+</Control>
+
+<!-- TextBox control -->
+<Control ID="{GUID}" Type="TextBox">
+  <DisplayName>{TEXTBOX_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{TEXTBOX_NAME}</DisplayValue><Value>{TEXTBOX_NAME}</Value></Property>
+    <Property><Name>DataType</Name><Value>Text</Value></Property>
+    <Property><Name>WaterMarkText</Name><Value>Type a value</Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{TEXTBOX_NAME}</Name>
+</Control>
+
+<!-- DropDown control with static items -->
+<Control ID="{GUID}" Type="DropDown">
+  <DisplayName>{DROPDOWN_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{DROPDOWN_NAME}</DisplayValue><Value>{DROPDOWN_NAME}</Value></Property>
+    <Property><Name>DataType</Name><Value>Text</Value></Property>
+    <Property><Name>WaterMarkText</Name><Value>Select an item</Value></Property>
+    <Property><Name>Items</Name><Value>
+      <Items>
+        <Item><DisplayValue>{ITEM_1}</DisplayValue><Value>{ITEM_1}</Value></Item>
+        <Item><DisplayValue>{ITEM_2}</DisplayValue><Value>{ITEM_2}</Value></Item>
+      </Items>
+    </Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{DROPDOWN_NAME}</Name>
+</Control>
+
+<!-- CheckBox control -->
+<Control ID="{GUID}" Type="CheckBox">
+  <DisplayName>{CHECKBOX_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{CHECKBOX_NAME}</DisplayValue><Value>{CHECKBOX_NAME}</Value></Property>
+    <Property><Name>DataType</Name><Value>YesNo</Value></Property>
+    <Property><Name>Text</Name><Value>{CHECKBOX_LABEL}</Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{CHECKBOX_NAME}</Name>
+</Control>
+
+<!-- Button control -->
+<Control ID="{GUID}" Type="Button">
+  <DisplayName>{BUTTON_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{BUTTON_NAME}</DisplayValue><Value>{BUTTON_NAME}</Value></Property>
+    <Property><Name>Text</Name><Value>{BUTTON_TEXT}</Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{BUTTON_NAME}</Name>
+</Control>
+
+<!-- DataLabel control -->
+<Control ID="{GUID}" Type="DataLabel">
+  <DisplayName>{DATALABEL_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{DATALABEL_NAME}</DisplayValue><Value>{DATALABEL_NAME}</Value></Property>
+    <Property><Name>DataType</Name><Value>Text</Value></Property>
+    <Property><Name>LiteralVal</Name><Value>false</Value></Property>
+    <Property><Name>SanitizeHtml</Name><Value>false</Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{DATALABEL_NAME}</Name>
+</Control>
+
+<!-- RadioButton control -->
+<Control ID="{GUID}" Type="RadioButton">
+  <DisplayName>{RADIO_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{RADIO_NAME}</DisplayValue><Value>{RADIO_NAME}</Value></Property>
+    <Property><Name>DataType</Name><Value>Text</Value></Property>
+    <Property><Name>Items</Name><Value>
+      <Items>
+        <Item><DisplayValue>{OPTION_1}</DisplayValue><Value>{OPTION_1}</Value></Item>
+        <Item><DisplayValue>{OPTION_2}</DisplayValue><Value>{OPTION_2}</Value></Item>
+      </Items>
+    </Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{RADIO_NAME}</Name>
+</Control>
+
+<!-- DatePicker/Calendar control -->
+<Control ID="{GUID}" Type="DatePicker">
+  <DisplayName>{DATEPICKER_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{DATEPICKER_NAME}</DisplayValue><Value>{DATEPICKER_NAME}</Value></Property>
+    <Property><Name>DataType</Name><Value>Date</Value></Property>
+    <Property><Name>WaterMarkText</Name><Value>Select a date</Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{DATEPICKER_NAME}</Name>
+</Control>
+
+<!-- NumericTextBox control -->
+<Control ID="{GUID}" Type="NumericTextBox">
+  <DisplayName>{NUMERIC_NAME}</DisplayName>
+  <Properties>
+    <Property><Name>ControlName</Name><DisplayValue>{NUMERIC_NAME}</DisplayValue><Value>{NUMERIC_NAME}</Value></Property>
+    <Property><Name>DataType</Name><Value>Number</Value></Property>
+    <Property><Name>WaterMarkText</Name><Value>Type a value</Value></Property>
+  </Properties>
+  <Styles><Style IsDefault="True"/></Styles>
+  <Name>{NUMERIC_NAME}</Name>
+</Control>
+
+
+<!-- ========================================================================
+     PATTERN: CANVAS LAYOUT STRUCTURE (Grid layout with rows/columns/cells)
+     ======================================================================== -->
+<!--
+<Canvas>
+  <Sections>
+    <Section ID="{GUID}" Type="Body">
+      <Control ID="{TABLE_GUID}" LayoutType="Grid">
+        <Columns>
+          <Column ID="{GUID}" Size="1fr"/>
+          <Column ID="{GUID}" Size="1fr"/>
+        </Columns>
+        <Rows>
+          <Row ID="{GUID}">
+            <Cells>
+              <Cell ID="{GUID}" ColumnSpan="1" RowSpan="1">
+                <Control ID="{LABEL_CONTROL_ID}"/>
+              </Cell>
+              <Cell ID="{GUID}" ColumnSpan="1" RowSpan="1">
+                <Control ID="{INPUT_CONTROL_ID}"/>
+              </Cell>
+            </Cells>
+          </Row>
+        </Rows>
+      </Control>
+    </Section>
+  </Sections>
+</Canvas>
+-->
+
+
+<!-- ========================================================================
+     PATTERN: LIST VIEW TYPE vs ITEM VIEW TYPE
+     ======================================================================== -->
+<!--
+Item View (Capture): <View ID="{GUID}" Type="Capture" RenderVersion="3">
+List View:          <View ID="{GUID}" Type="List" RenderVersion="3">
+
+List views have additional structures:
+- Toolbar section with Add/Edit/Delete/Save/Refresh buttons
+- Body section with editable columns
+- Footer section for aggregations
+- Edit section for inline editing
+-->
+

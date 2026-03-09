@@ -128,6 +128,17 @@ namespace K2SmartObjectGenerator
                     Console.WriteLine("\nPublishing SmartObjects...");
                 await PublishSmartObjectsAsync(publishSmo);
 
+                // CRITICAL: Refresh all GUIDs from K2 server after publishing
+                // The K2 server may assign different GUIDs than the local definition GUIDs.
+                await Task.Delay(500); // Brief delay for server indexing
+                await RefreshSmartObjectGuidFromServerAsync(formName);
+                foreach (var section in repeatingSections)
+                {
+                    string sectionName = NameSanitizer.SanitizeSmartObjectName(section.Key);
+                    string childSmoName = $"{formName}_{sectionName}";
+                    await RefreshSmartObjectGuidFromServerAsync(childSmoName);
+                }
+
                 // PERFORMANCE FIX: Give K2 server time to index published SmartObjects
                 // This is necessary before retrieving them for association creation
                 if (repeatingSections.Count > 0)
@@ -219,6 +230,16 @@ namespace K2SmartObjectGenerator
 
             // Add a small delay to ensure server synchronization
             await Task.Delay(1000);
+
+            // CRITICAL: Refresh GUID from K2 server after publishing
+            // The K2 server may assign a different GUID than the local definition GUID.
+            // We must use the server-assigned GUID for all downstream references (views, forms).
+            string serverGuid = await RefreshSmartObjectGuidFromServerAsync(consolidatedLookupName);
+            if (!string.IsNullOrEmpty(serverGuid) && serverGuid != lookupGuid)
+            {
+                Console.WriteLine($"  GUID updated from server: {lookupGuid} → {serverGuid}");
+                lookupGuid = serverGuid;
+            }
 
             // Populate the consolidated lookup with all data
             if (_config.Logging.ShowProgress)
@@ -607,6 +628,7 @@ namespace K2SmartObjectGenerator
             string columnName = field["ColumnName"]?.Value<string>();
             string type = field["Type"]?.Value<string>();
             string displayName = field["DisplayName"]?.Value<string>();
+            string dataTypeHint = field["DataType"]?.Value<string>();
 
             if (string.IsNullOrEmpty(columnName))
                 return null;
@@ -679,7 +701,48 @@ namespace K2SmartObjectGenerator
                     break;
             }
 
-            // Handle SQL mapping if present
+            // ENHANCEMENT: Check DataType hint from InfoPath metadata (highest priority)
+            if (!string.IsNullOrEmpty(dataTypeHint))
+            {
+                string dataTypeLower = dataTypeHint.ToLower();
+                if (dataTypeLower.Contains("date") || dataTypeLower.Contains("datetime") || dataTypeLower.Contains("time"))
+                {
+                    property.Type = PropertyDefinitionType.DateTime;
+                }
+                else if (dataTypeLower.Contains("decimal") || dataTypeLower.Contains("currency") || dataTypeLower.Contains("number"))
+                {
+                    property.Type = PropertyDefinitionType.Decimal;
+                }
+                else if (dataTypeLower.Contains("int") || dataTypeLower.Contains("integer"))
+                {
+                    property.Type = PropertyDefinitionType.Number;
+                }
+            }
+
+            // ENHANCEMENT: Pattern-based type detection for fields with "textfield" or "label" type
+            // This catches calculated fields and ExpressionBoxes that have numeric or date data
+            if ((type?.ToLower() == "textfield" || type?.ToLower() == "label") && string.IsNullOrEmpty(dataTypeHint))
+            {
+                string columnLower = columnName.ToLower();
+
+                // Date field detection
+                if (columnLower.EndsWith("date") || columnLower.EndsWith("datetime") ||
+                    columnLower.EndsWith("startdate") || columnLower.EndsWith("enddate") ||
+                    columnLower.EndsWith("dob") || columnLower.Contains("_date"))
+                {
+                    property.Type = PropertyDefinitionType.DateTime;
+                }
+                // Currency/decimal field detection
+                else if (columnLower.EndsWith("total") || columnLower.EndsWith("subtotal") ||
+                         columnLower.EndsWith("amount") || columnLower.EndsWith("price") ||
+                         columnLower.EndsWith("cost") || columnLower.EndsWith("rate") ||
+                         columnLower.Contains("salary") || columnLower.Contains("cash"))
+                {
+                    property.Type = PropertyDefinitionType.Decimal;
+                }
+            }
+
+            // Handle SQL mapping if present (override any previous type detection)
             JObject sqlMapping = field["SqlMapping"] as JObject;
             if (sqlMapping != null)
             {
@@ -952,6 +1015,50 @@ namespace K2SmartObjectGenerator
 
                 return false;
             }
+        }
+
+        /// <summary>
+        /// After publishing a SmartObject to the K2 server, query the server for the actual
+        /// assigned GUID and update our local cache and registry. The server may assign a
+        /// different GUID than the one generated by the local SmartObjectDefinition.
+        /// </summary>
+        private async Task<string> RefreshSmartObjectGuidFromServerAsync(string smoName)
+        {
+            try
+            {
+                _connectionManager.Connect();
+                SmartObjectExplorer explorer = _connectionManager.ManagementServer.GetSmartObjects(smoName);
+                if (explorer.SmartObjects.Count > 0)
+                {
+                    string serverGuid = explorer.SmartObjects[0].Guid.ToString();
+                    string cachedGuid = _createdSmartObjectGuids.ContainsKey(smoName) ? _createdSmartObjectGuids[smoName] : null;
+
+                    if (cachedGuid != null && cachedGuid != serverGuid)
+                    {
+                        Console.WriteLine($"  GUID REFRESH: {smoName} local={cachedGuid} → server={serverGuid}");
+                    }
+
+                    // Update cache and registry with the server-authoritative GUID
+                    _createdSmartObjectGuids[smoName] = serverGuid;
+
+                    // Update registry - check what type was registered
+                    var existingInfo = SmartObjectViewRegistry.GetSmartObjectInfo(smoName);
+                    var smoType = existingInfo?.Type ?? SmartObjectViewRegistry.SmartObjectType.Main;
+                    SmartObjectViewRegistry.RegisterSmartObject(smoName, serverGuid, smoType);
+
+                    return serverGuid;
+                }
+                else
+                {
+                    Console.WriteLine($"  WARNING: Could not find {smoName} on K2 server for GUID refresh");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  WARNING: Failed to refresh GUID for {smoName}: {ex.Message}");
+            }
+
+            return null;
         }
 
         private async Task PublishSmartObjectsAsync(SmartObjectDefinitionsPublish publishSmo)

@@ -112,24 +112,215 @@ namespace FormGenerator.Writers.K2.RuleBuilders
         }
 
         /// <summary>
-        /// Build a "is not empty/not blank" condition element
+        /// Build a "is not empty/not blank" condition element.
+        /// Reference: K2-Live-Patterns-PurchaseOrders.xml - IsNotBlank expression wraps Item.
         /// </summary>
         public static XmlElement BuildIsNotEmptyCondition(XmlDocument doc, string controlId,
             string controlName, string dataType = "Text")
         {
-            var condition = CreateConditionShell(doc, "SimpleNotEmptyCondition");
+            var condition = CreateConditionShell(doc, "SimpleNotBlankControlCondition");
 
             var expressions = doc.CreateElement("Expressions");
+            var isNotBlank = doc.CreateElement("IsNotBlank");
+
             var item = doc.CreateElement("Item");
             item.SetAttribute("SourceType", "Control");
             item.SetAttribute("SourceID", controlId);
             item.SetAttribute("SourceName", controlName);
             item.SetAttribute("SourceDisplayName", controlName);
             item.SetAttribute("DataType", dataType);
-            expressions.AppendChild(item);
+            isNotBlank.AppendChild(item);
+
+            expressions.AppendChild(isNotBlank);
+            condition.AppendChild(expressions);
+            return condition;
+        }
+
+        // ================================================================
+        // Advanced Condition expression builders
+        // Reference: K2 Designer "Advanced Condition" XML output
+        // These use AdvancedCondition shell and SourceValue child elements
+        // ================================================================
+
+        /// <summary>
+        /// Build a "contains" condition element for Advanced Conditions.
+        /// Reference: K2 Designer Advanced Condition - Contains expression.
+        /// XML: &lt;Contains&gt;&lt;Item SourceType="Control" .../&gt;&lt;Item SourceType="Value"&gt;&lt;SourceValue&gt;...&lt;/SourceValue&gt;&lt;/Item&gt;&lt;/Contains&gt;
+        /// </summary>
+        public static XmlElement BuildContainsCondition(XmlDocument doc, string controlId,
+            string controlName, string compareValue, string dataType = "Text")
+        {
+            return BuildAdvancedTwoItemExpression(doc, "Contains", controlId, controlName, compareValue, dataType);
+        }
+
+        /// <summary>
+        /// Build a "starts with" condition element for Advanced Conditions.
+        /// Reference: K2 Designer Advanced Condition - StartsWith expression.
+        /// </summary>
+        public static XmlElement BuildStartsWithCondition(XmlDocument doc, string controlId,
+            string controlName, string compareValue, string dataType = "Text")
+        {
+            return BuildAdvancedTwoItemExpression(doc, "StartsWith", controlId, controlName, compareValue, dataType);
+        }
+
+        /// <summary>
+        /// Build an "ends with" condition element for Advanced Conditions.
+        /// Reference: K2 Designer Advanced Condition - EndsWith expression.
+        /// </summary>
+        public static XmlElement BuildEndsWithCondition(XmlDocument doc, string controlId,
+            string controlName, string compareValue, string dataType = "Text")
+        {
+            return BuildAdvancedTwoItemExpression(doc, "EndsWith", controlId, controlName, compareValue, dataType);
+        }
+
+        /// <summary>
+        /// Build a "greater than" condition element for Advanced Conditions.
+        /// Reference: K2 Designer Advanced Condition - GreaterThan expression.
+        /// </summary>
+        public static XmlElement BuildGreaterThanCondition(XmlDocument doc, string controlId,
+            string controlName, string compareValue, string dataType = "Text")
+        {
+            return BuildAdvancedTwoItemExpression(doc, "GreaterThan", controlId, controlName, compareValue, dataType);
+        }
+
+        /// <summary>
+        /// Build a "less than" condition element for Advanced Conditions.
+        /// Reference: K2 Designer Advanced Condition - LessThan expression.
+        /// </summary>
+        public static XmlElement BuildLessThanCondition(XmlDocument doc, string controlId,
+            string controlName, string compareValue, string dataType = "Text")
+        {
+            return BuildAdvancedTwoItemExpression(doc, "LessThan", controlId, controlName, compareValue, dataType);
+        }
+
+        /// <summary>
+        /// Build a "greater than or equal" condition element for Advanced Conditions.
+        /// Reference: K2 Designer Advanced Condition - GreaterThanEquals expression.
+        /// </summary>
+        public static XmlElement BuildGreaterThanEqualsCondition(XmlDocument doc, string controlId,
+            string controlName, string compareValue, string dataType = "Text")
+        {
+            return BuildAdvancedTwoItemExpression(doc, "GreaterThanEquals", controlId, controlName, compareValue, dataType);
+        }
+
+        /// <summary>
+        /// Build a "less than or equal" condition element for Advanced Conditions.
+        /// Reference: K2 Designer Advanced Condition - LessThanEquals expression.
+        /// </summary>
+        public static XmlElement BuildLessThanEqualsCondition(XmlDocument doc, string controlId,
+            string controlName, string compareValue, string dataType = "Text")
+        {
+            return BuildAdvancedTwoItemExpression(doc, "LessThanEquals", controlId, controlName, compareValue, dataType);
+        }
+
+        /// <summary>
+        /// Build an Advanced Condition with multiple sub-expressions combined with AND logic.
+        /// Reference: K2 Designer uses nested &lt;And&gt; elements for compound AND conditions
+        /// within a single AdvancedCondition Condition element.
+        /// Structure: Expressions > And > And > ... (nested) with leaf expressions.
+        /// </summary>
+        public static XmlElement BuildAdvancedAndCondition(XmlDocument doc,
+            List<XmlElement> subExpressions)
+        {
+            if (subExpressions == null || subExpressions.Count == 0)
+                return null;
+
+            var condition = CreateConditionShell(doc, "AdvancedCondition");
+            var expressions = doc.CreateElement("Expressions");
+
+            if (subExpressions.Count == 1)
+            {
+                // Single expression - no And wrapper needed
+                expressions.AppendChild(doc.ImportNode(subExpressions[0], true));
+            }
+            else
+            {
+                // Multiple expressions - nest with And elements
+                // K2 pattern: And(And(And(expr1, expr2), expr3), expr4)
+                XmlElement current = subExpressions[0];
+                for (int i = 1; i < subExpressions.Count; i++)
+                {
+                    var andEl = doc.CreateElement("And");
+                    andEl.AppendChild(doc.ImportNode(current, true));
+                    andEl.AppendChild(doc.ImportNode(subExpressions[i], true));
+                    current = andEl;
+                }
+                expressions.AppendChild(current);
+            }
 
             condition.AppendChild(expressions);
             return condition;
+        }
+
+        /// <summary>
+        /// Build an Advanced Condition with multiple sub-expressions combined with OR logic.
+        /// Reference: K2 Designer uses nested &lt;Or&gt; elements for compound OR conditions.
+        /// </summary>
+        public static XmlElement BuildAdvancedOrCondition(XmlDocument doc,
+            List<XmlElement> subExpressions)
+        {
+            if (subExpressions == null || subExpressions.Count == 0)
+                return null;
+
+            var condition = CreateConditionShell(doc, "AdvancedCondition");
+            var expressions = doc.CreateElement("Expressions");
+
+            if (subExpressions.Count == 1)
+            {
+                expressions.AppendChild(doc.ImportNode(subExpressions[0], true));
+            }
+            else
+            {
+                XmlElement current = subExpressions[0];
+                for (int i = 1; i < subExpressions.Count; i++)
+                {
+                    var orEl = doc.CreateElement("Or");
+                    orEl.AppendChild(doc.ImportNode(current, true));
+                    orEl.AppendChild(doc.ImportNode(subExpressions[i], true));
+                    current = orEl;
+                }
+                expressions.AppendChild(current);
+            }
+
+            condition.AppendChild(expressions);
+            return condition;
+        }
+
+        /// <summary>
+        /// Create a raw expression element (without Condition shell) for use in compound builders.
+        /// Returns just the expression element (e.g. Contains, StartsWith) for embedding
+        /// inside an AdvancedCondition's And/Or tree.
+        /// </summary>
+        public static XmlElement CreateAdvancedExpression(XmlDocument doc, string expressionType,
+            string controlId, string controlName, string compareValue = null, string dataType = "Text")
+        {
+            var expr = doc.CreateElement(expressionType);
+
+            var leftItem = doc.CreateElement("Item");
+            leftItem.SetAttribute("SourceType", "Control");
+            leftItem.SetAttribute("SourceID", controlId);
+            leftItem.SetAttribute("SourceName", controlName);
+            leftItem.SetAttribute("SourceDisplayName", controlName);
+            leftItem.SetAttribute("DataType", dataType);
+            expr.AppendChild(leftItem);
+
+            // IsBlank/IsNotBlank have only one Item (no right value)
+            if (!string.Equals(expressionType, "IsBlank", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(expressionType, "IsNotBlank", StringComparison.OrdinalIgnoreCase))
+            {
+                var rightItem = doc.CreateElement("Item");
+                rightItem.SetAttribute("SourceType", "Value");
+                rightItem.SetAttribute("DataType", dataType);
+
+                var sourceValue = doc.CreateElement("SourceValue");
+                sourceValue.SetAttribute("xml:space", "preserve");
+                sourceValue.InnerText = compareValue ?? "";
+                rightItem.AppendChild(sourceValue);
+
+                expr.AppendChild(rightItem);
+            }
+
+            return expr;
         }
 
         /// <summary>
@@ -200,8 +391,9 @@ namespace FormGenerator.Writers.K2.RuleBuilders
         }
 
         /// <summary>
-        /// Legacy compound builder - wraps in Composite for OR logic only.
-        /// For AND logic, use BuildAndConditions instead.
+        /// Compound condition builder using correct K2 Designer patterns.
+        /// For AND with simple conditions: returns multiple Condition elements (use BuildAndConditions).
+        /// For AND/OR with advanced expressions: uses nested And/Or elements inside AdvancedCondition.
         /// </summary>
         public static XmlElement BuildCompoundCondition(XmlDocument doc,
             List<XmlElement> subConditions, string logic = "And")
@@ -212,18 +404,18 @@ namespace FormGenerator.Writers.K2.RuleBuilders
             if (subConditions.Count == 1)
                 return subConditions[0];
 
-            // For AND: K2 uses multiple Condition elements, not Composite
+            // For AND with simple conditions: K2 uses multiple Condition elements in Conditions block
             // Return first condition; caller should add all conditions to Conditions block
             if (string.Equals(logic, "And", StringComparison.OrdinalIgnoreCase))
                 return subConditions[0];
 
-            // For OR: use Composite element
+            // For OR: build AdvancedCondition with nested Or elements
+            // Reference: K2 Designer uses nested <Or> elements (same pattern as <And>)
             var condition = CreateConditionShell(doc, "AdvancedCondition");
-
             var expressions = doc.CreateElement("Expressions");
-            var composite = doc.CreateElement("Composite");
-            composite.SetAttribute("Logic", logic);
 
+            // Extract expression elements from each sub-condition
+            var subExpressions = new List<XmlNode>();
             foreach (var sub in subConditions)
             {
                 var subExprs = sub.SelectSingleNode("Expressions");
@@ -231,12 +423,68 @@ namespace FormGenerator.Writers.K2.RuleBuilders
                 {
                     foreach (XmlNode child in subExprs.ChildNodes)
                     {
-                        composite.AppendChild(doc.ImportNode(child, true));
+                        subExpressions.Add(child);
                     }
                 }
             }
 
-            expressions.AppendChild(composite);
+            if (subExpressions.Count == 1)
+            {
+                expressions.AppendChild(doc.ImportNode(subExpressions[0], true));
+            }
+            else if (subExpressions.Count > 1)
+            {
+                // Build nested Or tree: Or(Or(expr1, expr2), expr3)
+                XmlNode current = doc.ImportNode(subExpressions[0], true);
+                for (int i = 1; i < subExpressions.Count; i++)
+                {
+                    var orEl = doc.CreateElement("Or");
+                    orEl.AppendChild(current);
+                    orEl.AppendChild(doc.ImportNode(subExpressions[i], true));
+                    current = orEl;
+                }
+                expressions.AppendChild(current);
+            }
+
+            condition.AppendChild(expressions);
+            return condition;
+        }
+
+        /// <summary>
+        /// Helper: build a two-item expression wrapped in an AdvancedCondition.
+        /// Used for Contains, StartsWith, EndsWith, GreaterThan, LessThan, etc.
+        /// Advanced Conditions use SourceValue child elements instead of InnerText.
+        /// </summary>
+        private static XmlElement BuildAdvancedTwoItemExpression(XmlDocument doc,
+            string expressionElementName, string controlId, string controlName,
+            string compareValue, string dataType)
+        {
+            var condition = CreateConditionShell(doc, "AdvancedCondition");
+
+            var expressions = doc.CreateElement("Expressions");
+            var expr = doc.CreateElement(expressionElementName);
+
+            var leftItem = doc.CreateElement("Item");
+            leftItem.SetAttribute("SourceType", "Control");
+            leftItem.SetAttribute("SourceID", controlId);
+            leftItem.SetAttribute("SourceName", controlName);
+            leftItem.SetAttribute("SourceDisplayName", controlName);
+            leftItem.SetAttribute("DataType", dataType);
+            expr.AppendChild(leftItem);
+
+            var rightItem = doc.CreateElement("Item");
+            rightItem.SetAttribute("SourceType", "Value");
+            rightItem.SetAttribute("DataType", dataType);
+
+            // Advanced conditions use SourceValue child element with xml:space="preserve"
+            var sourceValue = doc.CreateElement("SourceValue");
+            sourceValue.SetAttribute("xml:space", "preserve");
+            sourceValue.InnerText = compareValue ?? "";
+            rightItem.AppendChild(sourceValue);
+
+            expr.AppendChild(rightItem);
+
+            expressions.AppendChild(expr);
             condition.AppendChild(expressions);
 
             return condition;

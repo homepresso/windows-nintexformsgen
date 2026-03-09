@@ -31,6 +31,13 @@ namespace FormGenerator.Analyzers.Infopath
         public string Version { get; set; }
         public List<ValidationRule> Validations { get; set; } = new List<ValidationRule>();
         public List<ConditionalRule> ConditionalRules { get; set; } = new List<ConditionalRule>();
+
+        /// <summary>
+        /// Maps InfoPath binding leaf names to K2-matching control names (ctrl.Name).
+        /// E.g., "isRoundTrip" -> "ISROUNDTRIP", "includeCar" -> "INCLUDECAR".
+        /// Used by the K2 generator to translate InfoPath field references to K2 control names.
+        /// </summary>
+        public Dictionary<string, string> InfoPathToK2NameMap { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
 
@@ -194,6 +201,12 @@ namespace FormGenerator.Analyzers.Infopath
         public string ConditionField { get; set; }
         public string ConditionValue { get; set; }
         public List<string> Controls { get; set; } = new List<string>();
+        /// <summary>
+        /// Field names (e.g., "returnDate", "returnTime") resolved from the Controls CtrlIds.
+        /// Used for deterministic K2 control lookup during generation - avoids CtrlId guessing.
+        /// K2 has no sections, so we hide/show each individual control.
+        /// </summary>
+        public List<string> FieldNames { get; set; } = new List<string>();
         public bool IsVisible { get; set; }
 
         public List<string> AssociatedRules { get; set; } = new List<string>();
@@ -868,6 +881,70 @@ namespace FormGenerator.Analyzers.Infopath
         {
             try
             {
+                // Build TWO lookups:
+                // 1. ctrlIdToFieldName: InfoPath CtrlId (e.g. "CTRL33") -> leaf field name from binding
+                // 2. bindingNameToK2Name: InfoPath binding leaf name (e.g. "isRoundTrip") -> ctrl.Name (e.g. "ROUNDTRIP")
+                //
+                // ctrl.Name holds the K2-matching display name (e.g. "RETURNDATE", "ROUNDTRIP").
+                // The binding leaf name is from XPath (e.g. "my:preferences/my:isRoundTrip" -> "isRoundTrip").
+                // These often differ! We need ctrl.Name for K2 control resolution.
+                var ctrlIdToFieldName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var bindingNameToK2Name = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var view in formDef.Views)
+                {
+                    foreach (var ctrl in view.Controls)
+                    {
+                        // Get the InfoPath CtrlId from Properties
+                        string ctrlId = null;
+                        if (ctrl.Properties != null && ctrl.Properties.ContainsKey("CtrlId"))
+                            ctrlId = ctrl.Properties["CtrlId"];
+
+                        if (string.IsNullOrEmpty(ctrl.Binding)) continue;
+
+                        // Extract leaf field name from binding XPath
+                        string binding = ctrl.Binding;
+                        string bindingLeafName;
+                        if (binding.Contains("/"))
+                        {
+                            string[] segments = binding.Split('/');
+                            bindingLeafName = segments[segments.Length - 1].Replace("my:", "");
+                        }
+                        else
+                        {
+                            bindingLeafName = binding.Replace("my:", "");
+                        }
+
+                        if (!string.IsNullOrEmpty(bindingLeafName))
+                        {
+                            // Map CtrlId -> binding leaf name (for resolving section controls)
+                            if (!string.IsNullOrEmpty(ctrlId))
+                            {
+                                ctrlIdToFieldName[ctrlId] = bindingLeafName;
+                            }
+
+                            // Map binding leaf name -> ctrl.Name (K2-matching name)
+                            // ctrl.Name is the display name that matches what K2 creates (e.g. "ROUNDTRIP", "INCLUDECARRENTAL")
+                            if (!string.IsNullOrEmpty(ctrl.Name))
+                            {
+                                bindingNameToK2Name[bindingLeafName] = ctrl.Name;
+                            }
+                        }
+                    }
+                }
+                Console.WriteLine($"    PostProcess: Built CtrlId->FieldName lookup with {ctrlIdToFieldName.Count} entries:");
+                foreach (var kvp in ctrlIdToFieldName)
+                {
+                    Console.WriteLine($"      {kvp.Key} -> {kvp.Value}");
+                }
+                // Store the mapping on the form definition so the K2 generator can use it
+                formDef.InfoPathToK2NameMap = new Dictionary<string, string>(bindingNameToK2Name, StringComparer.OrdinalIgnoreCase);
+
+                Console.WriteLine($"    PostProcess: Built BindingName->K2Name lookup with {bindingNameToK2Name.Count} entries:");
+                foreach (var kvp in bindingNameToK2Name)
+                {
+                    Console.WriteLine($"      {kvp.Key} -> {kvp.Value}");
+                }
+
                 foreach (var dynSection in formDef.DynamicSections)
                 {
                     if (!string.IsNullOrEmpty(dynSection.ConditionField))
@@ -886,6 +963,159 @@ namespace FormGenerator.Analyzers.Infopath
                                     list.Add(ctrlId);
                             }
                         }
+                    }
+
+                    // Resolve CtrlIds to K2-matching field names for deterministic K2 control lookup.
+                    // K2 has no sections, so each field's control is hidden/shown individually.
+                    // We use ctrl.Name (K2 name) instead of binding leaf name to ensure 1:1 mapping.
+                    Console.WriteLine($"    DynamicSection '{dynSection.CtrlId}' (condition: {dynSection.ConditionField}={dynSection.ConditionValue}): Controls=[{string.Join(", ", dynSection.Controls ?? new List<string>())}]");
+                    if (dynSection.Controls != null)
+                    {
+                        foreach (var ctrlId in dynSection.Controls)
+                        {
+                            if (!string.IsNullOrEmpty(ctrlId))
+                            {
+                                if (ctrlIdToFieldName.TryGetValue(ctrlId, out var bindingLeaf))
+                                {
+                                    // Resolve to K2-matching name via ctrl.Name
+                                    string k2Name = bindingNameToK2Name.ContainsKey(bindingLeaf)
+                                        ? bindingNameToK2Name[bindingLeaf]
+                                        : bindingLeaf; // fallback to binding leaf if no mapping
+
+                                    if (!dynSection.FieldNames.Contains(k2Name))
+                                        dynSection.FieldNames.Add(k2Name);
+                                    Console.WriteLine($"      {ctrlId} -> binding '{bindingLeaf}' -> K2 name '{k2Name}' (resolved)");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"      {ctrlId} -> NOT FOUND in CtrlId lookup (no ControlDefinition with this CtrlId has a Binding)");
+                                }
+                            }
+                        }
+                    }
+                    if (dynSection.FieldNames.Count > 0)
+                    {
+                        Console.WriteLine($"    DynamicSection '{dynSection.CtrlId}': resolved {dynSection.FieldNames.Count} field names: {string.Join(", ", dynSection.FieldNames)}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"    DynamicSection '{dynSection.CtrlId}': WARNING - no field names resolved from {dynSection.Controls?.Count ?? 0} controls");
+                    }
+                }
+
+                // REMAP ConditionalVisibility keys from InfoPath binding names to K2-matching ctrl.Name
+                // This ensures the JSON output uses K2 control names as keys, which the K2 generator
+                // can resolve directly without name mismatches.
+                var remappedVisibility = new Dictionary<string, List<string>>();
+                foreach (var kvp in formDef.ConditionalVisibility)
+                {
+                    string infoPathName = kvp.Key;
+                    string k2Name = bindingNameToK2Name.ContainsKey(infoPathName)
+                        ? bindingNameToK2Name[infoPathName]
+                        : infoPathName; // fallback if no mapping exists
+
+                    if (infoPathName != k2Name)
+                    {
+                        Console.WriteLine($"    Remapped ConditionalVisibility key: '{infoPathName}' -> '{k2Name}'");
+                    }
+
+                    // Merge if multiple InfoPath names map to the same K2 name
+                    if (remappedVisibility.ContainsKey(k2Name))
+                    {
+                        remappedVisibility[k2Name].AddRange(kvp.Value);
+                    }
+                    else
+                    {
+                        remappedVisibility[k2Name] = kvp.Value;
+                    }
+                }
+                formDef.ConditionalVisibility = remappedVisibility;
+
+                // Also remap ConditionField on each dynamic section to use K2 name
+                foreach (var dynSection in formDef.DynamicSections)
+                {
+                    if (!string.IsNullOrEmpty(dynSection.ConditionField) &&
+                        bindingNameToK2Name.ContainsKey(dynSection.ConditionField))
+                    {
+                        string oldName = dynSection.ConditionField;
+                        dynSection.ConditionField = bindingNameToK2Name[oldName];
+                        Console.WriteLine($"    Remapped DynamicSection ConditionField: '{oldName}' -> '{dynSection.ConditionField}'");
+                    }
+                }
+
+                // Remap ConditionalRule SourceField/TargetField to K2-matching names
+                foreach (var rule in formDef.ConditionalRules)
+                {
+                    if (!string.IsNullOrEmpty(rule.SourceField) &&
+                        bindingNameToK2Name.TryGetValue(rule.SourceField, out var k2Source))
+                    {
+                        Console.WriteLine($"    Remapped ConditionalRule '{rule.Name}' SourceField: '{rule.SourceField}' -> '{k2Source}'");
+                        rule.SourceField = k2Source;
+                    }
+                    if (!string.IsNullOrEmpty(rule.TargetField) &&
+                        bindingNameToK2Name.TryGetValue(rule.TargetField, out var k2Target))
+                    {
+                        Console.WriteLine($"    Remapped ConditionalRule '{rule.Name}' TargetField: '{rule.TargetField}' -> '{k2Target}'");
+                        rule.TargetField = k2Target;
+                    }
+                    // Remap AffectedControls: resolve CtrlIds to K2 field names
+                    // AffectedControls are InfoPath CtrlIds (e.g., "CTRL33"). Resolve them through:
+                    //   CtrlId -> binding leaf name (ctrlIdToFieldName) -> K2 name (bindingNameToK2Name)
+                    // Also try direct bindingNameToK2Name lookup for entries that are already field names.
+                    for (int i = 0; i < rule.AffectedControls.Count; i++)
+                    {
+                        string original = rule.AffectedControls[i];
+
+                        // Path 1: CtrlId -> binding leaf -> K2 name
+                        if (ctrlIdToFieldName.TryGetValue(original, out var bindingLeaf))
+                        {
+                            string k2Name = bindingNameToK2Name.ContainsKey(bindingLeaf)
+                                ? bindingNameToK2Name[bindingLeaf]
+                                : bindingLeaf;
+                            rule.AffectedControls[i] = k2Name;
+                            Console.WriteLine($"    Remapped AffectedControl '{original}' -> '{bindingLeaf}' -> '{k2Name}'");
+                        }
+                        // Path 2: Already a binding leaf name -> K2 name
+                        else if (bindingNameToK2Name.TryGetValue(original, out var k2Affected))
+                        {
+                            rule.AffectedControls[i] = k2Affected;
+                        }
+                    }
+                }
+
+                // Enrich ConditionalVisibility with same-view Visibility ConditionalRules
+                // that aren't already covered by DynamicSections.
+                // This handles cases like nonSmokingRoom where the xsl:if visibility rule
+                // doesn't correspond to a DynamicSection but needs a K2 visibility event.
+                var visibilityConditionalRules = formDef.ConditionalRules
+                    .Where(r => r != null &&
+                           string.Equals(r.Type, "Visibility", StringComparison.OrdinalIgnoreCase) &&
+                           !string.IsNullOrEmpty(r.SourceField) &&
+                           r.AffectedControls != null && r.AffectedControls.Count > 0)
+                    .ToList();
+
+                foreach (var rule in visibilityConditionalRules)
+                {
+                    // Resolve SourceField to K2 name if not already done
+                    string triggerKey = rule.SourceField;
+                    if (bindingNameToK2Name.ContainsKey(triggerKey))
+                        triggerKey = bindingNameToK2Name[triggerKey];
+
+                    // Skip if this trigger is already covered in ConditionalVisibility
+                    if (formDef.ConditionalVisibility.ContainsKey(triggerKey))
+                        continue;
+
+                    // Filter to only K2-resolvable affected controls (skip unresolved CtrlIds)
+                    var resolvedAffected = rule.AffectedControls
+                        .Where(ac => !string.IsNullOrEmpty(ac) &&
+                               !ac.StartsWith("CTRL", StringComparison.OrdinalIgnoreCase))
+                        .Distinct()
+                        .ToList();
+
+                    if (resolvedAffected.Count > 0)
+                    {
+                        formDef.ConditionalVisibility[triggerKey] = resolvedAffected;
+                        Console.WriteLine($"    Enriched ConditionalVisibility from ConditionalRule: '{triggerKey}' -> [{string.Join(", ", resolvedAffected)}]");
                     }
                 }
             }
@@ -6204,8 +6434,14 @@ namespace FormGenerator.Analyzers.Infopath
                 Controls = new List<string>()
             };
 
-            var sectionDiv = ifElement.Descendants()
-                .FirstOrDefault(e => e.Attributes().Any(a => a.Name.LocalName == "CtrlId"));
+            // Find ALL elements with CtrlId in the xsl:if block (not just the first)
+            var allCtrlIdElements = ifElement.Descendants()
+                .Where(e => e.Attributes().Any(a => a.Name.LocalName == "CtrlId"))
+                .ToList();
+
+            Console.WriteLine($"    ParseDynamicSection mode='{mode}': condition='{condition}', found {allCtrlIdElements.Count} elements with CtrlId");
+
+            var sectionDiv = allCtrlIdElements.FirstOrDefault();
 
             if (sectionDiv != null)
             {
@@ -6213,6 +6449,22 @@ namespace FormGenerator.Analyzers.Infopath
                 sectionInfo.Caption = sectionDiv.Attributes().FirstOrDefault(a => a.Name.LocalName == "caption_0")?.Value
                                       ?? sectionDiv.Attributes().FirstOrDefault(a => a.Name.LocalName == "caption")?.Value;
                 sectionInfo.Controls = ExtractSectionControls(sectionDiv);
+
+                Console.WriteLine($"      Section container CtrlId={sectionInfo.CtrlId}, caption='{sectionInfo.Caption}'");
+                Console.WriteLine($"      Extracted {sectionInfo.Controls.Count} child controls: [{string.Join(", ", sectionInfo.Controls)}]");
+
+                // ALWAYS extract field names from XSL bindings as a secondary data source.
+                // CtrlId-based resolution (via PostProcess) is the primary path, but some controls
+                // (labels, section containers, optional sections) don't have data bindings and won't
+                // resolve to FieldNames via CtrlId lookup. XSL binding extraction provides a fallback.
+                Console.WriteLine($"      Extracting field names from XSL bindings in section...");
+                ExtractFieldNamesFromXslBindings(ifElement, sectionInfo);
+            }
+            else
+            {
+                Console.WriteLine($"      WARNING: No element with CtrlId found in xsl:if block");
+                // Extract field names directly from XSL bindings
+                ExtractFieldNamesFromXslBindings(ifElement, sectionInfo);
             }
 
             return sectionInfo;
@@ -6220,8 +6472,17 @@ namespace FormGenerator.Analyzers.Infopath
 
         private string ExtractConditionField(string condition)
         {
-            var match = Regex.Match(condition ?? "", @"my:(\w+)");
-            return match.Success ? match.Groups[1].Value : "";
+            // Extract the LEAF field name from XPath conditions.
+            // For "my:preferences/my:isRoundTrip = 'true'" we need "isRoundTrip", not "preferences".
+            var match = Regex.Match(condition ?? "", @"((?:my:\w+)(?:/my:\w+)*)");
+            if (match.Success)
+            {
+                string fullPath = match.Groups[1].Value;
+                string[] segments = fullPath.Split('/');
+                string lastSegment = segments[segments.Length - 1];
+                return lastSegment.Replace("my:", "");
+            }
+            return "";
         }
 
         private string ExtractConditionValue(string condition)
@@ -6239,6 +6500,60 @@ namespace FormGenerator.Analyzers.Infopath
                 .ToList();
 
             return controlElements;
+        }
+
+        /// <summary>
+        /// Extracts field names directly from XSL bindings (xsl:value-of, xsl:attribute)
+        /// within a section element. Used when Controls (CtrlIds) are empty or unresolvable.
+        /// This provides a secondary path for field resolution for sections where the XSL
+        /// structure doesn't use CtrlId attributes on data controls.
+        /// </summary>
+        private void ExtractFieldNamesFromXslBindings(XElement sectionElement, DynamicSection sectionInfo)
+        {
+            // Find all xsl:value-of and xsl:attribute elements with select attributes containing my: bindings
+            var bindingSelects = sectionElement.Descendants()
+                .Where(e => (e.Name.LocalName == "value-of" || e.Name.LocalName == "attribute") &&
+                            e.Attribute("select")?.Value?.Contains("my:") == true)
+                .Select(e => e.Attribute("select").Value)
+                .Distinct()
+                .ToList();
+
+            // Also check for xd:binding attributes on HTML input elements
+            var xdBindings = sectionElement.Descendants()
+                .SelectMany(e => e.Attributes())
+                .Where(a => a.Name.LocalName == "binding" && a.Value.Contains("my:"))
+                .Select(a => a.Value)
+                .Distinct()
+                .ToList();
+
+            var allBindings = bindingSelects.Concat(xdBindings).Distinct().ToList();
+
+            foreach (var binding in allBindings)
+            {
+                // Extract leaf field name from binding XPath like "my:preferences/my:returnDate"
+                var match = Regex.Match(binding, @"((?:my:\w+)(?:/my:\w+)*)");
+                if (match.Success)
+                {
+                    string fullPath = match.Groups[1].Value;
+                    string[] segments = fullPath.Split('/');
+                    string leafField = segments[segments.Length - 1].Replace("my:", "");
+
+                    if (!string.IsNullOrEmpty(leafField) && !sectionInfo.FieldNames.Contains(leafField))
+                    {
+                        sectionInfo.FieldNames.Add(leafField);
+                        Console.WriteLine($"        Extracted field '{leafField}' from XSL binding: {binding}");
+                    }
+                }
+            }
+
+            if (sectionInfo.FieldNames.Count > 0)
+            {
+                Console.WriteLine($"      Resolved {sectionInfo.FieldNames.Count} field names from XSL bindings: [{string.Join(", ", sectionInfo.FieldNames)}]");
+            }
+            else
+            {
+                Console.WriteLine($"      WARNING: No field names found from XSL bindings either");
+            }
         }
 
         /// <summary>

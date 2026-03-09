@@ -288,6 +288,8 @@ namespace FormGenerator.Writers.K2.RuleBuilders
                 "concat" => "Concat",
                 "sum" => "Plus",
                 "count" => "Count",
+                "substring" => "Plus",  // Substring extraction → maps to source field reference
+                "string" => "Plus",     // string() cast → pass through to source field
                 _ => null
             };
 
@@ -386,6 +388,19 @@ namespace FormGenerator.Writers.K2.RuleBuilders
             if (double.TryParse(fieldPath, out _)) return null;
 
             var result = fieldPath;
+
+            // Strip function wrappers like string(...), number(...), normalize-space(...)
+            // These are XPath type-cast functions wrapping field references
+            var funcWrapperMatch = Regex.Match(result, @"^\w+\((.+)\)$");
+            if (funcWrapperMatch.Success)
+            {
+                string inner = funcWrapperMatch.Groups[1].Value;
+                // Only unwrap if the inner content looks like a field ref (contains my: or /)
+                if (inner.Contains("my:") || inner.Contains("/"))
+                {
+                    result = inner;
+                }
+            }
 
             // Take last segment if it contains path separators
             if (result.Contains("/"))

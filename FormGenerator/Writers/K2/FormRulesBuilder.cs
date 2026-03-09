@@ -231,6 +231,18 @@ namespace K2SmartObjectGenerator
                 {
                     Console.WriteLine($"\n      === Skipping Rule 3: No Cancel button found for item view ===");
                 }
+
+                // Rule 4: Delete ToolBar Button on List View → RemoveItem
+                if (listViewButtons != null && !string.IsNullOrEmpty(listViewButtons.DeleteButtonId))
+                {
+                    Console.WriteLine($"\n      === Creating Rule 4: Delete ToolBar Button → RemoveItem ===");
+                    AddDeleteToolbarButtonRule(doc, eventsElement, viewPair,
+                        listViewButtons.DeleteButtonId, listViewButtons.DeleteButtonName ?? "Delete ToolBar Button");
+                }
+                else
+                {
+                    Console.WriteLine($"\n      === Skipping Rule 4: No Delete button found for list view ===");
+                }
             }
 
             // Final validation of created rules
@@ -271,7 +283,7 @@ namespace K2SmartObjectGenerator
                 // Debug: Save form XML with expressions to file
                 try
                 {
-                    string debugPath = "SmartObjectAuthoringSample\\bin\\Debug\\form_with_expressions_debug.xml";
+                    string debugPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "form_with_expressions_debug.xml");
                     doc.Save(debugPath);
                     Console.WriteLine($"    DEBUG: Saved form XML with expressions to {debugPath}");
                 }
@@ -573,6 +585,36 @@ namespace K2SmartObjectGenerator
                 return;
             }
 
+            // Detect xdMath:Min/Max/Eval aggregate patterns
+            // e.g., ../my:items/my:item/my:date[translate(...) = xdMath:Min(xdMath:Eval(...))]
+            var xdMathMatch = System.Text.RegularExpressions.Regex.Match(cleanExpr,
+                @"xdMath:(Min|Max|Avg|Eval)\s*\(", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (xdMathMatch.Success)
+            {
+                // Extract all field references from the expression (any my:fieldName patterns)
+                var fieldRefs = System.Text.RegularExpressions.Regex.Matches(cleanExpr,
+                    @"my:([\w]+)(?:\s*[,\[\])\s]|$)");
+                HashSet<string> addedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (System.Text.RegularExpressions.Match fieldRef in fieldRefs)
+                {
+                    string refFieldName = fieldRef.Groups[1].Value;
+                    if (!addedFields.Contains(refFieldName))
+                    {
+                        AddSourceFieldByName(refFieldName, sourceFields, fieldLookup);
+                        addedFields.Add(refFieldName);
+                    }
+                }
+
+                string funcName = xdMathMatch.Groups[1].Value;
+                if (funcName.Equals("Min", StringComparison.OrdinalIgnoreCase))
+                    calcField.OperatorType = null; // Will need special handling as aggregate Min
+                else if (funcName.Equals("Max", StringComparison.OrdinalIgnoreCase))
+                    calcField.OperatorType = null; // Will need special handling as aggregate Max
+
+                Console.WriteLine($"      xdMath:{funcName} aggregate expression → extracted {addedFields.Count} source field(s): {string.Join(", ", addedFields)}");
+                return;
+            }
+
             // Single field reference (assignment)
             string singleField = ExtractFieldNameFromXPath(cleanExpr);
             if (!string.IsNullOrEmpty(singleField))
@@ -639,8 +681,12 @@ namespace K2SmartObjectGenerator
             // Remove namespace prefix (my:)
             cleaned = cleaned.Replace("my:", "");
 
-            // Remove predicates like [position()]
-            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\[.*?\]", "");
+            // Remove predicates like [position()] - handle nested brackets by counting depth
+            int bracketStart = cleaned.IndexOf('[');
+            if (bracketStart >= 0)
+            {
+                cleaned = cleaned.Substring(0, bracketStart);
+            }
 
             return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned.Trim();
         }
@@ -1121,16 +1167,66 @@ namespace K2SmartObjectGenerator
                 Console.WriteLine($"            - {ctrl.Key}: {ctrl.Value.ControlName} (Type: {ctrl.Value.ControlType}, ID: {ctrl.Value.ControlId})");
             }
 
-            // Match controls by field name
+            // Build a reverse lookup: SmoPropertyName -> list control key, for fallback matching
+            var listSmoToKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var lc in listViewControls)
+            {
+                if (!string.IsNullOrEmpty(lc.Value.SmoPropertyName))
+                    listSmoToKey[lc.Value.SmoPropertyName] = lc.Key;
+                // Also index by the key itself (which is often the SMO property name for list views)
+                if (!listSmoToKey.ContainsKey(lc.Key))
+                    listSmoToKey[lc.Key] = lc.Key;
+            }
+
+            // Track which list controls have been matched (to report unmatched ones)
+            var matchedListKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Match controls by field name, with SmoPropertyName fallback
             foreach (var itemControl in itemViewControls)
             {
                 string fieldName = itemControl.Key;
+                ViewGenerator.ControlMapping listControl = null;
+                string matchedListKey = null;
+                string matchMethod = "direct key";
 
-                // Look for matching field in list view
+                // 1. Direct key match
                 if (listViewControls.ContainsKey(fieldName))
                 {
-                    var listControl = listViewControls[fieldName];
+                    listControl = listViewControls[fieldName];
+                    matchedListKey = fieldName;
+                }
+                // 2. Fallback: match item's SmoPropertyName against list view keys or SmoPropertyNames
+                else if (!string.IsNullOrEmpty(itemControl.Value.SmoPropertyName))
+                {
+                    string itemSmoProp = itemControl.Value.SmoPropertyName;
+                    if (listViewControls.ContainsKey(itemSmoProp))
+                    {
+                        listControl = listViewControls[itemSmoProp];
+                        matchedListKey = itemSmoProp;
+                        matchMethod = "item SmoPropertyName -> list key";
+                    }
+                    else if (listSmoToKey.ContainsKey(itemSmoProp))
+                    {
+                        string listKey = listSmoToKey[itemSmoProp];
+                        listControl = listViewControls[listKey];
+                        matchedListKey = listKey;
+                        matchMethod = "item SmoPropertyName -> list SmoPropertyName";
+                    }
+                }
+                // 3. Fallback: match item key against list SmoPropertyNames
+                if (listControl == null && listSmoToKey.ContainsKey(fieldName))
+                {
+                    string listKey = listSmoToKey[fieldName];
+                    if (listKey != fieldName) // avoid re-checking direct match
+                    {
+                        listControl = listViewControls[listKey];
+                        matchedListKey = listKey;
+                        matchMethod = "item key -> list SmoPropertyName";
+                    }
+                }
 
+                if (listControl != null)
+                {
                     viewPair.FieldMappings.Add(new FieldMapping
                     {
                         ItemControlId = itemControl.Value.ControlId,
@@ -1140,22 +1236,23 @@ namespace K2SmartObjectGenerator
                         FieldName = fieldName
                     });
 
-                    Console.WriteLine($"          ✓ Mapped field '{fieldName}':");
-                    Console.WriteLine($"              Item: {itemControl.Value.ControlName} (ID: {itemControl.Value.ControlId})");
-                    Console.WriteLine($"              List: {listControl.ControlName} (ID: {listControl.ControlId})");
+                    matchedListKeys.Add(matchedListKey);
+                    Console.WriteLine($"          ✓ Mapped field '{fieldName}' ({matchMethod}):");
+                    Console.WriteLine($"              Item: {itemControl.Value.ControlName} (ID: {itemControl.Value.ControlId}, SmoProp: {itemControl.Value.SmoPropertyName ?? "N/A"})");
+                    Console.WriteLine($"              List: {listControl.ControlName} (ID: {listControl.ControlId}, SmoProp: {listControl.SmoPropertyName ?? "N/A"})");
                 }
                 else
                 {
-                    Console.WriteLine($"          ✗ Field '{fieldName}' exists in item view but NOT in list view");
+                    Console.WriteLine($"          ✗ Field '{fieldName}' (SmoProp: {itemControl.Value.SmoPropertyName ?? "N/A"}) exists in item view but NO match found in list view");
                 }
             }
 
             // Log any fields that exist in list but not item (for debugging)
             foreach (var listControl in listViewControls)
             {
-                if (!itemViewControls.ContainsKey(listControl.Key))
+                if (!matchedListKeys.Contains(listControl.Key))
                 {
-                    Console.WriteLine($"          ✗ Field '{listControl.Key}' exists in list view but NOT in item view");
+                    Console.WriteLine($"          ✗ Field '{listControl.Key}' (SmoProp: {listControl.Value.SmoPropertyName ?? "N/A"}) exists in list view but was NOT matched to any item view control");
                 }
             }
 
@@ -1246,24 +1343,28 @@ namespace K2SmartObjectGenerator
             {
                 XmlElement hideAction = CreateViewVisibilityAction(doc,
                     viewPair.ListViewInstanceId ?? viewPair.ListViewId,
-                    viewPair.ListViewName, "Hide");
+                    viewPair.ListViewName, "Hide",
+                    viewPair.ListViewId);
                 actions.AppendChild(hideAction);
 
                 XmlElement showAction = CreateViewVisibilityAction(doc,
                     viewPair.ItemViewInstanceId ?? viewPair.ItemViewId,
-                    viewPair.ItemViewName, "Show");
+                    viewPair.ItemViewName, "Show",
+                    viewPair.ItemViewId);
                 actions.AppendChild(showAction);
             }
             else
             {
                 XmlElement hideAction = CreateViewVisibilityAction(doc,
                     viewPair.ItemViewInstanceId ?? viewPair.ItemViewId,
-                    viewPair.ItemViewName, "Hide");
+                    viewPair.ItemViewName, "Hide",
+                    viewPair.ItemViewId);
                 actions.AppendChild(hideAction);
 
                 XmlElement showAction = CreateViewVisibilityAction(doc,
                     viewPair.ListViewInstanceId ?? viewPair.ListViewId,
-                    viewPair.ListViewName, "Show");
+                    viewPair.ListViewName, "Show",
+                    viewPair.ListViewId);
                 actions.AppendChild(showAction);
             }
 
@@ -1272,17 +1373,38 @@ namespace K2SmartObjectGenerator
             return handler;
         }
         private XmlElement CreateViewVisibilityAction(XmlDocument doc, string viewInstanceId,
-           string viewName, string visibility)
+           string viewName, string visibility, string viewId = null)
         {
             Console.WriteLine($"              Creating {visibility} action for {viewName}");
-            Console.WriteLine($"                View Instance ID: {viewInstanceId}");
+            Console.WriteLine($"                View Instance ID (AreaItem): {viewInstanceId}");
+            Console.WriteLine($"                View ID (actual view): {viewId ?? "(not provided)"}");
 
+            // K2 Designer requires ViewID property and TargetName/TargetDisplayName on Parameter
+            // for the action to be "transformable" (renderable in the Rule Designer).
+            // Without these, K2 shows "One or more actions could not be transformed" and
+            // drops the visibility actions from the visual representation.
+            //
+            // Pattern (matching other working actions like AddRow, AcceptItem, Clear):
+            // <Action Type="Transfer" ExecutionType="Synchronous" InstanceID="{AREA_ITEM_ID}">
+            //   <Properties>
+            //     <Property><Name>Location</Name><Value>Form</Value></Property>
+            //     <Property><Name>ViewID</Name><DisplayValue>{viewName}</DisplayValue>
+            //       <NameValue>{viewName}</NameValue><Value>{viewId}</Value></Property>
+            //   </Properties>
+            //   <Parameters>
+            //     <Parameter SourceType="Value" TargetInstanceID="{AREA_ITEM_ID}"
+            //                TargetID="display" TargetName="display"
+            //                TargetDisplayName="{viewName}" TargetType="ViewProperty">
+            //       <SourceValue xml:space="preserve">Show|Hide</SourceValue>
+            //     </Parameter>
+            //   </Parameters>
+            // </Action>
             XmlElement action = doc.CreateElement("Action");
             string actionId = Guid.NewGuid().ToString();
             action.SetAttribute("ID", actionId);
-            action.SetAttribute("DefinitionID", Guid.NewGuid().ToString()); // Always new GUID
+            action.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
             action.SetAttribute("Type", "Transfer");
-            action.SetAttribute("ExecutionType", "Parallel");
+            action.SetAttribute("ExecutionType", "Synchronous");
             action.SetAttribute("InstanceID", viewInstanceId);
 
             XmlElement props = doc.CreateElement("Properties");
@@ -1292,11 +1414,14 @@ namespace K2SmartObjectGenerator
             XmlHelper.AddElement(doc, locationProp, "Value", "Form");
             props.AppendChild(locationProp);
 
+            // ViewID property - required for K2 Designer to transform the action
+            // Use actual view ID if provided, fall back to AreaItem ID
+            string effectiveViewId = !string.IsNullOrEmpty(viewId) ? viewId : viewInstanceId;
             XmlElement viewIdProp = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, viewIdProp, "Name", "ViewID");
             XmlHelper.AddElement(doc, viewIdProp, "DisplayValue", viewName);
             XmlHelper.AddElement(doc, viewIdProp, "NameValue", viewName);
-            XmlHelper.AddElement(doc, viewIdProp, "Value", viewInstanceId);
+            XmlHelper.AddElement(doc, viewIdProp, "Value", effectiveViewId);
             props.AppendChild(viewIdProp);
 
             action.AppendChild(props);
@@ -1320,6 +1445,7 @@ namespace K2SmartObjectGenerator
 
             Console.WriteLine($"                Action created with ID: {actionId}");
             Console.WriteLine($"                Target Instance ID: {viewInstanceId}");
+            Console.WriteLine($"                View ID in properties: {effectiveViewId}");
             Console.WriteLine($"                Visibility: {visibility}");
 
             return action;
@@ -1372,7 +1498,7 @@ namespace K2SmartObjectGenerator
             }
 
             // Add Add Item button rules for nested sections
-            AddAddItemButtonRules(doc, eventsElement, formId);
+            AddAddItemButtonRules(doc, eventsElement, formId, formName);
         }
 
         private void AddClearButtonClickHandler(XmlDocument doc, XmlElement eventsElement,
@@ -1406,6 +1532,10 @@ namespace K2SmartObjectGenerator
             XmlHelper.AddElement(doc, locationProp, "Name", "Location");
             XmlHelper.AddElement(doc, locationProp, "Value", formName);
             props.AppendChild(locationProp);
+
+            // NOTE: Do NOT add ViewID to event Properties for form-level control events.
+            // K2 Designer expects only RuleFriendlyName + Location here.
+            // ViewID belongs in Action Properties (targeting which view the action operates on).
 
             clearButtonEvent.AppendChild(props);
 
@@ -1452,7 +1582,7 @@ namespace K2SmartObjectGenerator
                     clearAction.SetAttribute("ID", Guid.NewGuid().ToString());
                     clearAction.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
                     clearAction.SetAttribute("Type", "Execute");
-                    clearAction.SetAttribute("ExecutionType", "Parallel");
+                    clearAction.SetAttribute("ExecutionType", "Synchronous");
                     clearAction.SetAttribute("InstanceID", instanceId);
 
                     XmlElement actionProps = doc.CreateElement("Properties");
@@ -1556,6 +1686,9 @@ namespace K2SmartObjectGenerator
             XmlHelper.AddElement(doc, locationProp, "Name", "Location");
             XmlHelper.AddElement(doc, locationProp, "Value", formName);
             props.AppendChild(locationProp);
+
+            // NOTE: Do NOT add ViewID to event Properties for form-level control events.
+            // K2 Designer expects only RuleFriendlyName + Location here.
 
             clearButtonEvent.AppendChild(props);
 
@@ -1695,7 +1828,7 @@ namespace K2SmartObjectGenerator
                     clearAction.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
 
                     clearAction.SetAttribute("Type", "Execute");
-                    clearAction.SetAttribute("ExecutionType", "Parallel");
+                    clearAction.SetAttribute("ExecutionType", "Synchronous");
                     clearAction.SetAttribute("InstanceID", instanceId);
 
                     XmlElement actionProps = doc.CreateElement("Properties");
@@ -1746,7 +1879,7 @@ namespace K2SmartObjectGenerator
             // For Clear actions, these typically follow a pattern
             action.SetAttribute("DefinitionID", definitionId);
             action.SetAttribute("Type", "Execute");
-            action.SetAttribute("ExecutionType", "Parallel");
+            action.SetAttribute("ExecutionType", "Synchronous");
             action.SetAttribute("InstanceID", instanceId);
 
             XmlElement props = doc.CreateElement("Properties");
@@ -2188,6 +2321,9 @@ namespace K2SmartObjectGenerator
             {
                 foreach (var control in listControls)
                 {
+                    string smoPropN = !string.IsNullOrEmpty(control.Value.SmoPropertyName) ? control.Value.SmoPropertyName : control.Value.FieldName;
+                    string smoDispN = !string.IsNullOrEmpty(control.Value.SmoDisplayName) ? control.Value.SmoDisplayName : control.Value.FieldName;
+
                     XmlElement param = doc.CreateElement("Parameter");
                     param.SetAttribute("SourceInstanceID", nestedViewPair.ListViewInstanceId);
                     param.SetAttribute("SourceID", control.Value.ControlId);
@@ -2195,9 +2331,9 @@ namespace K2SmartObjectGenerator
                     param.SetAttribute("SourceDisplayName", control.Value.ControlName);
                     param.SetAttribute("SourceType", "Control");
                     param.SetAttribute("TargetInstanceID", nestedViewPair.ListViewInstanceId);
-                    param.SetAttribute("TargetID", control.Value.FieldName);
-                    param.SetAttribute("TargetName", control.Value.FieldName);
-                    param.SetAttribute("TargetDisplayName", control.Value.FieldName);
+                    param.SetAttribute("TargetID", smoPropN);
+                    param.SetAttribute("TargetName", smoPropN);
+                    param.SetAttribute("TargetDisplayName", smoDispN);
                     param.SetAttribute("TargetType", "ObjectProperty");
                     parameters.AppendChild(param);
                 }
@@ -2242,6 +2378,9 @@ namespace K2SmartObjectGenerator
             XmlHelper.AddElement(doc, locationProp, "Name", "Location");
             XmlHelper.AddElement(doc, locationProp, "Value", formName);
             props.AppendChild(locationProp);
+
+            // NOTE: Do NOT add ViewID to event Properties for form-level control events.
+            // K2 Designer expects only RuleFriendlyName + Location here.
 
             submitEvent.AppendChild(props);
 
@@ -2397,6 +2536,10 @@ namespace K2SmartObjectGenerator
                     {
                         foreach (var control in viewControls)
                         {
+                            // Resolve SmartObject property name and display name
+                            string smoPropertyName = !string.IsNullOrEmpty(control.Value.SmoPropertyName) ? control.Value.SmoPropertyName : control.Value.FieldName.ToUpper();
+                            string smoDisplayName = !string.IsNullOrEmpty(control.Value.SmoDisplayName) ? control.Value.SmoDisplayName : GetFieldDisplayName(control.Value.FieldName);
+
                             // Create parameter mapping for each control
                             XmlElement param = doc.CreateElement("Parameter");
                             param.SetAttribute("SourceInstanceID", instanceId);
@@ -2405,16 +2548,16 @@ namespace K2SmartObjectGenerator
                             param.SetAttribute("SourceDisplayName", control.Value.ControlName);
                             param.SetAttribute("SourceType", "Control");
 
-                            // Target is the main view for the Create action
+                            // Target is the SmartObject property for the Create action
                             param.SetAttribute("TargetInstanceID", mainViewInstanceId);
-                            param.SetAttribute("TargetID", control.Value.FieldName.ToUpper());
-                            param.SetAttribute("TargetName", control.Value.FieldName.ToUpper());
-                            param.SetAttribute("TargetDisplayName", GetFieldDisplayName(control.Value.FieldName));
+                            param.SetAttribute("TargetID", smoPropertyName);
+                            param.SetAttribute("TargetName", smoPropertyName);
+                            param.SetAttribute("TargetDisplayName", smoDisplayName);
                             param.SetAttribute("TargetType", "ObjectProperty");
 
                             parameters.AppendChild(param);
 
-                            Console.WriteLine($"            Mapped control {control.Value.ControlName} to field {control.Value.FieldName}");
+                            Console.WriteLine($"            Mapped control {control.Value.ControlName} to SmartObject property {smoPropertyName} ({smoDisplayName})");
                         }
                     }
                 }
@@ -2438,27 +2581,38 @@ namespace K2SmartObjectGenerator
             if (string.IsNullOrEmpty(fieldName))
                 return fieldName;
 
-            // Handle some common patterns
             string displayName = fieldName;
 
-            // Insert spaces before capital letters (except the first one)
+            // Apply special case replacements FIRST (before ToTitleCase which changes case)
+            string upper = displayName.ToUpper();
+            if (upper == "EMAILADDRESS" || upper == "EMAIL") return upper == "EMAIL" ? "E-mail address" : "E-mail address";
+            if (upper == "REQUESTDATE") return "Request date";
+            if (upper == "BUSINESSPURPOSE" || upper == "PURPOSE") return upper == "PURPOSE" ? "Business purpose" : "Business purpose";
+            if (upper == "TRIPCLASS") return "Trip class";
+            if (upper == "CARCLASS") return "Car class";
+            if (upper == "SEATLOCATION") return "Seat location";
+            if (upper == "NONSMOKINGHOTELROOMREQUIRED" || upper == "NONSMOKINGROOM") return "Non-smoking hotel room required";
+            if (upper == "NOTES") return "Notes";
+            if (upper == "NAME") return "Name";
+            if (upper == "DEPARTURELOCATION") return "Departure location";
+            if (upper == "DESTINATION") return "Destination location";
+            if (upper == "DEPARTUREDATE") return "Departure date";
+            if (upper == "DEPARTURETIME") return "Departure time";
+            if (upper == "INCLUDEHOTEL") return "Include hotel";
+            if (upper == "INCLUDECAR" || upper == "INCLUDECARRENTAL") return "Include car rental";
+            if (upper == "ISROUNDTRIP" || upper == "ROUNDTRIP") return "Round trip";
+            if (upper == "RETURNDATE") return "Return date";
+            if (upper == "RETURNTIME") return "Return time";
+
+            // Insert spaces before capital letters (for camelCase)
             displayName = System.Text.RegularExpressions.Regex.Replace(displayName, "([a-z])([A-Z])", "$1 $2");
 
-            // Handle all caps fields
+            // Handle all caps fields - convert to title case
             if (displayName == displayName.ToUpper())
             {
                 displayName = displayName.ToLower();
                 displayName = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(displayName);
             }
-
-            // Special cases
-            displayName = displayName.Replace("EMAILADDRESS", "E-mail address");
-            displayName = displayName.Replace("REQUESTDATE", "Request date");
-            displayName = displayName.Replace("BUSINESSPURPOSE", "Business purpose");
-            displayName = displayName.Replace("TRIPCLASS", "Trip class");
-            displayName = displayName.Replace("CARCLASS", "Car class");
-            displayName = displayName.Replace("SEATLOCATION", "Seat location");
-            displayName = displayName.Replace("NONSMOKINGHOTELROOMREQUIRED", "Non-smoking hotel room required");
 
             // Ensure first letter is uppercase
             if (displayName.Length > 0)
@@ -2601,6 +2755,9 @@ namespace K2SmartObjectGenerator
             {
                 foreach (var control in listControls)
                 {
+                    string smoPropN = !string.IsNullOrEmpty(control.Value.SmoPropertyName) ? control.Value.SmoPropertyName : control.Value.FieldName;
+                    string smoDispN = !string.IsNullOrEmpty(control.Value.SmoDisplayName) ? control.Value.SmoDisplayName : control.Value.FieldName;
+
                     XmlElement param = doc.CreateElement("Parameter");
                     param.SetAttribute("SourceInstanceID", viewPair.ListViewInstanceId);
                     param.SetAttribute("SourceID", control.Value.ControlId);
@@ -2608,9 +2765,9 @@ namespace K2SmartObjectGenerator
                     param.SetAttribute("SourceDisplayName", control.Value.ControlName);
                     param.SetAttribute("SourceType", "Control");
                     param.SetAttribute("TargetInstanceID", viewPair.ListViewInstanceId);
-                    param.SetAttribute("TargetID", control.Value.FieldName);
-                    param.SetAttribute("TargetName", control.Value.FieldName);
-                    param.SetAttribute("TargetDisplayName", control.Value.FieldName);
+                    param.SetAttribute("TargetID", smoPropN);
+                    param.SetAttribute("TargetName", smoPropN);
+                    param.SetAttribute("TargetDisplayName", smoDispN);
                     param.SetAttribute("TargetType", "ObjectProperty");
                     parameters.AppendChild(param);
                 }
@@ -2900,6 +3057,124 @@ namespace K2SmartObjectGenerator
             Console.WriteLine($"        ✓ Rule created with Event ID: {eventGuid}");
         }
 
+        /// <summary>
+        /// Rule 4: Delete ToolBar Button clicked on List View → RemoveItem
+        /// When the user selects a row in the list and clicks the Delete toolbar button,
+        /// this rule executes RemoveItem to remove the selected row from the list.
+        /// </summary>
+        private void AddDeleteToolbarButtonRule(XmlDocument doc, XmlElement eventsElement,
+                                            ViewPairInfo viewPair, string buttonId, string buttonName)
+        {
+            Console.WriteLine($"        Creating Delete ToolBar Button Rule");
+            Console.WriteLine($"          Button ID: {buttonId}");
+            Console.WriteLine($"          Button Name: {buttonName}");
+            Console.WriteLine($"          List View: {viewPair.ListViewName}");
+            Console.WriteLine($"          List View ID: {viewPair.ListViewId}");
+            Console.WriteLine($"          List View Instance ID: {viewPair.ListViewInstanceId ?? "NULL"}");
+
+            // ── Event: OnClick for Delete ToolBar Button on the List view ──
+            XmlElement eventElement = doc.CreateElement("Event");
+            string eventGuid = Guid.NewGuid().ToString();
+            eventElement.SetAttribute("ID", eventGuid);
+            eventElement.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
+            eventElement.SetAttribute("Type", "User");
+            eventElement.SetAttribute("SourceID", buttonId);
+            eventElement.SetAttribute("SourceType", "Control");
+            eventElement.SetAttribute("SourceName", buttonName);
+            eventElement.SetAttribute("SourceDisplayName", buttonName);
+            eventElement.SetAttribute("IsExtended", "True");
+            eventElement.SetAttribute("InstanceID", viewPair.ListViewInstanceId ?? viewPair.ListViewId);
+
+            XmlHelper.AddElement(doc, eventElement, "Name", "OnClick");
+
+            // Event Properties
+            XmlElement eventProps = doc.CreateElement("Properties");
+
+            XmlElement viewIdProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, viewIdProp, "Name", "ViewID");
+            XmlHelper.AddElement(doc, viewIdProp, "DisplayValue", viewPair.ListViewName);
+            XmlHelper.AddElement(doc, viewIdProp, "NameValue", viewPair.ListViewName);
+            XmlHelper.AddElement(doc, viewIdProp, "Value", viewPair.ListViewId);
+            eventProps.AppendChild(viewIdProp);
+
+            XmlElement ruleProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, ruleProp, "Name", "RuleFriendlyName");
+            XmlHelper.AddElement(doc, ruleProp, "Value", $"On {viewPair.ListViewName}, when {buttonName} is Clicked");
+            eventProps.AppendChild(ruleProp);
+
+            XmlElement locationProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, locationProp, "Name", "Location");
+            XmlHelper.AddElement(doc, locationProp, "Value", viewPair.ListViewName);
+            eventProps.AppendChild(locationProp);
+
+            eventElement.AppendChild(eventProps);
+
+            // ── Handler: IfLogicalHandler with RemoveItem action ──
+            XmlElement handlers = doc.CreateElement("Handlers");
+
+            XmlElement handler = doc.CreateElement("Handler");
+            string handlerId = Guid.NewGuid().ToString();
+            handler.SetAttribute("ID", handlerId);
+            handler.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
+
+            XmlElement handlerProps = doc.CreateElement("Properties");
+            XmlElement handlerNameProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, handlerNameProp, "Name", "HandlerName");
+            XmlHelper.AddElement(doc, handlerNameProp, "Value", "then");
+            handlerProps.AppendChild(handlerNameProp);
+
+            XmlElement handlerLocationProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, handlerLocationProp, "Name", "Location");
+            XmlHelper.AddElement(doc, handlerLocationProp, "Value", "form");
+            handlerProps.AppendChild(handlerLocationProp);
+
+            handler.AppendChild(handlerProps);
+
+            // ── Action: RemoveItem on the List view ──
+            XmlElement actions = doc.CreateElement("Actions");
+
+            XmlElement removeAction = doc.CreateElement("Action");
+            string actionId = Guid.NewGuid().ToString();
+            removeAction.SetAttribute("ID", actionId);
+            removeAction.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
+            removeAction.SetAttribute("Type", "List");
+            removeAction.SetAttribute("ExecutionType", "Synchronous");
+            removeAction.SetAttribute("InstanceID", viewPair.ListViewInstanceId ?? viewPair.ListViewId);
+
+            XmlElement actionProps = doc.CreateElement("Properties");
+
+            XmlElement actionLocationProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, actionLocationProp, "Name", "Location");
+            XmlHelper.AddElement(doc, actionLocationProp, "Value", "Form");
+            actionProps.AppendChild(actionLocationProp);
+
+            XmlElement actionViewIdProp = doc.CreateElement("Property");
+            XmlHelper.AddElement(doc, actionViewIdProp, "Name", "ViewID");
+            XmlHelper.AddElement(doc, actionViewIdProp, "DisplayValue", viewPair.ListViewName);
+            XmlHelper.AddElement(doc, actionViewIdProp, "NameValue", viewPair.ListViewName);
+            XmlHelper.AddElement(doc, actionViewIdProp, "Value", viewPair.ListViewId);
+            actionProps.AppendChild(actionViewIdProp);
+
+            XmlElement methodProp = doc.CreateElement("Property");
+            methodProp.SetAttribute("ValidationStatus", "Auto");
+            methodProp.SetAttribute("ValidationMessages", "ActionMethod,ViewMethod,Auto,,RemoveItem,Remove item");
+            XmlHelper.AddElement(doc, methodProp, "Name", "Method");
+            XmlHelper.AddElement(doc, methodProp, "DisplayValue", "Remove item");
+            XmlHelper.AddElement(doc, methodProp, "NameValue", "RemoveItem");
+            XmlHelper.AddElement(doc, methodProp, "Value", "RemoveItem");
+            actionProps.AppendChild(methodProp);
+
+            removeAction.AppendChild(actionProps);
+            actions.AppendChild(removeAction);
+
+            handler.AppendChild(actions);
+            handlers.AppendChild(handler);
+            eventElement.AppendChild(handlers);
+
+            eventsElement.AppendChild(eventElement);
+            Console.WriteLine($"        ✓ Delete rule created: Event ID={eventGuid}, Action=RemoveItem");
+        }
+
         // Keep all other existing methods as they are, but add similar debug logging...
 
         private XmlElement CreateComprehensiveItemToListHandler(XmlDocument doc, ViewPairInfo viewPair)
@@ -2940,15 +3215,15 @@ namespace K2SmartObjectGenerator
             Console.WriteLine($"            Adding Hide Item View action");
             XmlElement hideItemAction = CreateViewVisibilityAction(doc,
                 viewPair.ItemViewInstanceId ?? viewPair.ItemViewId,
-                viewPair.ItemViewName, "Hide");
-            hideItemAction.SetAttribute("ExecutionType", "Parallel");
+                viewPair.ItemViewName, "Hide",
+                viewPair.ItemViewId);
             actions.AppendChild(hideItemAction);
 
             Console.WriteLine($"            Adding Show List View action");
             XmlElement showListAction = CreateViewVisibilityAction(doc,
                 viewPair.ListViewInstanceId ?? viewPair.ListViewId,
-                viewPair.ListViewName, "Show");
-            showListAction.SetAttribute("ExecutionType", "Parallel");
+                viewPair.ListViewName, "Show",
+                viewPair.ListViewId);
             actions.AppendChild(showListAction);
 
             handler.AppendChild(actions);
@@ -3169,7 +3444,7 @@ namespace K2SmartObjectGenerator
             public string FieldName { get; set; }
         }
 
-        private void AddAddItemButtonRules(XmlDocument doc, XmlElement eventsElement, string formId)
+        private void AddAddItemButtonRules(XmlDocument doc, XmlElement eventsElement, string formId, string formName)
         {
             Console.WriteLine("      Creating Add Item button rules for nested sections...");
 
@@ -3182,40 +3457,85 @@ namespace K2SmartObjectGenerator
                 return;
             }
 
-            foreach (var buttonInfo in addItemButtons.Values)
+            // In multi-form generation, the registry accumulates buttons from ALL forms.
+            // Filter to only include buttons whose ViewName belongs to the current form.
+            // formName is "{BaseFormName}_{viewName}_Form" (e.g. "Expense_Report_view1_Form")
+            // Button ViewNames follow: "{BaseFormName}_{viewX}_SectionName_Item"
+            // Extract base form name by removing the trailing "_viewX_Form" suffix.
+            string baseFormName = formName;
+            int viewSuffix = formName.LastIndexOf("_view", StringComparison.OrdinalIgnoreCase);
+            if (viewSuffix > 0)
             {
-                Console.WriteLine($"        Creating rule for button: {buttonInfo.ButtonName}");
-                CreateAddItemButtonRule(doc, eventsElement, formId, buttonInfo);
+                baseFormName = formName.Substring(0, viewSuffix);
             }
 
-            Console.WriteLine($"        ✓ Created {addItemButtons.Count} add item button rules");
+            int totalButtons = addItemButtons.Count;
+            int skippedButtons = 0;
+            int createdButtons = 0;
+
+            foreach (var buttonInfo in addItemButtons.Values)
+            {
+                // Skip buttons that belong to a different form
+                if (!string.IsNullOrEmpty(baseFormName) && !string.IsNullOrEmpty(buttonInfo.ViewName) &&
+                    !buttonInfo.ViewName.StartsWith(baseFormName + "_", StringComparison.OrdinalIgnoreCase))
+                {
+                    skippedButtons++;
+                    continue;
+                }
+
+                Console.WriteLine($"        Creating rule for button: {buttonInfo.ButtonName}");
+                CreateAddItemButtonRule(doc, eventsElement, formId, buttonInfo);
+                createdButtons++;
+            }
+
+            if (skippedButtons > 0)
+            {
+                Console.WriteLine($"        Skipped {skippedButtons} button(s) belonging to other forms");
+            }
+            Console.WriteLine($"        ✓ Created {createdButtons} add item button rules for {formName}");
         }
 
         private void CreateAddItemButtonRule(XmlDocument doc, XmlElement eventsElement, string formId, SmartObjectViewRegistry.AddItemButtonInfo buttonInfo)
         {
-            // Find the target view instance ID (the view that should be shown)
             // Convert TABLECTRL338 -> Table_CTRL338
             string normalizedTableName = NormalizeTableName(buttonInfo.TargetTableName);
-            string targetViewInstanceId = FindViewInstanceId(doc, normalizedTableName + "_Item");
-            if (string.IsNullOrEmpty(targetViewInstanceId))
+
+            // Find the nested Item view instance ID (the view that should be SHOWN)
+            string nestedItemViewInstanceId = FindViewInstanceId(doc, normalizedTableName + "_Item");
+            if (string.IsNullOrEmpty(nestedItemViewInstanceId))
             {
-                Console.WriteLine($"          WARNING: Could not find instance ID for target view: {normalizedTableName}_Item");
+                Console.WriteLine($"          WARNING: Could not find instance ID for nested Item view: {normalizedTableName}_Item");
                 return;
             }
+
+            // Find the nested List view instance ID (the view that should be HIDDEN)
+            string nestedListViewInstanceId = FindViewInstanceId(doc, normalizedTableName + "_List");
+            if (string.IsNullOrEmpty(nestedListViewInstanceId))
+            {
+                Console.WriteLine($"          WARNING: Could not find instance ID for nested List view: {normalizedTableName}_List");
+                return;
+            }
+
+            // Find actual ViewIDs (distinct from AreaItem instance IDs)
+            string nestedItemViewId = FindTargetViewId(doc, normalizedTableName);
+            string nestedListViewId = FindListViewId(doc, normalizedTableName);
 
             // Find the source view instance ID (the view containing the button)
-            string sourceViewInstanceId = FindViewInstanceId(doc, "Item_Entertainment_Details_Item");
+            string sourceViewInstanceId = FindViewInstanceId(doc, buttonInfo.ViewName);
             if (string.IsNullOrEmpty(sourceViewInstanceId))
             {
-                Console.WriteLine($"          WARNING: Could not find source view instance ID");
+                Console.WriteLine($"          WARNING: Could not find source view instance ID for: {buttonInfo.ViewName}");
                 return;
             }
 
-            Console.WriteLine($"        Creating Add Item Button Rule");
+            Console.WriteLine($"        Creating Add Item Button Rule (nested section: {normalizedTableName})");
             Console.WriteLine($"          Button ID: {buttonInfo.ButtonControlId}");
             Console.WriteLine($"          Button Name: {buttonInfo.ButtonName}");
+            Console.WriteLine($"          Source View: {buttonInfo.ViewName} (InstanceID: {sourceViewInstanceId})");
+            Console.WriteLine($"          Nested Item View: {normalizedTableName}_Item (InstanceID: {nestedItemViewInstanceId}, ViewID: {nestedItemViewId ?? "N/A"})");
+            Console.WriteLine($"          Nested List View: {normalizedTableName}_List (InstanceID: {nestedListViewInstanceId}, ViewID: {nestedListViewId ?? "N/A"})");
 
-            // Create the OnClick event (following exact pattern from AddComprehensiveItemViewAddButtonRule)
+            // Create the OnClick event
             XmlElement eventElement = doc.CreateElement("Event");
             string eventGuid = Guid.NewGuid().ToString();
             eventElement.SetAttribute("ID", eventGuid);
@@ -3226,7 +3546,7 @@ namespace K2SmartObjectGenerator
             eventElement.SetAttribute("SourceName", buttonInfo.ButtonName + " Button");
             eventElement.SetAttribute("SourceDisplayName", buttonInfo.ButtonName + " Button");
             eventElement.SetAttribute("IsExtended", "True");
-            eventElement.SetAttribute("InstanceID", sourceViewInstanceId); // Key fix: use source view, not form
+            eventElement.SetAttribute("InstanceID", sourceViewInstanceId);
 
             XmlHelper.AddElement(doc, eventElement, "Name", "OnClick");
 
@@ -3252,9 +3572,11 @@ namespace K2SmartObjectGenerator
 
             eventElement.AppendChild(eventProps);
 
-            // Add handlers (following exact pattern)
+            // Add handlers - use Hide List + Show Item pattern (same as top-level Add ToolBar Button)
             XmlElement handlers = doc.CreateElement("Handlers");
-            XmlElement handler = CreateAddItemButtonHandler(doc, targetViewInstanceId, normalizedTableName + "_Item");
+            XmlElement handler = CreateAddItemButtonHandler(doc,
+                nestedListViewInstanceId, normalizedTableName + "_List", nestedListViewId,
+                nestedItemViewInstanceId, normalizedTableName + "_Item", nestedItemViewId);
             handlers.AppendChild(handler);
             eventElement.AppendChild(handlers);
 
@@ -3262,9 +3584,11 @@ namespace K2SmartObjectGenerator
             Console.WriteLine($"        ✓ Add Item Button rule created with Event ID: {eventGuid}");
         }
 
-        private XmlElement CreateAddItemButtonHandler(XmlDocument doc, string targetViewInstanceId, string targetViewName)
+        private XmlElement CreateAddItemButtonHandler(XmlDocument doc,
+            string listViewInstanceId, string listViewName, string listViewId,
+            string itemViewInstanceId, string itemViewName, string itemViewId)
         {
-            Console.WriteLine($"          Creating Add Item Button Handler");
+            Console.WriteLine($"          Creating Add Item Button Handler (Hide List + Show Item)");
 
             XmlElement handler = doc.CreateElement("Handler");
             handler.SetAttribute("ID", Guid.NewGuid().ToString());
@@ -3273,7 +3597,7 @@ namespace K2SmartObjectGenerator
             XmlElement props = doc.CreateElement("Properties");
             XmlElement handlerNameProp = doc.CreateElement("Property");
             XmlHelper.AddElement(doc, handlerNameProp, "Name", "HandlerName");
-            XmlHelper.AddElement(doc, handlerNameProp, "Value", "then"); // Key fix: use "then" not "IfLogicalHandler"
+            XmlHelper.AddElement(doc, handlerNameProp, "Value", "then");
             props.AppendChild(handlerNameProp);
 
             XmlElement locationProp = doc.CreateElement("Property");
@@ -3285,13 +3609,37 @@ namespace K2SmartObjectGenerator
 
             XmlElement actions = doc.CreateElement("Actions");
 
-            Console.WriteLine($"            Adding Show Target View action");
-            // Use the existing CreateViewVisibilityAction method for consistency
-            XmlElement showTargetAction = CreateViewVisibilityAction(doc, targetViewInstanceId, targetViewName, "Show");
-            actions.AppendChild(showTargetAction);
+            // ACTION 1: Hide the nested List view (same pattern as top-level Add ToolBar Button)
+            Console.WriteLine($"            Adding Hide Nested List View action: {listViewName}");
+            XmlElement hideListAction = CreateViewVisibilityAction(doc, listViewInstanceId,
+                listViewName, "Hide", listViewId);
+            actions.AppendChild(hideListAction);
+
+            // ACTION 2: Show the nested Item view
+            Console.WriteLine($"            Adding Show Nested Item View action: {itemViewName}");
+            XmlElement showItemAction = CreateViewVisibilityAction(doc, itemViewInstanceId,
+                itemViewName, "Show", itemViewId);
+            actions.AppendChild(showItemAction);
 
             handler.AppendChild(actions);
             return handler;
+        }
+
+        /// <summary>
+        /// Finds the actual ViewID (not AreaItem ID) for a List view matching the pattern.
+        /// </summary>
+        private string FindListViewId(XmlDocument doc, string targetTableName)
+        {
+            XmlNodeList items = doc.GetElementsByTagName("Item");
+            foreach (XmlElement item in items)
+            {
+                string viewName = item.SelectSingleNode("Name")?.InnerText ?? "";
+                if (viewName.Contains(targetTableName) && viewName.EndsWith("_List"))
+                {
+                    return item.GetAttribute("ViewID");
+                }
+            }
+            return null;
         }
 
         private string FindViewInstanceId(XmlDocument doc, string viewNamePattern)
@@ -3308,11 +3656,12 @@ namespace K2SmartObjectGenerator
                 }
             }
 
-            // Fallback: partial match (original behavior for _Item views)
+            // Fallback: partial match - works for both _Item and _List views
+            // View names may have a prefix like "Expense_Report_view1_" that isn't in the pattern
             foreach (XmlElement item in items)
             {
                 string viewName = item.SelectSingleNode("Name")?.InnerText ?? "";
-                if (viewName.Contains(viewNamePattern) && viewName.EndsWith("_Item"))
+                if (viewName.Contains(viewNamePattern))
                 {
                     return item.GetAttribute("ID");
                 }

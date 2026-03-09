@@ -52,7 +52,8 @@ namespace K2SmartObjectGenerator
 
 
 
-        public void GenerateFormsFromJson(string jsonContent, Dictionary<string, string> viewTitles = null)
+        public void GenerateFormsFromJson(string jsonContent, Dictionary<string, string> viewTitles = null,
+            Dictionary<string, int> viewGridPositionsFromGenerator = null)
         {
             _viewTitles = viewTitles ?? new Dictionary<string, string>();
 
@@ -80,6 +81,20 @@ namespace K2SmartObjectGenerator
 
             // NEW: Extract view grid positions for ordering
             ExtractViewGridPositions(viewsArray, baseFormName);
+
+            // Merge grid positions from ViewGenerator (includes Part views and repeating sections
+            // with their actual InfoPath grid rows). These are authoritative because ViewGenerator
+            // computes them directly from the segment controls during view generation.
+            if (viewGridPositionsFromGenerator != null && viewGridPositionsFromGenerator.Count > 0)
+            {
+                Console.WriteLine($"    [VIEW ORDERING] Merging {viewGridPositionsFromGenerator.Count} grid positions from ViewGenerator:");
+                foreach (var kvp in viewGridPositionsFromGenerator)
+                {
+                    bool existed = _viewGridPositions.ContainsKey(kvp.Key);
+                    _viewGridPositions[kvp.Key] = kvp.Value;
+                    Console.WriteLine($"      '{kvp.Key}' -> row {kvp.Value}{(existed ? " (overwrote existing)" : " (new)")}");
+                }
+            }
 
             // Define base category path for forms - respect TargetFolder from configuration
             // Get target folder from config, extract it from the original JSON if passed via K2GenerationService
@@ -708,196 +723,18 @@ namespace K2SmartObjectGenerator
 
 
 
+        /// <summary>
+        /// DEPRECATED: This method is no longer called. Layout restructuring is now done by
+        /// RestructureFormLayout() and all rule creation is consolidated in GenerateForm().
+        /// Kept for reference only - can be removed in future cleanup.
+        /// </summary>
+        [System.Obsolete("Use RestructureFormLayout() and GenerateForm() instead. This method is no longer called.")]
         private Form RestructureFormToGroupListAndItemViews(Form generatedForm, FormDefinition formDef)
         {
-            try
-            {
-                // Get the form's XML
-                string formXml = generatedForm.ToXml();
-                XmlDocument doc = new XmlDocument();
-                doc.LoadXml(formXml);
-
-                // Update the Form element's Theme attribute to _Dynamic
-                XmlNodeList formElements = doc.GetElementsByTagName("Form");
-                if (formElements.Count > 0)
-                {
-                    XmlElement formElement = (XmlElement)formElements[0];
-                    formElement.SetAttribute("Theme", "_Dynamic");
-                    Console.WriteLine("    Updated form theme to _Dynamic");
-                }
-
-                // Update or add UseLegacyTheme property in the Form control
-                UpdateFormControlLegacyTheme(doc);
-
-                // Find all panels in the form
-                XmlNodeList panels = doc.GetElementsByTagName("Panel");
-                if (panels.Count == 0)
-                {
-                    Console.WriteLine("    No panels found to restructure");
-                    return generatedForm;
-                }
-
-                // Track view pairs for rule generation
-                Dictionary<string, ViewPairInfo> viewPairs = new Dictionary<string, ViewPairInfo>();
-
-                // For each panel, reorganize the areas to group list and item views
-                foreach (XmlElement panel in panels)
-                {
-                    XmlNodeList areas = panel.GetElementsByTagName("Area");
-                    if (areas.Count == 0) continue;
-
-                    // Categorize all views
-                    Dictionary<string, XmlElement> listViews = new Dictionary<string, XmlElement>();
-                    Dictionary<string, XmlElement> itemViews = new Dictionary<string, XmlElement>();
-                    List<OrderedView> orderedViews = new List<OrderedView>();
-
-                    Console.WriteLine("\n    === Analyzing Form Structure ===");
-
-                    // Process each area and maintain order
-                    int position = 0;
-                    foreach (XmlElement area in areas)
-                    {
-                        XmlNodeList items = area.GetElementsByTagName("Item");
-                        foreach (XmlElement item in items)
-                        {
-                            XmlNodeList nameNodes = item.GetElementsByTagName("Name");
-                            if (nameNodes.Count > 0)
-                            {
-                                string viewName = nameNodes[0].InnerText;
-                                Console.WriteLine($"      Position {position}: {viewName}");
-
-                                // Update titles if we have them
-                                string titleToUse = null;
-                                if (_viewTitles != null && _viewTitles.ContainsKey(viewName))
-                                {
-                                    titleToUse = _viewTitles[viewName];
-                                }
-                                UpdateAreaItemControlTitle(doc, viewName, titleToUse);
-
-                                // Check if it's a list or item view
-                                if (viewName.Contains("_List"))
-                                {
-                                    string baseName = ExtractRepeatingSectionNameFromView(viewName, formDef.InfoPathViewName);
-                                    if (!string.IsNullOrEmpty(baseName))
-                                    {
-                                        listViews[baseName] = item;
-                                    }
-                                }
-                                else if (viewName.Contains("_Item"))
-                                {
-                                    string baseName = ExtractRepeatingSectionNameFromView(viewName, formDef.InfoPathViewName);
-                                    if (!string.IsNullOrEmpty(baseName))
-                                    {
-                                        itemViews[baseName] = item;
-                                    }
-                                }
-                                else
-                                {
-                                    // Regular view or Part view
-                                    orderedViews.Add(new OrderedView
-                                    {
-                                        Position = position,
-                                        View = item,
-                                        ViewName = viewName,
-                                        IsPartView = viewName.Contains("_Part")
-                                    });
-                                }
-
-                                position++;
-                            }
-                        }
-                    }
-
-                    // Now rebuild the form
-                    if (orderedViews.Count > 0 || listViews.Count > 0)
-                    {
-                        Console.WriteLine($"\n    === Rebuilding Form Structure ===");
-
-                        // Clear all existing areas
-                        ClearExistingAreas(panel);
-
-                        // Create new area structure
-                        XmlElement areasContainer = doc.CreateElement("Areas");
-
-                        // NEW: GridPosition-based ordering strategy
-                        // Combine all views (regular and repeating sections) with their grid positions
-                        Console.WriteLine($"    === Using GridPosition-Based Ordering ===");
-
-                        var allViewsWithPositions = CreateGridPositionOrderedViewList(orderedViews, listViews, itemViews, formDef);
-
-                        // Sort all views by their grid position and add them to the form
-                        foreach (var viewWithPos in allViewsWithPositions.OrderBy(v => v.GridPosition))
-                        {
-                            if (viewWithPos.IsRepeatingSection)
-                            {
-                                // Add repeating section (list + item view pair)
-                                if (listViews.ContainsKey(viewWithPos.SectionName) && itemViews.ContainsKey(viewWithPos.SectionName))
-                                {
-                                    AddRepeatingSectionToContainer(doc, areasContainer, viewWithPos.SectionName,
-                                        listViews, itemViews, formDef, viewPairs);
-                                    Console.WriteLine($"      Added repeating section: {viewWithPos.SectionName} at grid position {viewWithPos.GridPosition}");
-
-                                    // Remove from dictionaries to avoid duplication
-                                    listViews.Remove(viewWithPos.SectionName);
-                                    itemViews.Remove(viewWithPos.SectionName);
-                                }
-                            }
-                            else
-                            {
-                                // Add regular view
-                                XmlElement viewArea = doc.CreateElement("Area");
-                                viewArea.SetAttribute("ID", Guid.NewGuid().ToString());
-                                XmlElement viewItems = doc.CreateElement("Items");
-                                XmlElement clonedItem = (XmlElement)viewWithPos.View.CloneNode(true);
-                                viewItems.AppendChild(clonedItem);
-                                viewArea.AppendChild(viewItems);
-                                areasContainer.AppendChild(viewArea);
-                                Console.WriteLine($"      Added view: {viewWithPos.ViewName} at grid position {viewWithPos.GridPosition}");
-                            }
-                        }
-
-                        // Add any remaining repeating sections that weren't found in grid positions
-                        foreach (var kvp in listViews.ToList())
-                        {
-                            if (itemViews.ContainsKey(kvp.Key))
-                            {
-                                AddRepeatingSectionToContainer(doc, areasContainer, kvp.Key,
-                                    listViews, itemViews, formDef, viewPairs);
-                                Console.WriteLine($"      Added remaining section: {kvp.Key} (no grid position found)");
-                            }
-                        }
-
-                        // Add the button area with table at the end
-                        Dictionary<string, string> buttonGuids;
-                        XmlElement buttonArea = CreateButtonArea(doc, formDef.FormName, out buttonGuids);
-                        areasContainer.AppendChild(buttonArea);
-                        Console.WriteLine("      Added Form Action Table at the end");
-
-                        // Replace the panel's areas with the new structure
-                        panel.AppendChild(areasContainer);
-
-                        // Add button controls to the form
-                        if (buttonGuids.Count > 0)
-                        {
-                            AddButtonControlsToForm(doc, formDef.FormName, buttonGuids);
-                        }
-                    }
-                }
-
-                // Continue with the rest of the method (rules, etc.)
-                CompleteFormRestructuring(doc, formDef, viewPairs);
-
-                // Create a new form object from the modified XML
-                Form modifiedForm = new Form(doc.OuterXml);
-                Console.WriteLine("    Form restructuring completed successfully");
-                return modifiedForm;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"    WARNING: Could not restructure form: {ex.Message}");
-                Console.WriteLine($"    Stack trace: {ex.StackTrace}");
-                return generatedForm;
-            }
+            throw new InvalidOperationException(
+                "RestructureFormToGroupListAndItemViews is deprecated. " +
+                "Layout restructuring is now done by RestructureFormLayout() " +
+                "and all rule creation is consolidated in GenerateForm().");
         }
 
         private void AddRepeatingSectionToContainer(XmlDocument doc, XmlElement areasContainer,
@@ -918,18 +755,15 @@ namespace K2SmartObjectGenerator
 
                 areasContainer.AppendChild(result.Area);
 
-                // Always hide the list view and show the item view
-                if (viewPairs.ContainsKey(sectionName))
+                // Hide the item view (it's shown when user clicks Add/Edit in the list view)
+                UpdateItemViewVisibility(doc, result.ItemViewName);
+                Console.WriteLine($"        Set item view '{result.ItemViewName}' to hidden");
+
+                // For nested sections, also hide the list view
+                if (!string.IsNullOrEmpty(result.ListViewName))
                 {
-                    var pair = viewPairs[sectionName];
-
-                    // Hide the list view
-                    UpdateItemViewVisibility(doc, pair.ListViewName);
-                    Console.WriteLine($"        Set list view '{pair.ListViewName}' to hidden");
-
-                    // Make the item view visible
-                    SetAreaItemVisible(doc, pair.ItemViewName);
-                    Console.WriteLine($"        Set item view '{pair.ItemViewName}' to visible");
+                    UpdateItemViewVisibility(doc, result.ListViewName);
+                    Console.WriteLine($"        Set both nested section views to invisible: {result.ItemViewName} and {result.ListViewName}");
                 }
 
                 Console.WriteLine($"      Added repeating section: {sectionName}");
@@ -1002,17 +836,99 @@ namespace K2SmartObjectGenerator
 
         private void ClearExistingAreas(XmlElement panel)
         {
-            XmlNodeList existingAreas = panel.GetElementsByTagName("Area");
-            List<XmlNode> areasToRemove = new List<XmlNode>();
-            foreach (XmlNode area in existingAreas)
+            // Remove the entire Areas container(s) from the panel, not just Area children.
+            // This prevents leaving empty <Areas/> tags that cause duplicate containers.
+            List<XmlNode> areasContainersToRemove = new List<XmlNode>();
+            foreach (XmlNode child in panel.ChildNodes)
             {
-                areasToRemove.Add(area);
+                if (child.Name == "Areas")
+                {
+                    areasContainersToRemove.Add(child);
+                }
             }
-            foreach (XmlNode area in areasToRemove)
+            foreach (XmlNode areasContainer in areasContainersToRemove)
             {
-                area.ParentNode.RemoveChild(area);
+                panel.RemoveChild(areasContainer);
             }
         }
+
+        /// <summary>
+        /// Synchronizes the Controls section with the current Panels/Areas structure.
+        /// K2 requires that every Area ID in the Panels section has a matching
+        /// Control Type="Area" in the Controls section (and vice versa for AreaItems).
+        /// After RestructureFormLayout creates new Areas with new GUIDs, the old
+        /// Area controls become orphaned and the new Areas have no controls.
+        /// This method removes old Area controls and creates new ones to match.
+        /// </summary>
+        private void SynchronizeAreaControlsWithPanels(XmlDocument doc)
+        {
+            Console.WriteLine("    === Synchronizing Controls with Panel Areas ===");
+
+            // Find the Controls element
+            XmlNodeList controlsNodes = doc.GetElementsByTagName("Controls");
+            if (controlsNodes.Count == 0) return;
+            XmlElement controls = (XmlElement)controlsNodes[0];
+
+            // Step 1: Remove ALL existing Area-type controls (they have stale IDs)
+            List<XmlNode> areaControlsToRemove = new List<XmlNode>();
+            foreach (XmlNode child in controls.ChildNodes)
+            {
+                XmlElement ctrl = child as XmlElement;
+                if (ctrl != null && ctrl.Name == "Control" && ctrl.GetAttribute("Type") == "Area")
+                {
+                    areaControlsToRemove.Add(ctrl);
+                }
+            }
+            foreach (XmlNode ctrl in areaControlsToRemove)
+            {
+                string oldId = ((XmlElement)ctrl).GetAttribute("ID");
+                controls.RemoveChild(ctrl);
+                Console.WriteLine($"      Removed stale Area control: {oldId}");
+            }
+
+            // Step 2: Collect all current Area IDs from Panels
+            // Use GetElementsByTagName to find all Area elements in the document,
+            // then filter to only those that are children of an Areas element
+            XmlNodeList allAreaElements = doc.GetElementsByTagName("Area");
+            List<XmlElement> panelAreas = new List<XmlElement>();
+            foreach (XmlNode node in allAreaElements)
+            {
+                XmlElement areaEl = node as XmlElement;
+                if (areaEl != null && areaEl.ParentNode != null && areaEl.ParentNode.Name == "Items")
+                    continue; // Skip Area-like elements inside Items
+                if (areaEl != null && !string.IsNullOrEmpty(areaEl.GetAttribute("ID")))
+                    panelAreas.Add(areaEl);
+            }
+            if (panelAreas.Count == 0) return;
+
+            int areaIndex = 0;
+            foreach (XmlElement area in panelAreas)
+            {
+                string areaId = area.GetAttribute("ID");
+
+                // Step 3: Create a matching Area control
+                XmlElement areaControl = doc.CreateElement("Control");
+                areaControl.SetAttribute("ID", areaId);
+                areaControl.SetAttribute("Type", "Area");
+
+                string areaName = $"Area{areaIndex}";
+                XmlHelper.AddElement(doc, areaControl, "Name", areaName);
+
+                XmlElement props = doc.CreateElement("Properties");
+                XmlElement controlNameProp = doc.CreateElement("Property");
+                XmlHelper.AddElement(doc, controlNameProp, "Name", "ControlName");
+                XmlHelper.AddElement(doc, controlNameProp, "Value", areaName);
+                props.AppendChild(controlNameProp);
+                areaControl.AppendChild(props);
+
+                controls.AppendChild(areaControl);
+                Console.WriteLine($"      Added Area control: ID={areaId}, Name={areaName}");
+                areaIndex++;
+            }
+
+            Console.WriteLine($"    Synchronized {areaIndex} Area controls");
+        }
+
         private RepeatingSectionAreaResult CreateRepeatingSectionArea(
             XmlDocument doc,
             XmlElement listView,
@@ -1081,12 +997,15 @@ namespace K2SmartObjectGenerator
             }
             else
             {
-                // For nested sections: Both views initially invisible
-                XmlElement listItem = (XmlElement)listView.CloneNode(true);
-                sectionItems.AppendChild(listItem);
-
+                // For nested sections: OPPOSITE of top-level pattern.
+                // Nested sections start with List visible (showing existing items) and Item hidden.
+                // The "+Add Item" button on the parent view toggles: Hide List, Show Item.
+                // The "Add" button on the nested Item view toggles back: save data, Hide Item, Show List.
                 XmlElement itemItem = (XmlElement)itemView.CloneNode(true);
                 sectionItems.AppendChild(itemItem);
+
+                XmlElement listItem = (XmlElement)listView.CloneNode(true);
+                sectionItems.AppendChild(listItem);
 
                 sectionArea.AppendChild(sectionItems);
 
@@ -1120,13 +1039,14 @@ namespace K2SmartObjectGenerator
                     IsTopLevel = false
                 };
 
-                Console.WriteLine($"        Grouped {listViewName} (both invisible) with {itemViewName} (both invisible) - Nested Section");
+                Console.WriteLine($"        Grouped {listViewName} (hidden) with {itemViewName} (hidden) - Nested Section");
+                Console.WriteLine($"        Both nested views start hidden; +Add Item button will show Item view");
 
                 return new RepeatingSectionAreaResult
                 {
                     Area = sectionArea,
-                    ItemViewName = itemViewName,  // Return item view name to be hidden
-                    ListViewName = listViewName   // Also return list view name to be hidden
+                    ItemViewName = itemViewName,   // Item view hidden initially
+                    ListViewName = listViewName     // List view ALSO hidden initially for nested sections
                 };
             }
         }
@@ -1333,68 +1253,194 @@ namespace K2SmartObjectGenerator
         }
 
         // NEW: Helper method to complete form restructuring
+        /// <summary>
+        /// DEPRECATED: This method's work is now consolidated into GenerateForm() Steps 4-5.
+        /// Kept for reference only - can be removed in future cleanup.
+        /// </summary>
+        [System.Obsolete("All rule creation is now consolidated in GenerateForm(). This method is no longer called.")]
         private void CompleteFormRestructuring(XmlDocument doc, FormDefinition formDef, Dictionary<string, ViewPairInfo> viewPairs)
         {
-            // Add rules for list/item view interactions if we have view pairs
-            if (viewPairs.Count > 0)
-            {
-                Console.WriteLine("\n    === Adding Form Rules for List/Item View Interactions ===");
-                _rulesBuilder.ApplyListItemViewRules(doc, viewPairs);
-            }
-
-            // ADD FORM-LEVEL RULES (Clear and Submit buttons)
-            Console.WriteLine("\n    === Adding Form-Level Rules (Clear & Submit) ===");
-
-            // Get form ID and name from the document
-            string formId = null;
-            string formName = formDef.FormName;
-
-            XmlNodeList formElems = doc.GetElementsByTagName("Form");
-            if (formElems.Count > 0)
-            {
-                XmlElement formElement = (XmlElement)formElems[0];
-                formId = formElement.GetAttribute("ID");
-
-                // If no ID exists, generate one
-                if (string.IsNullOrEmpty(formId))
-                {
-                    formId = Guid.NewGuid().ToString();
-                    formElement.SetAttribute("ID", formId);
-                    Console.WriteLine($"      Generated new Form ID: {formId}");
-                }
-                else
-                {
-                    Console.WriteLine($"      Found existing Form ID: {formId}");
-                }
-            }
-
-            // Call the AddFormLevelRules method to add Clear and Submit button rules
-            if (!string.IsNullOrEmpty(formId))
-            {
-                _rulesBuilder.AddFormLevelRules(doc, formId, formName, viewPairs);
-                Console.WriteLine("      Form-level rules added successfully");
-            }
-            else
-            {
-                Console.WriteLine("      WARNING: Could not determine Form ID for rule generation");
-            }
-
-            // Update Init rule with ID parameter condition
-            AddInitRuleIDParameterCondition(doc);
-
-            AddLoadActionToInitRule(doc, formDef.FormName);
-
-            // Verify the form has an ID parameter
-            VerifyFormIDParameter(doc);
-
-            // ADD CALCULATION RULES for dynamic expressions after all views and rules are fully integrated
-            Console.WriteLine("\n    === Adding Calculation Rules (After All Views and Rules Added) ===");
-            _rulesBuilder.ApplyCalculationRules(doc, _originalJsonData, _infoPathFormDef);
-
-            // ADD CROSS-VIEW RULES from InfoPath conditional rules
-            AddCrossViewInfoPathRules(doc);
+            throw new InvalidOperationException(
+                "CompleteFormRestructuring is deprecated. " +
+                "All rule creation is now consolidated in GenerateForm().");
         }
 
+        /// <summary>
+        /// Post-processing step to ensure all events have ViewID, RuleFriendlyName, and Location properties.
+        /// K2 auto-generated events and some view-level events may be missing these properties.
+        /// </summary>
+        private void EnsureEventProperties(XmlDocument doc, string formName)
+        {
+            Console.WriteLine("\n    === Ensuring Event Properties (ViewID, RuleFriendlyName, Location) ===");
+
+            XmlNodeList allEvents = doc.SelectNodes("//Event");
+            if (allEvents == null) return;
+
+            int fixedCount = 0;
+
+            foreach (XmlElement eventEl in allEvents)
+            {
+                string sourceType = eventEl.GetAttribute("SourceType");
+                string sourceName = eventEl.GetAttribute("SourceName");
+                string eventType = eventEl.GetAttribute("Type");
+                string instanceId = eventEl.GetAttribute("InstanceID");
+
+                // Get or create Properties element
+                XmlElement propsEl = eventEl.SelectSingleNode("Properties") as XmlElement;
+                bool created = false;
+                if (propsEl == null)
+                {
+                    propsEl = doc.CreateElement("Properties");
+                    created = true;
+                }
+
+                bool modified = false;
+
+                // Check for ViewID property
+                bool hasViewID = false;
+                bool hasRuleFriendlyName = false;
+                bool hasLocation = false;
+
+                foreach (XmlElement prop in propsEl.SelectNodes("Property"))
+                {
+                    XmlNode nameNode = prop.SelectSingleNode("Name");
+                    if (nameNode == null) continue;
+                    string propName = nameNode.InnerText;
+
+                    if (propName == "ViewID") hasViewID = true;
+                    if (propName == "RuleFriendlyName") hasRuleFriendlyName = true;
+                    if (propName == "Location") hasLocation = true;
+                }
+
+                // Determine the view context for this event by walking up the XML tree
+                string viewId = "";
+                string viewName = "";
+
+                if (sourceType == "Form" && eventType == "User")
+                {
+                    // Form-level User events: Do NOT add ViewID.
+                    // K2 Designer expects only RuleFriendlyName + Location in event Properties.
+                    // ViewID in event Properties causes ValidationStatus="Error" because
+                    // the form ID is not a valid View reference.
+                    viewName = formName;
+                    viewId = ""; // Empty = won't be added
+                }
+                else if (sourceType == "Form")
+                {
+                    // Form-level System events: use form ID
+                    viewName = formName;
+                    viewId = "";
+                    XmlElement formElement = doc.SelectSingleNode("//Form") as XmlElement;
+                    if (formElement != null)
+                        viewId = formElement.GetAttribute("ID") ?? "";
+                }
+                else if (sourceType == "View" || sourceType == "Control")
+                {
+                    // Walk up the XML tree from this Event to find the parent Item (view) element.
+                    XmlNode parent = eventEl.ParentNode; // Should be <Events>
+                    if (parent != null) parent = parent.ParentNode; // Should be <Item> (the view)
+
+                    if (parent is XmlElement parentItem && parentItem.Name == "Item")
+                    {
+                        // Inside a view Item - get the view's ID
+                        viewId = parentItem.GetAttribute("ViewID");
+                        if (string.IsNullOrEmpty(viewId))
+                            viewId = parentItem.GetAttribute("ID");
+
+                        XmlNode viewNameNode = parentItem.SelectSingleNode("Name");
+                        viewName = viewNameNode?.InnerText ?? sourceName;
+                    }
+                    else
+                    {
+                        // Not inside a view Item = form-level control (Clear Form Button, Submit)
+                        // Do NOT add ViewID - K2 Designer doesn't want it for form-level controls.
+                        // ViewID belongs only in Action Properties, not Event Properties.
+                        viewId = ""; // Empty = won't be added
+                        viewName = formName;
+                        Console.WriteLine($"      Form-level control event '{sourceName}': skipping ViewID (not needed for form-level controls)");
+                    }
+                }
+
+                // Add missing ViewID
+                if (!hasViewID && !string.IsNullOrEmpty(viewId))
+                {
+                    XmlElement viewIdProp = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, viewIdProp, "Name", "ViewID");
+                    XmlHelper.AddElement(doc, viewIdProp, "DisplayValue", viewName);
+                    XmlHelper.AddElement(doc, viewIdProp, "NameValue", viewName);
+                    XmlHelper.AddElement(doc, viewIdProp, "Value", viewId);
+                    propsEl.AppendChild(viewIdProp);
+                    modified = true;
+                }
+
+                // Add missing RuleFriendlyName
+                if (!hasRuleFriendlyName)
+                {
+                    string friendlyName;
+                    XmlNode eventNameNode = eventEl.SelectSingleNode("Name");
+                    string eventName = eventNameNode?.InnerText ?? "";
+
+                    if (eventType == "System" && eventName == "Init")
+                    {
+                        friendlyName = $"When the {(sourceType == "Form" ? "Form" : "View")} '{(string.IsNullOrEmpty(viewName) ? sourceName : viewName)}' executed Initialized";
+                    }
+                    else if (eventName == "OnClick")
+                    {
+                        friendlyName = $"On {viewName}, when {sourceName} is Clicked";
+                    }
+                    else
+                    {
+                        friendlyName = $"When {sourceName} {eventName}";
+                    }
+
+                    XmlElement ruleProp = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, ruleProp, "Name", "RuleFriendlyName");
+                    XmlHelper.AddElement(doc, ruleProp, "Value", friendlyName);
+                    propsEl.AppendChild(ruleProp);
+                    modified = true;
+                }
+
+                // Add missing Location
+                if (!hasLocation)
+                {
+                    string location = string.IsNullOrEmpty(viewName) ? sourceName : viewName;
+
+                    XmlElement locationProp = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, locationProp, "Name", "Location");
+                    XmlHelper.AddElement(doc, locationProp, "Value", location);
+                    propsEl.AppendChild(locationProp);
+                    modified = true;
+                }
+
+                if (modified)
+                {
+                    if (created)
+                    {
+                        // Insert Properties after the Name element (or at beginning if no Name)
+                        XmlNode nameNode = eventEl.SelectSingleNode("Name");
+                        if (nameNode != null && nameNode.NextSibling != null)
+                        {
+                            eventEl.InsertAfter(propsEl, nameNode);
+                        }
+                        else if (nameNode != null)
+                        {
+                            eventEl.AppendChild(propsEl);
+                        }
+                        else
+                        {
+                            if (eventEl.FirstChild != null)
+                            eventEl.InsertBefore(propsEl, eventEl.FirstChild);
+                        else
+                            eventEl.AppendChild(propsEl);
+                        }
+                    }
+
+                    fixedCount++;
+                }
+            }
+
+            Console.WriteLine($"      Fixed Properties on {fixedCount} events");
+        }
 
         /// <summary>
         /// Adds cross-view rules from InfoPath conditional rules to the form-level Events section.
@@ -1880,21 +1926,22 @@ namespace K2SmartObjectGenerator
 
                 if (actionsElement != null)
                 {
-                    // Add action to SHOW the Form Action Table when ID is not blank
-                    XmlElement showTableAction = CreateAreaItemVisibilityAction(doc,
-                        formActionTableAreaItemId, formActionTableAreaItemName, "Show");
-                    actionsElement.AppendChild(showTableAction);
-                    Console.WriteLine("        ✓ Added Show Form Action Table action to conditional handler");
+                    // When ID is NOT blank (editing existing record), HIDE the Form Action Table
+                    // (Submit/Clear buttons are for new records only)
+                    XmlElement hideTableAction = CreateAreaItemVisibilityAction(doc,
+                        formActionTableAreaItemId, formActionTableAreaItemName, "Hide");
+                    actionsElement.AppendChild(hideTableAction);
+                    Console.WriteLine("        ✓ Added Hide Form Action Table action to conditional handler (ID not blank = editing)");
                 }
             }
 
-            // Now find the unconditional handler (for when ID is blank) or create one
-            AddHideFormActionTableForBlankID(doc, formActionTableAreaItemId, formActionTableAreaItemName);
+            // When ID IS blank (new record), SHOW the Form Action Table so user can Submit/Clear
+            AddShowFormActionTableForBlankID(doc, formActionTableAreaItemId, formActionTableAreaItemName);
         }
 
-        private void AddHideFormActionTableForBlankID(XmlDocument doc, string areaItemId, string areaItemName)
+        private void AddShowFormActionTableForBlankID(XmlDocument doc, string areaItemId, string areaItemName)
         {
-            Console.WriteLine("      Adding Hide Form Action Table for blank ID condition");
+            Console.WriteLine("      Adding Show Form Action Table for blank ID (new record)");
 
             // Find the Form event handlers
             XmlNodeList formEvents = doc.SelectNodes("//Event[@SourceType='Form']");
@@ -1932,16 +1979,17 @@ namespace K2SmartObjectGenerator
 
                         elseHandler.AppendChild(props);
 
-                        // Add action to HIDE the Form Action Table
+                        // When ID IS blank (new record), SHOW the Form Action Table
+                        // so the user can see Submit/Clear buttons
                         XmlElement actions = doc.CreateElement("Actions");
-                        XmlElement hideTableAction = CreateAreaItemVisibilityAction(doc,
-                            areaItemId, areaItemName, "Hide");
-                        actions.AppendChild(hideTableAction);
+                        XmlElement showTableAction = CreateAreaItemVisibilityAction(doc,
+                            areaItemId, areaItemName, "Show");
+                        actions.AppendChild(showTableAction);
                         elseHandler.AppendChild(actions);
 
                         // Insert the else handler after the conditional handler
                         handler.ParentNode.InsertAfter(elseHandler, handler);
-                        Console.WriteLine("        ✓ Added Else handler to hide Form Action Table when ID is blank");
+                        Console.WriteLine("        ✓ Added Else handler to SHOW Form Action Table when ID is blank (new record)");
                         return;
                     }
                 }
@@ -2140,13 +2188,15 @@ namespace K2SmartObjectGenerator
                         // Create a result mapping for each control
                         XmlElement result = doc.CreateElement("Result");
 
-                        // Source (SmartObject property)
-                        result.SetAttribute("SourceID", control.Value.FieldName);
-                        result.SetAttribute("SourceName", control.Value.FieldName);
-                        result.SetAttribute("SourceDisplayName", GetFieldDisplayName(control.Value.FieldName));
+                        // Source (SmartObject property) - use SmoPropertyName for correct SmartObject property reference
+                        string smoPropertyName = !string.IsNullOrEmpty(control.Value.SmoPropertyName) ? control.Value.SmoPropertyName : control.Value.FieldName;
+                        string smoDisplayName = !string.IsNullOrEmpty(control.Value.SmoDisplayName) ? control.Value.SmoDisplayName : GetFieldDisplayName(control.Value.FieldName);
+                        result.SetAttribute("SourceID", smoPropertyName);
+                        result.SetAttribute("SourceName", smoPropertyName);
+                        result.SetAttribute("SourceDisplayName", smoDisplayName);
                         result.SetAttribute("SourceType", "ObjectProperty");
 
-                        // Target (View control)
+                        // Target (View control) - use actual control name from ControlMapping
                         result.SetAttribute("TargetInstanceID", view.InstanceId);
                         result.SetAttribute("TargetID", control.Value.ControlId);
                         result.SetAttribute("TargetName", control.Value.ControlName);
@@ -2155,7 +2205,7 @@ namespace K2SmartObjectGenerator
 
                         results.AppendChild(result);
 
-                        Console.WriteLine($"            Mapped {control.Value.FieldName} -> {control.Value.ControlName} (View: {view.Name})");
+                        Console.WriteLine($"            Mapped {smoPropertyName} -> {control.Value.ControlName} (View: {view.Name}, SmoDisplay: {smoDisplayName})");
                         mappedFields.Add(control.Value.FieldName);
                     }
                 }
@@ -2280,10 +2330,13 @@ namespace K2SmartObjectGenerator
             {
                 foreach (var control in viewControls)
                 {
+                    string smoPropName = !string.IsNullOrEmpty(control.Value.SmoPropertyName) ? control.Value.SmoPropertyName : control.Value.FieldName;
+                    string smoDispName = !string.IsNullOrEmpty(control.Value.SmoDisplayName) ? control.Value.SmoDisplayName : GetFieldDisplayName(control.Value.FieldName);
+
                     XmlElement result = doc.CreateElement("Result");
-                    result.SetAttribute("SourceID", control.Value.FieldName);
-                    result.SetAttribute("SourceName", control.Value.FieldName);
-                    result.SetAttribute("SourceDisplayName", GetFieldDisplayName(control.Value.FieldName));
+                    result.SetAttribute("SourceID", smoPropName);
+                    result.SetAttribute("SourceName", smoPropName);
+                    result.SetAttribute("SourceDisplayName", smoDispName);
                     result.SetAttribute("SourceType", "ObjectProperty");
                     result.SetAttribute("TargetInstanceID", instanceId);
                     result.SetAttribute("TargetID", control.Value.ControlId);
@@ -2292,7 +2345,7 @@ namespace K2SmartObjectGenerator
                     result.SetAttribute("TargetType", "Control");
                     results.AppendChild(result);
 
-                    Console.WriteLine($"          Mapped {control.Value.FieldName} -> {control.Value.ControlName}");
+                    Console.WriteLine($"          Mapped {smoPropName} -> {control.Value.ControlName} (SmoDisplay: {smoDispName})");
                 }
             }
 
@@ -3207,6 +3260,93 @@ namespace K2SmartObjectGenerator
             return buttonArea;
         }
 
+        /// <summary>
+        /// Adds View-type Control entries to the form's Controls section for each view Item.
+        /// K2 expects a Control Type="View" with ViewID/ViewName properties for each view
+        /// referenced in the form's Areas/Items. Without these, K2 Designer shows
+        /// "AreaItemView,View,Warning" validation messages.
+        /// </summary>
+        private void AddViewControlsToForm(XmlDocument doc)
+        {
+            // Find the Controls element in the form
+            XmlNodeList controlsNodes = doc.GetElementsByTagName("Controls");
+            if (controlsNodes.Count == 0) return;
+
+            XmlElement controls = (XmlElement)controlsNodes[0];
+
+            // Build a set of existing control IDs (direct children only) to avoid duplicates
+            HashSet<string> existingControlIds = new HashSet<string>();
+            foreach (XmlNode child in controls.ChildNodes)
+            {
+                XmlElement childElement = child as XmlElement;
+                if (childElement != null && childElement.Name == "Control")
+                {
+                    string existingId = childElement.GetAttribute("ID");
+                    if (!string.IsNullOrEmpty(existingId))
+                        existingControlIds.Add(existingId);
+                }
+            }
+
+            // Find Items with ViewID attribute in Areas/Panels only (view references)
+            // Use a HashSet to track what we've already added
+            HashSet<string> addedIds = new HashSet<string>();
+            XmlNodeList allItems = doc.GetElementsByTagName("Item");
+            int addedCount = 0;
+
+            foreach (XmlNode itemNode in allItems)
+            {
+                XmlElement item = itemNode as XmlElement;
+                if (item == null) continue;
+
+                string viewId = item.GetAttribute("ViewID");
+                string itemId = item.GetAttribute("ID");
+
+                // Only process Items that have a ViewID (view references, not button areas etc.)
+                if (string.IsNullOrEmpty(viewId) || string.IsNullOrEmpty(itemId))
+                    continue;
+
+                // Skip if already exists or already added
+                if (existingControlIds.Contains(itemId) || addedIds.Contains(itemId))
+                    continue;
+
+                string viewName = item.GetAttribute("ViewName");
+
+                // Create View control matching K2's expected pattern
+                XmlElement viewControl = doc.CreateElement("Control");
+                viewControl.SetAttribute("ID", itemId);
+                viewControl.SetAttribute("Type", "View");
+
+                // Name must be unique - use itemId to avoid conflicts with AreaItem controls
+                XmlHelper.AddElement(doc, viewControl, "Name", itemId);
+
+                XmlElement properties = doc.CreateElement("Properties");
+
+                // Add ViewID property
+                XmlElement viewIdProp = doc.CreateElement("Property");
+                XmlHelper.AddElement(doc, viewIdProp, "Name", "ViewID");
+                XmlHelper.AddElement(doc, viewIdProp, "Value", viewId);
+                properties.AppendChild(viewIdProp);
+
+                // Add ViewName property
+                if (!string.IsNullOrEmpty(viewName))
+                {
+                    XmlElement viewNameProp = doc.CreateElement("Property");
+                    XmlHelper.AddElement(doc, viewNameProp, "Name", "ViewName");
+                    XmlHelper.AddElement(doc, viewNameProp, "Value", viewName);
+                    properties.AppendChild(viewNameProp);
+                }
+
+                viewControl.AppendChild(properties);
+                controls.AppendChild(viewControl);
+                addedIds.Add(itemId);
+                addedCount++;
+
+                Console.WriteLine($"      Added View control: ID={itemId}, ViewID={viewId}, ViewName={viewName}");
+            }
+
+            Console.WriteLine($"    Added {addedCount} View controls to form Controls section");
+        }
+
         private void AddButtonControlsToForm(XmlDocument doc, string formName, Dictionary<string, string> buttonGuids)
         {
             // Find the Controls element in the form
@@ -3459,6 +3599,7 @@ namespace K2SmartObjectGenerator
             Console.WriteLine($"\n=== Generating Form: {formDef.FormName} ===");
             Console.WriteLine($"    Category: {formDef.CategoryPath}");
             Console.WriteLine($"    Views to include: {formDef.ViewNames.Count}");
+            Console.WriteLine($"    Has repeating sections: {formDef.HasRepeatingSections}");
             Console.WriteLine($"    Theme: {_formTheme}");
 
             if (formDef.ViewNames.Count == 0)
@@ -3486,95 +3627,123 @@ namespace K2SmartObjectGenerator
                     }
                     catch { }
 
-                    // Set up form options - keeping it simple with basic options
-                    FormBehaviorOption fbOptions = FormBehaviorOption.LoadFormListClick |
-                                                  FormBehaviorOption.RefreshListFormLoad;
-
-                    // Use NoTabs for all forms to keep it simple
+                    // Set up form options
+                    // NOTE: LoadFormListClick removed — it generated empty ListClick stub events
+                    // with no handlers/actions. Delete functionality is handled by our custom
+                    // Rule 4 (Delete ToolBar Button → RemoveItem) in FormRulesBuilder.
+                    FormBehaviorOption fbOptions = FormBehaviorOption.RefreshListFormLoad;
                     FormGenerationOption fgOptions = FormGenerationOption.NoTabs;
 
-                    // Use AutoGenerator to create the form
                     using (AutoGenerator autoGenerator = new AutoGenerator(formsManager.Connection))
                     {
-                        // Create FormGenerator with options
                         SourceCode.Forms.Utilities.FormGenerator formGenerator =
                             new SourceCode.Forms.Utilities.FormGenerator(fgOptions, fbOptions, _formTheme);
 
-                        // Generate the form with the specified views
+                        // ─── STEP 1: Generate base form via K2 SDK ───
+                        Console.WriteLine("\n    ─── Step 1: Generating base form via K2 SDK ───");
                         Form generatedForm = autoGenerator.Generate(formGenerator,
                             formDef.ViewNames.ToArray(), formDef.FormName);
 
-                        // Get the form's XML to modify it
                         string formXml = generatedForm.ToXml();
-                        XmlDocument formDoc = new XmlDocument();
-                        formDoc.LoadXml(formXml);
+                        XmlDocument doc = new XmlDocument();
+                        doc.LoadXml(formXml);
 
-                        // ADD ID PARAMETER HERE - Before any other modifications
-                        AddIDParameterToForm(formDoc);
+                        // ─── STEP 2: Add ID parameter and update theme (ONCE) ───
+                        Console.WriteLine("\n    ─── Step 2: Adding ID parameter and updating theme ───");
+                        AddIDParameterToForm(doc);
                         Console.WriteLine($"    Added ID parameter to form: {formDef.FormName}");
 
-                        // Update theme to _Dynamic and disable legacy theme for ALL forms
-                        XmlNodeList formElementsList = formDoc.GetElementsByTagName("Form");
+                        XmlNodeList formElementsList = doc.GetElementsByTagName("Form");
                         if (formElementsList.Count > 0)
                         {
                             XmlElement formElem = (XmlElement)formElementsList[0];
                             formElem.SetAttribute("Theme", "_Dynamic");
-                            Console.WriteLine("    Updated form theme to _Dynamic");
+
+                            // Remove IsGenerated (set by AutoGenerator) and mark as user-modified.
+                            // K2 Designer validates generated forms differently from user-modified ones,
+                            // and IsGenerated=True can trigger AreaItemView,View,Warning.
+                            formElem.RemoveAttribute("IsGenerated");
+                            formElem.SetAttribute("IsUserModified", "True");
+                            Console.WriteLine("    Updated form: Theme=_Dynamic, removed IsGenerated, set IsUserModified=True");
                         }
-                        UpdateFormControlLegacyTheme(formDoc);
+                        UpdateFormControlLegacyTheme(doc);
 
-                        // For forms WITHOUT repeating sections, add form-level rules here
-                        if (!formDef.HasRepeatingSections)
-                        {
-                            Console.WriteLine("\n    === Processing Simple Form (No Repeating Sections) ===");
+                        // ─── STEP 3: Restructure layout (if complex) or add buttons (if simple) ───
+                        Dictionary<string, ViewPairInfo> viewPairs = new Dictionary<string, ViewPairInfo>();
 
-                            // First, we need to add the Clear and Submit buttons to the form
-                            AddFormActionButtonsToSimpleForm(formDoc, formDef.FormName);
-
-                            // Now add the form-level rules
-                            Console.WriteLine("    === Adding Form-Level Rules (Clear & Submit) ===");
-
-                            // Get or create form ID
-                            string formId = null;
-                            XmlNodeList formElements = formDoc.GetElementsByTagName("Form");
-                            if (formElements.Count > 0)
-                            {
-                                XmlElement formElement = (XmlElement)formElements[0];
-                                formId = formElement.GetAttribute("ID");
-
-                                if (string.IsNullOrEmpty(formId))
-                                {
-                                    formId = Guid.NewGuid().ToString();
-                                    formElement.SetAttribute("ID", formId);
-                                    Console.WriteLine($"      Generated new Form ID: {formId}");
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"      Found existing Form ID: {formId}");
-                                }
-                            }
-
-                            // Call AddFormLevelRules with empty viewPairs for simple forms
-                            var emptyViewPairs = new Dictionary<string, ViewPairInfo>();
-                            _rulesBuilder.AddFormLevelRules(formDoc, formId, formDef.FormName, emptyViewPairs);
-                            Console.WriteLine("      Form-level rules added to simple form");
-
-                            // Add cross-view rules from InfoPath conditional rules
-                            AddCrossViewInfoPathRules(formDoc);
-                        }
-
-                        // Create a new form object from the modified XML
-                        generatedForm = new Form(formDoc.OuterXml);
-
-                        // Restructure the form to group list and item views together
                         if (formDef.HasRepeatingSections)
                         {
-                            Console.WriteLine($"    Restructuring form to group list and item views...");
-                            generatedForm = RestructureFormToGroupListAndItemViews(generatedForm, formDef);
-                            // Note: Form-level rules are added inside RestructureFormToGroupListAndItemViews for complex forms
+                            Console.WriteLine("\n    ─── Step 3: Restructuring layout for repeating sections ───");
+                            RestructureFormLayout(doc, formDef, viewPairs);
+                        }
+                        else
+                        {
+                            Console.WriteLine("\n    ─── Step 3: Adding buttons for simple form ───");
+                            AddFormActionButtonsToSimpleForm(doc, formDef.FormName);
                         }
 
-                        // Deploy the form with the ID parameter and all rules
+                        // ─── STEP 4: Add ALL rules (ONE place for both simple and complex forms) ───
+                        Console.WriteLine("\n    ─── Step 4: Adding all form rules ───");
+
+                        // Get or create form ID
+                        string formId = GetOrCreateFormId(doc);
+
+                        // 4a. Add list/item view interaction rules (for complex forms)
+                        if (viewPairs.Count > 0)
+                        {
+                            Console.WriteLine("    Adding list/item view interaction rules...");
+                            _rulesBuilder.ApplyListItemViewRules(doc, viewPairs);
+                        }
+
+                        // 4b. Add form-level rules (Clear, Submit, Add buttons)
+                        Console.WriteLine("    Adding form-level rules (Clear, Submit)...");
+                        _rulesBuilder.AddFormLevelRules(doc, formId, formDef.FormName, viewPairs);
+
+                        // 4c. Add Init rule ID parameter condition and Load action
+                        Console.WriteLine("    Configuring Init rule...");
+                        AddInitRuleIDParameterCondition(doc);
+                        AddLoadActionToInitRule(doc, formDef.FormName);
+                        VerifyFormIDParameter(doc);
+
+                        // 4d. Add calculation rules
+                        Console.WriteLine("    Adding calculation rules...");
+                        _rulesBuilder.ApplyCalculationRules(doc, _originalJsonData, _infoPathFormDef);
+
+                        // 4e. Add cross-view InfoPath rules
+                        Console.WriteLine("    Adding cross-view InfoPath rules...");
+                        AddCrossViewInfoPathRules(doc);
+
+                        // ─── STEP 5: Ensure all events have proper properties ───
+                        Console.WriteLine("\n    ─── Step 5: Ensuring event properties ───");
+                        EnsureEventProperties(doc, formDef.FormName);
+
+                        // ─── STEP 6: Validate events before deployment ───
+                        Console.WriteLine("\n    ─── Step 6: Validating events before deployment ───");
+                        ValidateEventsBeforeDeploy(doc, formDef.FormName);
+
+                        // ─── STEP 6b: Cleanup event structure for K2 compatibility ───
+                        CleanupEventStructureForK2(doc, formDef.FormName);
+
+                        // ─── STEP 7: Deploy ONCE ───
+                        Console.WriteLine("\n    ─── Step 7: Deploying form ───");
+
+                        generatedForm = new Form(doc.OuterXml);
+
+                        // DIAGNOSTIC: Dump form XML before deployment
+                        try
+                        {
+                            string diagDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "DIAG_PreDeploy");
+                            System.IO.Directory.CreateDirectory(diagDir);
+                            string safeFormName = formDef.FormName.Replace(" ", "_").Replace("\\", "_").Replace("/", "_");
+                            string diagPath = System.IO.Path.Combine(diagDir, $"PRE_Form_{safeFormName}.xml");
+                            System.IO.File.WriteAllText(diagPath, doc.OuterXml);
+                            Console.WriteLine($"    [DIAG] Wrote pre-deploy form XML to: {diagPath}");
+                        }
+                        catch (Exception diagEx)
+                        {
+                            Console.WriteLine($"    [DIAG] Failed to write form diagnostic: {diagEx.Message}");
+                        }
+
                         Console.WriteLine($"    [DEPLOY] About to call DeployForms:");
                         Console.WriteLine($"    [DEPLOY]   Form name: {formDef.FormName}");
                         Console.WriteLine($"    [DEPLOY]   Category path: {formDef.CategoryPath}");
@@ -3583,10 +3752,28 @@ namespace K2SmartObjectGenerator
                         formsManager.DeployForms(generatedForm.ToXml(), formDef.CategoryPath, true);
 
                         Console.WriteLine($"    [DEPLOY] DeployForms call completed successfully");
-                        Console.WriteLine($"    Successfully deployed form: {formDef.FormName} with ID parameter and rules");
+                        Console.WriteLine($"    Successfully deployed form: {formDef.FormName}");
                         Console.WriteLine($"    Location: {formDef.CategoryPath}");
 
-                        // Log the views included, categorizing them
+                        // DIAGNOSTIC: Dump post-deploy form XML
+                        try
+                        {
+                            string deployedFormXml = formsManager.GetFormDefinition(formDef.FormName);
+                            if (!string.IsNullOrEmpty(deployedFormXml))
+                            {
+                                string diagDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "DIAG_PreDeploy");
+                                string safeFormName = formDef.FormName.Replace(" ", "_").Replace("\\", "_").Replace("/", "_");
+                                string diagPath = System.IO.Path.Combine(diagDir, $"POST_Form_{safeFormName}.xml");
+                                System.IO.File.WriteAllText(diagPath, deployedFormXml);
+                                Console.WriteLine($"    [DIAG] Wrote post-deploy form XML to: {diagPath}");
+                            }
+                        }
+                        catch (Exception diagEx)
+                        {
+                            Console.WriteLine($"    [DIAG] Failed to write post-deploy form diagnostic: {diagEx.Message}");
+                        }
+
+                        // Log the views included
                         Console.WriteLine($"    Views included:");
                         foreach (string viewName in formDef.ViewNames)
                         {
@@ -3608,6 +3795,335 @@ namespace K2SmartObjectGenerator
                     Console.WriteLine($"    Stack trace: {ex.StackTrace}");
                 }
             }
+        }
+
+        /// <summary>
+        /// Gets the existing Form ID or creates one if missing.
+        /// </summary>
+        private string GetOrCreateFormId(XmlDocument doc)
+        {
+            XmlNodeList formElements = doc.GetElementsByTagName("Form");
+            if (formElements.Count > 0)
+            {
+                XmlElement formElement = (XmlElement)formElements[0];
+                string formId = formElement.GetAttribute("ID");
+
+                if (string.IsNullOrEmpty(formId))
+                {
+                    formId = Guid.NewGuid().ToString();
+                    formElement.SetAttribute("ID", formId);
+                    Console.WriteLine($"    Generated new Form ID: {formId}");
+                }
+                else
+                {
+                    Console.WriteLine($"    Found existing Form ID: {formId}");
+                }
+                return formId;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Restructures the form layout to group list and item views together.
+        /// This ONLY handles layout - no rules are created here.
+        /// Rules are all created in GenerateForm Step 4.
+        /// </summary>
+        private void RestructureFormLayout(XmlDocument doc, FormDefinition formDef,
+            Dictionary<string, ViewPairInfo> viewPairs)
+        {
+            XmlNodeList panels = doc.GetElementsByTagName("Panel");
+            if (panels.Count == 0)
+            {
+                Console.WriteLine("    No panels found to restructure");
+                return;
+            }
+
+            foreach (XmlElement panel in panels)
+            {
+                XmlNodeList areas = panel.GetElementsByTagName("Area");
+                if (areas.Count == 0) continue;
+
+                // Categorize all views
+                Dictionary<string, XmlElement> listViews = new Dictionary<string, XmlElement>();
+                Dictionary<string, XmlElement> itemViews = new Dictionary<string, XmlElement>();
+                List<OrderedView> orderedViews = new List<OrderedView>();
+
+                Console.WriteLine("    === Analyzing Form Structure ===");
+
+                int position = 0;
+                foreach (XmlElement area in areas)
+                {
+                    XmlNodeList items = area.GetElementsByTagName("Item");
+                    foreach (XmlElement item in items)
+                    {
+                        XmlNodeList nameNodes = item.GetElementsByTagName("Name");
+                        if (nameNodes.Count > 0)
+                        {
+                            string viewName = nameNodes[0].InnerText;
+                            Console.WriteLine($"      Position {position}: {viewName}");
+
+                            // Update titles if we have them
+                            string titleToUse = null;
+                            if (_viewTitles != null && _viewTitles.ContainsKey(viewName))
+                            {
+                                titleToUse = _viewTitles[viewName];
+                            }
+                            UpdateAreaItemControlTitle(doc, viewName, titleToUse);
+
+                            if (viewName.Contains("_List"))
+                            {
+                                string baseName = ExtractRepeatingSectionNameFromView(viewName, formDef.InfoPathViewName);
+                                if (!string.IsNullOrEmpty(baseName))
+                                    listViews[baseName] = item;
+                            }
+                            else if (viewName.Contains("_Item"))
+                            {
+                                string baseName = ExtractRepeatingSectionNameFromView(viewName, formDef.InfoPathViewName);
+                                if (!string.IsNullOrEmpty(baseName))
+                                    itemViews[baseName] = item;
+                            }
+                            else
+                            {
+                                orderedViews.Add(new OrderedView
+                                {
+                                    Position = position,
+                                    View = item,
+                                    ViewName = viewName,
+                                    IsPartView = viewName.Contains("_Part")
+                                });
+                            }
+
+                            position++;
+                        }
+                    }
+                }
+
+                // Rebuild the form structure
+                if (orderedViews.Count > 0 || listViews.Count > 0)
+                {
+                    Console.WriteLine("    === Rebuilding Form Structure ===");
+
+                    ClearExistingAreas(panel);
+
+                    XmlElement areasContainer = doc.CreateElement("Areas");
+
+                    Console.WriteLine("    === Using GridPosition-Based Ordering ===");
+                    var allViewsWithPositions = CreateGridPositionOrderedViewList(orderedViews, listViews, itemViews, formDef);
+
+                    foreach (var viewWithPos in allViewsWithPositions.OrderBy(v => v.GridPosition))
+                    {
+                        if (viewWithPos.IsRepeatingSection)
+                        {
+                            if (listViews.ContainsKey(viewWithPos.SectionName) && itemViews.ContainsKey(viewWithPos.SectionName))
+                            {
+                                AddRepeatingSectionToContainer(doc, areasContainer, viewWithPos.SectionName,
+                                    listViews, itemViews, formDef, viewPairs);
+                                Console.WriteLine($"      Added repeating section: {viewWithPos.SectionName} at grid position {viewWithPos.GridPosition}");
+                                listViews.Remove(viewWithPos.SectionName);
+                                itemViews.Remove(viewWithPos.SectionName);
+                            }
+                        }
+                        else
+                        {
+                            XmlElement viewArea = doc.CreateElement("Area");
+                            viewArea.SetAttribute("ID", Guid.NewGuid().ToString());
+                            XmlElement viewItems = doc.CreateElement("Items");
+                            XmlElement clonedItem = (XmlElement)viewWithPos.View.CloneNode(true);
+                            viewItems.AppendChild(clonedItem);
+                            viewArea.AppendChild(viewItems);
+                            areasContainer.AppendChild(viewArea);
+                            Console.WriteLine($"      Added view: {viewWithPos.ViewName} at grid position {viewWithPos.GridPosition}");
+                        }
+                    }
+
+                    // Add any remaining repeating sections
+                    foreach (var kvp in listViews.ToList())
+                    {
+                        if (itemViews.ContainsKey(kvp.Key))
+                        {
+                            AddRepeatingSectionToContainer(doc, areasContainer, kvp.Key,
+                                listViews, itemViews, formDef, viewPairs);
+                            Console.WriteLine($"      Added remaining section: {kvp.Key} (no grid position found)");
+                        }
+                    }
+
+                    // Add the button area at the end
+                    Dictionary<string, string> buttonGuids;
+                    XmlElement buttonArea = CreateButtonArea(doc, formDef.FormName, out buttonGuids);
+                    areasContainer.AppendChild(buttonArea);
+                    Console.WriteLine("      Added Form Action Table at the end");
+
+                    panel.AppendChild(areasContainer);
+
+                    // CRITICAL FIX: Synchronize Controls section with new Area IDs.
+                    // The K2 AutoGenerator creates Area/AreaItem controls with IDs matching
+                    // the original Areas. When we rebuild Areas with new GUIDs, the Controls
+                    // section must be updated to match, or K2 Designer shows
+                    // "AreaItemView,View,Warning" because it can't resolve the linkage.
+                    SynchronizeAreaControlsWithPanels(doc);
+
+                    if (buttonGuids.Count > 0)
+                    {
+                        AddButtonControlsToForm(doc, formDef.FormName, buttonGuids);
+                    }
+                }
+            }
+
+            Console.WriteLine("    Layout restructuring completed");
+        }
+
+        /// <summary>
+        /// Validates all events in the form XML before deployment.
+        /// Logs warnings for any events that appear empty or malformed.
+        /// </summary>
+        private void ValidateEventsBeforeDeploy(XmlDocument doc, string formName)
+        {
+            XmlNodeList allEvents = doc.SelectNodes("//Event");
+            if (allEvents == null || allEvents.Count == 0)
+            {
+                Console.WriteLine("    WARNING: No events found in form XML!");
+                return;
+            }
+
+            Console.WriteLine($"    Total events: {allEvents.Count}");
+
+            int emptyEvents = 0;
+            int emptyHandlers = 0;
+
+            foreach (XmlElement eventEl in allEvents)
+            {
+                string sourceType = eventEl.GetAttribute("SourceType");
+                string sourceName = eventEl.GetAttribute("SourceName");
+                string eventType = eventEl.GetAttribute("Type");
+
+                // Get friendly name from properties
+                string friendlyName = "";
+                XmlNode friendlyProp = eventEl.SelectSingleNode("Properties/Property[Name='RuleFriendlyName']/Value");
+                if (friendlyProp != null)
+                    friendlyName = friendlyProp.InnerText;
+
+                // Check for handlers
+                XmlElement handlersEl = eventEl.SelectSingleNode("Handlers") as XmlElement;
+                int handlerCount = 0;
+                int totalActions = 0;
+
+                if (handlersEl != null)
+                {
+                    XmlNodeList handlers = handlersEl.SelectNodes("Handler");
+                    handlerCount = handlers.Count;
+
+                    foreach (XmlElement handler in handlers)
+                    {
+                        XmlNodeList actions = handler.SelectNodes("Actions/Action");
+                        totalActions += actions?.Count ?? 0;
+                    }
+                }
+
+                if (handlerCount == 0)
+                {
+                    emptyEvents++;
+                    Console.WriteLine($"    ⚠ EMPTY EVENT (no handlers): {friendlyName} [SourceType={sourceType}, SourceName={sourceName}, Type={eventType}]");
+
+                    // Auto-fix: remove events with no handlers as they show as errors in K2 Designer
+                    eventEl.ParentNode?.RemoveChild(eventEl);
+                    Console.WriteLine($"      → Removed empty event to prevent K2 Designer error");
+                }
+                else if (totalActions == 0)
+                {
+                    emptyHandlers++;
+                    Console.WriteLine($"    ⚠ EVENT WITH EMPTY HANDLERS (0 actions): {friendlyName} [SourceType={sourceType}, Handlers={handlerCount}]");
+                }
+                else
+                {
+                    Console.WriteLine($"    ✓ {friendlyName}: {handlerCount} handler(s), {totalActions} action(s) [SourceType={sourceType}]");
+                }
+            }
+
+            if (emptyEvents > 0)
+                Console.WriteLine($"    Removed {emptyEvents} empty event(s) that would show as errors in K2 Designer");
+            if (emptyHandlers > 0)
+                Console.WriteLine($"    WARNING: {emptyHandlers} event(s) have handlers but no actions");
+
+            Console.WriteLine($"    Validation complete");
+        }
+
+        /// <summary>
+        /// Cleans up event XML structure to match K2 Designer's expected format.
+        /// Based on live comparison of before/after saving a rule in K2 Designer:
+        ///
+        /// For form-level events (SourceType="Form" or form-level controls like Clear/Submit):
+        ///   - Event Properties should contain ONLY RuleFriendlyName + Location
+        ///   - ViewID should NOT be in event Properties (causes ValidationStatus="Error")
+        ///   - ViewID belongs in Action Properties only (targeting which view the action operates on)
+        ///
+        /// K2 Designer EXPECTS and re-adds:
+        ///   - IsExtended="True" on events (do NOT remove)
+        ///   - Handler Properties like HandlerName (do NOT remove)
+        /// </summary>
+        private void CleanupEventStructureForK2(XmlDocument doc, string formName)
+        {
+            Console.WriteLine($"\n    ─── Cleaning up event structure for K2 compatibility ───");
+
+            // Get the form ID to identify form-level ViewID references
+            string formId = "";
+            XmlElement formElement = doc.SelectSingleNode("//Form") as XmlElement;
+            if (formElement != null)
+                formId = formElement.GetAttribute("ID") ?? "";
+
+            int viewIdRemoved = 0;
+
+            // Remove ViewID from event-level Properties where it shouldn't be.
+            // K2 Designer expects ViewID only in Action Properties, not Event Properties,
+            // for form-level events (SourceType="Form") and form-level control events
+            // (controls like Clear Form Button and Submit that aren't inside a view).
+            XmlNodeList allEvents = doc.SelectNodes("//Event");
+            if (allEvents != null)
+            {
+                foreach (XmlElement eventEl in allEvents)
+                {
+                    string sourceType = eventEl.GetAttribute("SourceType");
+                    string eventType = eventEl.GetAttribute("Type");
+
+                    // Check event's own Properties for ViewID
+                    XmlElement propsEl = eventEl.SelectSingleNode("Properties") as XmlElement;
+                    if (propsEl == null) continue;
+
+                    foreach (XmlElement prop in propsEl.SelectNodes("Property"))
+                    {
+                        XmlNode nameNode = prop.SelectSingleNode("Name");
+                        if (nameNode != null && nameNode.InnerText == "ViewID")
+                        {
+                            XmlNode valueNode = prop.SelectSingleNode("Value");
+                            string viewIdValue = valueNode?.InnerText ?? "";
+
+                            // Remove ViewID if it points to the form ID (form is not a view)
+                            // or if event is SourceType="Form" with Type="User"
+                            bool shouldRemove = false;
+
+                            if (sourceType == "Form" && eventType == "User")
+                            {
+                                shouldRemove = true;
+                                Console.WriteLine($"      Removing ViewID from Form-level User event (form events don't need ViewID)");
+                            }
+                            else if (!string.IsNullOrEmpty(formId) && viewIdValue == formId)
+                            {
+                                shouldRemove = true;
+                                Console.WriteLine($"      Removing ViewID pointing to form ID from {sourceType} event (form is not a view)");
+                            }
+
+                            if (shouldRemove)
+                            {
+                                propsEl.RemoveChild(prop);
+                                viewIdRemoved++;
+                            }
+                            break; // Only one ViewID per event
+                        }
+                    }
+                }
+            }
+
+            Console.WriteLine($"    Removed {viewIdRemoved} invalid ViewID property/properties from event Properties");
+            Console.WriteLine($"    Event structure cleanup complete");
         }
 
         // Helper method to add Clear and Submit buttons to simple forms

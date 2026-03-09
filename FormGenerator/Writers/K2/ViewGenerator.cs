@@ -22,10 +22,21 @@ namespace K2SmartObjectGenerator
         private readonly SmartObjectGenerator _smoGenerator;
         private readonly GeneratorConfiguration _config;
         private readonly InfoPathFormDefinition _infoPathFormDef;
+        // Performance: Cache SmartObject definitions to avoid redundant network calls
+        private readonly Dictionary<string, SmartObjectDefinition> _smoDefCache = new Dictionary<string, SmartObjectDefinition>();
         public Dictionary<string, Dictionary<string, ControlMapping>> ViewControlMappings { get; private set; }
 
 
         public Dictionary<string, string> ViewTitles { get; private set; }
+
+        /// <summary>
+        /// Maps K2 view names to their source InfoPath grid row positions.
+        /// This allows FormGenerator to order Part views (regular segments between
+        /// repeating sections) correctly relative to repeating section views.
+        /// Without this, Part views fall back to ordinal-based positions that place
+        /// them after all repeating sections instead of between them.
+        /// </summary>
+        public Dictionary<string, int> ViewGridPositions { get; private set; }
 
         public ViewGenerator(ServerConnectionManager connectionManager,
                            Dictionary<string, Dictionary<string, FieldInfo>> smoFieldMappings,
@@ -41,6 +52,7 @@ namespace K2SmartObjectGenerator
             _xmlBuilder = new ViewXmlBuilder(connectionManager, smoFieldMappings, smoGenerator, _config, infoPathFormDef);
             _rulesBuilder = new ViewRulesBuilder();
             ViewTitles = new Dictionary<string, string>();
+            ViewGridPositions = new Dictionary<string, int>();
             ViewControlMappings = new Dictionary<string, Dictionary<string, ControlMapping>>();
         }
 
@@ -226,9 +238,38 @@ namespace K2SmartObjectGenerator
 
                         JArray segmentControlsArray = new JArray(segment.Controls);
 
+                        // Pre-check: filter controls to see if any renderable ones remain.
+                        // If the segment only contains non-renderable controls (e.g., section
+                        // containers like CTRL277, CTRL278), skip generating an empty view.
+                        JArray renderableControls = FilterOutNonRenderableControls(segmentControlsArray);
+                        if (renderableControls.Count == 0)
+                        {
+                            Console.WriteLine($"    SKIPPING empty Part view '{segmentViewName}': no renderable controls after filtering ({segment.Controls.Count} controls were all non-renderable)");
+                            continue;
+                        }
+
                         // Generate the view
                         GenerateXmlBasedView(segmentViewName, formName, segmentControlsArray, dataArray,
                             viewCategory, dynamicSections, conditionalVisibility, false, viewName, regularSegmentIndex);
+
+                        // Store grid position from the segment's controls so FormGenerator can
+                        // order this Part view correctly relative to repeating sections.
+                        // Use the minimum row number from the segment's controls as the position.
+                        int minRow = int.MaxValue;
+                        foreach (var ctrl in segment.Controls)
+                        {
+                            string gp = ctrl["GridPosition"]?.Value<string>();
+                            if (!string.IsNullOrEmpty(gp))
+                            {
+                                int row = ExtractRowNumber(gp);
+                                if (row < minRow) minRow = row;
+                            }
+                        }
+                        if (minRow != int.MaxValue)
+                        {
+                            ViewGridPositions[segmentViewName] = minRow;
+                            Console.WriteLine($"    [VIEW ORDERING] Registered '{segmentViewName}' at grid row {minRow}");
+                        }
                     }
                     else if (segment.Type == SegmentType.RepeatingSection)
                     {
@@ -267,8 +308,8 @@ namespace K2SmartObjectGenerator
 
                         // IMPORTANT: Create view names that are unique per InfoPath view context
                         // This allows multiple view pairs for the same SmartObject
-                        // Sanitize section name to match FormGenerator expectations and SmartObject naming
-                        string normalizedSectionName = NameSanitizer.SanitizeSmartObjectName(sectionName);
+                        // Normalize section name to match FormGenerator's NormalizeRepeatingSectionName() logic
+                        string normalizedSectionName = NormalizeRepeatingSectionName(sectionName);
                         string itemViewName = $"{formName}_{viewName}_{normalizedSectionName}_Item";
                         string listViewName = $"{formName}_{viewName}_{normalizedSectionName}_List";
 
@@ -288,6 +329,24 @@ namespace K2SmartObjectGenerator
                         }
 
                         JArray sectionControlsArray = new JArray(segment.Controls);
+
+                        // Store grid position for the repeating section views
+                        int sectionMinRow = int.MaxValue;
+                        foreach (var ctrl in segment.Controls)
+                        {
+                            string gp = ctrl["GridPosition"]?.Value<string>();
+                            if (!string.IsNullOrEmpty(gp))
+                            {
+                                int row = ExtractRowNumber(gp);
+                                if (row < sectionMinRow) sectionMinRow = row;
+                            }
+                        }
+                        if (sectionMinRow != int.MaxValue)
+                        {
+                            ViewGridPositions[itemViewName] = sectionMinRow;
+                            ViewGridPositions[listViewName] = sectionMinRow;
+                            Console.WriteLine($"    [VIEW ORDERING] Registered '{itemViewName}' and '{listViewName}' at grid row {sectionMinRow}");
+                        }
 
                         // Generate item view
                         GenerateXmlBasedView(itemViewName, childSmoName, sectionControlsArray, dataArray,
@@ -394,6 +453,38 @@ namespace K2SmartObjectGenerator
         }
 
 
+        /// <summary>
+        /// Normalize repeating section name to match FormGenerator's naming convention.
+        /// Must be kept in sync with FormGenerator.NormalizeRepeatingSectionName().
+        /// </summary>
+        private string NormalizeRepeatingSectionName(string sectionName)
+        {
+            if (string.IsNullOrEmpty(sectionName))
+                return sectionName;
+
+            // Handle TABLECTRL naming convention (e.g., "Table CTRL243" -> "Table_CTRL243")
+            if (sectionName.StartsWith("TABLECTRL", StringComparison.OrdinalIgnoreCase))
+            {
+                string ctrlNumber = sectionName.Substring("TABLECTRL".Length);
+                return $"Table_CTRL{ctrlNumber}";
+            }
+
+            // Already normalized
+            if (sectionName.StartsWith("Table_CTRL", StringComparison.OrdinalIgnoreCase))
+            {
+                return sectionName;
+            }
+
+            // Handle "Table CTRL243" format (with space)
+            if (sectionName.StartsWith("Table CTRL", StringComparison.OrdinalIgnoreCase))
+            {
+                return sectionName.Replace(" ", "_");
+            }
+
+            // Replace spaces with underscores for other section names
+            return sectionName.Replace(" ", "_");
+        }
+
         // New helper method to extract visible fields from controls
         private List<string> ExtractVisibleFieldsFromControls(List<JObject> controls, JArray dataArray)
         {
@@ -420,7 +511,22 @@ namespace K2SmartObjectGenerator
                 // Check if this is a data control (not just a label or structural element)
                 if (IsDataControl(controlType))
                 {
-                    string fieldName = NameSanitizer.SanitizePropertyName(name);
+                    // BINDING PIPELINE: Use binding-derived field name as PRIMARY source
+                    // This matches SmartObject field names directly (both derived from binding)
+                    string binding = control["Binding"]?.Value<string>();
+                    string bindingFieldName = NameSanitizer.ExtractFieldNameFromBinding(binding);
+                    string fieldName;
+
+                    if (!string.IsNullOrEmpty(bindingFieldName))
+                    {
+                        fieldName = NameSanitizer.SanitizePropertyName(bindingFieldName);
+                        Console.WriteLine($"        [BINDING PIPELINE] Using binding '{binding}' -> field '{fieldName}' (control name was '{name}')");
+                    }
+                    else
+                    {
+                        fieldName = NameSanitizer.SanitizePropertyName(name);
+                        Console.WriteLine($"        [FALLBACK] No binding, using control name -> field '{fieldName}'");
+                    }
 
                     // Skip system fields
                     if (fieldName.Equals("ID", StringComparison.OrdinalIgnoreCase) ||
@@ -460,7 +566,8 @@ namespace K2SmartObjectGenerator
                     }
 
                     // If this label doesn't have a matching data control, it might be a header label
-                    // for a field in a repeating table
+                    // for a field in a repeating table. Use the DATA CONTROL's name (from binding)
+                    // instead of the header label name to match SmartObject field names.
                     if (!hasMatchingDataControl)
                     {
                         // Check if this label is in a header row (typically row 1 of the repeating section)
@@ -490,8 +597,24 @@ namespace K2SmartObjectGenerator
                                         // If there's a data control in the same column
                                         if (dataCol == col && dataRow != row)
                                         {
-                                            // Use the label name as the field name
-                                            string fieldName = NameSanitizer.SanitizePropertyName(name);
+                                            // BINDING PIPELINE: Use the DATA CONTROL's binding to derive the field name
+                                            // This matches SmartObject fields directly
+                                            string dataBinding = dataControl["Binding"]?.Value<string>();
+                                            string dataBindingField = NameSanitizer.ExtractFieldNameFromBinding(dataBinding);
+                                            string dataControlName = dataControl["Name"]?.Value<string>();
+
+                                            string fieldName;
+                                            if (!string.IsNullOrEmpty(dataBindingField))
+                                            {
+                                                fieldName = NameSanitizer.SanitizePropertyName(dataBindingField);
+                                                Console.WriteLine($"        [BINDING PIPELINE] Header label '{name}' -> data control binding '{dataBinding}' -> field '{fieldName}'");
+                                            }
+                                            else
+                                            {
+                                                fieldName = !string.IsNullOrEmpty(dataControlName)
+                                                    ? NameSanitizer.SanitizePropertyName(dataControlName)
+                                                    : NameSanitizer.SanitizePropertyName(name);
+                                            }
 
                                             if (!fieldName.Equals("ID", StringComparison.OrdinalIgnoreCase) &&
                                                 !fieldName.Equals("PARENTID", StringComparison.OrdinalIgnoreCase) &&
@@ -499,7 +622,7 @@ namespace K2SmartObjectGenerator
                                             {
                                                 visibleFields.Add(fieldName);
                                                 processedNames.Add(fieldName);
-                                                Console.WriteLine($"        Found field from header label: {fieldName}");
+                                                Console.WriteLine($"        Found field from header label '{name}' -> data control field: {fieldName}");
                                             }
                                             break;
                                         }
@@ -524,17 +647,21 @@ namespace K2SmartObjectGenerator
                     // Check if this data item belongs to the current repeating section
                     if (isRepeating && !string.IsNullOrEmpty(columnName))
                     {
-                        // Check if any of our controls reference this column
+                        // Check if any of our controls reference this column (via binding or name)
                         bool isRelevantToThisSection = false;
 
                         foreach (JObject control in controls)
                         {
                             string controlName = control["Name"]?.Value<string>();
+                            string controlBinding = control["Binding"]?.Value<string>();
+                            string controlBindingField = NameSanitizer.ExtractFieldNameFromBinding(controlBinding);
                             JObject repInfo = control["RepeatingSectionInfo"] as JObject;
 
                             if (repInfo != null &&
-                                !string.IsNullOrEmpty(controlName) &&
-                                controlName.Equals(columnName, StringComparison.OrdinalIgnoreCase))
+                                ((!string.IsNullOrEmpty(controlBindingField) &&
+                                  controlBindingField.Equals(columnName, StringComparison.OrdinalIgnoreCase)) ||
+                                 (!string.IsNullOrEmpty(controlName) &&
+                                  controlName.Equals(columnName, StringComparison.OrdinalIgnoreCase))))
                             {
                                 isRelevantToThisSection = true;
                                 break;
@@ -649,61 +776,190 @@ namespace K2SmartObjectGenerator
             return dataControlTypes.Contains(controlType.ToLower());
         }
 
-        private void CheckInView(string viewName)
+        /// <summary>
+        /// Phase 2: Applies rules to all deployed views.
+        /// Called AFTER all views and forms have been deployed.
+        /// Fetches each deployed view's XML from K2, adds rule events (visibility, conditional, InfoPath),
+        /// deduplicates, and re-deploys the updated XML.
+        /// </summary>
+        // Track which views have already had Phase 2 rules applied.
+        // This prevents duplicate rule application when the method is called multiple times
+        // (e.g., due to concurrent form generation/deployment operations).
+        private readonly HashSet<string> _phase2CompletedViews = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        public void ApplyRulesToAllViews()
         {
-            using (FormsManager formsManager = new FormsManager())
+            var pendingContexts = _xmlBuilder.PendingRuleContexts;
+            if (pendingContexts == null || pendingContexts.Count == 0)
             {
-                try
+                Console.WriteLine("  No pending rule contexts - skipping rule application phase");
+                return;
+            }
+
+            Console.WriteLine($"\n{'=',-60}");
+            Console.WriteLine($"  PHASE 2: APPLYING RULES TO {pendingContexts.Count} DEPLOYED VIEWS");
+            Console.WriteLine($"{'=',-60}");
+
+            int successCount = 0;
+            int failCount = 0;
+
+            foreach (var kvp in pendingContexts)
+            {
+                string viewName = kvp.Key;
+                var context = kvp.Value;
+
+                // Skip views that have already been processed in a previous call
+                if (_phase2CompletedViews.Contains(viewName))
                 {
-                    formsManager.CreateConnection();
-                    formsManager.Connection.Open(_connectionManager.ConnectionString.ConnectionString);
+                    Console.WriteLine($"\n--- Skipping already-processed view: {viewName} ---");
+                    successCount++;
+                    continue;
+                }
 
-                    // Get the view definition XML
-                    string viewXml = formsManager.GetViewDefinition(viewName);
-                    if (!string.IsNullOrEmpty(viewXml))
+                Console.WriteLine($"\n--- Applying rules to: {viewName} ---");
+
+                using (FormsManager formsManager = new FormsManager())
+                {
+                    try
                     {
-                        // Parse the XML to get the GUID
-                        XmlDocument doc = new XmlDocument();
-                        doc.LoadXml(viewXml);
+                        formsManager.CreateConnection();
+                        formsManager.Connection.Open(_connectionManager.ConnectionString.ConnectionString);
 
-                        // Look for View element - it might be nested under SourceCode.Forms/Views
-                        XmlNodeList viewNodes = doc.GetElementsByTagName("View");
-                        if (viewNodes.Count > 0)
+                        // Step 1: Fetch the deployed view XML from K2
+                        Console.WriteLine($"    Fetching deployed view XML for '{viewName}'...");
+                        Console.WriteLine($"    Context: controlIdMap={context.ControlIdMap?.Count ?? 0} entries, dynamicSections={context.DynamicSections?.Count ?? 0}, conditionalVisibility={context.ConditionalVisibility?.Count ?? 0} props");
+                        string deployedXml = formsManager.GetViewDefinition(viewName);
+                        if (string.IsNullOrEmpty(deployedXml))
                         {
-                            XmlElement viewElement = (XmlElement)viewNodes[0];
-                            if (viewElement.HasAttribute("ID"))
+                            Console.WriteLine($"    WARNING: Could not fetch deployed view '{viewName}' - skipping rules");
+                            failCount++;
+                            continue;
+                        }
+
+                        Console.WriteLine($"    Fetched deployed view XML ({deployedXml.Length} chars)");
+
+                        // Step 2: Apply rules to the deployed XML
+                        string updatedXml = _xmlBuilder.ApplyRulesToDeployedView(deployedXml, context);
+
+                        if (updatedXml == deployedXml)
+                        {
+                            Console.WriteLine($"    No rules to apply for '{viewName}'");
+                            _phase2CompletedViews.Add(viewName);
+                            successCount++;
+                            continue;
+                        }
+
+                        // Step 3: Check out the view before re-deploying
+                        // K2 requires views to be checked out before they can be updated
+                        try
+                        {
+                            XmlDocument tempDoc = new XmlDocument();
+                            tempDoc.LoadXml(deployedXml);
+                            XmlNodeList viewNodes = tempDoc.GetElementsByTagName("View");
+                            if (viewNodes.Count > 0)
                             {
-                                string guidString = viewElement.GetAttribute("ID");
+                                string guidString = ((XmlElement)viewNodes[0]).GetAttribute("ID");
                                 if (Guid.TryParse(guidString, out Guid viewGuid))
                                 {
-                                    // Check in the view using its GUID
-                                    formsManager.CheckInView(viewGuid);
-                                    Console.WriteLine($"    Checked in view: {viewName}");
+                                    formsManager.CheckOutView(viewGuid);
+                                    Console.WriteLine($"    Checked out view: {viewName} ({viewGuid})");
                                 }
-                                else
-                                {
-                                    Console.WriteLine($"    WARNING: Could not parse GUID for view: {viewName}");
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine($"    WARNING: View element does not have ID attribute: {viewName}");
                             }
                         }
-                        else
+                        catch (Exception checkoutEx)
                         {
-                            Console.WriteLine($"    WARNING: Could not find View element in XML: {viewName}");
+                            Console.WriteLine($"    Note: Checkout attempt: {checkoutEx.Message}");
+                            // Continue anyway - DeployViews may still work
                         }
+
+                        // Step 4: Get the category path from the registry
+                        var viewInfo = SmartObjectViewRegistry.GetViewInfo(viewName);
+                        string categoryPath = viewInfo?.Metadata?.Category ?? $"Generated\\Views";
+
+                        // DIAGNOSTIC: Dump list view XML before re-deploy
+                        try
+                        {
+                            string diagDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "DIAG_PreDeploy");
+                            System.IO.Directory.CreateDirectory(diagDir);
+                            string safeViewName = viewName.Replace(" ", "_").Replace("\\", "_").Replace("/", "_");
+                            string diagPath = System.IO.Path.Combine(diagDir, $"PRE_ListView_{safeViewName}.xml");
+                            System.IO.File.WriteAllText(diagPath, updatedXml);
+                            Console.WriteLine($"    [DIAG] Wrote pre-deploy list view XML to: {diagPath}");
+                        }
+                        catch (Exception diagEx)
+                        {
+                            Console.WriteLine($"    [DIAG] Failed to write diagnostic: {diagEx.Message}");
+                        }
+
+                        // Step 5: Re-deploy the updated XML (false = update existing)
+                        formsManager.DeployViews(updatedXml, categoryPath, false);
+                        Console.WriteLine($"    Successfully re-deployed '{viewName}' with rules");
+
+                        // Step 6: Check in the view (reuse existing connection)
+                        CheckInView(viewName, formsManager);
+                        _phase2CompletedViews.Add(viewName);
+                        successCount++;
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        Console.WriteLine($"    WARNING: Could not find view to check in: {viewName}");
+                        Console.WriteLine($"    WARNING: Failed to apply rules to '{viewName}': {ex.Message}");
+                        Console.WriteLine($"    Stack trace: {ex.StackTrace}");
+                        failCount++;
                     }
                 }
-                catch (Exception ex)
+            }
+
+            Console.WriteLine($"\n  Phase 2 complete: {successCount} succeeded, {failCount} failed");
+        }
+
+        /// <summary>
+        /// Check in a view. Uses existing FormsManager connection if provided (performance),
+        /// otherwise creates a new one.
+        /// </summary>
+        private void CheckInView(string viewName, FormsManager existingFormsManager = null)
+        {
+            void DoCheckIn(FormsManager fm)
+            {
+                string viewXml = fm.GetViewDefinition(viewName);
+                if (string.IsNullOrEmpty(viewXml))
                 {
-                    Console.WriteLine($"    WARNING: Could not check in view {viewName}: {ex.Message}");
+                    Console.WriteLine($"    WARNING: Could not find view to check in: {viewName}");
+                    return;
                 }
+
+                XmlDocument doc = new XmlDocument();
+                doc.LoadXml(viewXml);
+                XmlNodeList viewNodes = doc.GetElementsByTagName("View");
+                if (viewNodes.Count == 0) return;
+
+                XmlElement viewElement = (XmlElement)viewNodes[0];
+                string guidString = viewElement.GetAttribute("ID");
+                if (!Guid.TryParse(guidString, out Guid viewGuid)) return;
+
+                try { fm.CheckOutView(viewGuid); } catch { }
+                fm.CheckInView(viewGuid);
+                Console.WriteLine($"    Checked in view: {viewName}");
+            }
+
+            try
+            {
+                if (existingFormsManager != null)
+                {
+                    DoCheckIn(existingFormsManager);
+                }
+                else
+                {
+                    using (FormsManager formsManager = new FormsManager())
+                    {
+                        formsManager.CreateConnection();
+                        formsManager.Connection.Open(_connectionManager.ConnectionString.ConnectionString);
+                        DoCheckIn(formsManager);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    WARNING: Could not check in view {viewName}: {ex.Message}");
             }
         }
 
@@ -968,6 +1224,23 @@ namespace K2SmartObjectGenerator
             return 1;
         }
 
+        /// <summary>
+        /// Gets or caches a SmartObject definition to avoid redundant network calls.
+        /// </summary>
+        private SmartObjectDefinition GetCachedSmartObjectDefinition(string smoName)
+        {
+            if (_smoDefCache.ContainsKey(smoName))
+                return _smoDefCache[smoName];
+
+            _connectionManager.Connect();
+            string smoXml = _connectionManager.ManagementServer.GetSmartObjectDefinition(smoName);
+            SmartObjectDefinition smoDef = SmartObjectDefinition.Create(smoXml);
+            _connectionManager.Disconnect();
+
+            _smoDefCache[smoName] = smoDef;
+            return smoDef;
+        }
+
         private void GenerateXmlBasedView(string viewName, string smoName, JArray controls,
                                     JArray dataArray, string categoryPath,
                                     JArray dynamicSections, JObject conditionalVisibility,
@@ -983,10 +1256,7 @@ namespace K2SmartObjectGenerator
 
                     DeleteExistingView(formsManager, viewName);
 
-                    _connectionManager.Connect();
-                    string smoXml = _connectionManager.ManagementServer.GetSmartObjectDefinition(smoName);
-                    SmartObjectDefinition smoDef = SmartObjectDefinition.Create(smoXml);
-                    _connectionManager.Disconnect();
+                    SmartObjectDefinition smoDef = GetCachedSmartObjectDefinition(smoName);
 
                     // Filter out non-renderable controls (nested table processing already done at top level)
                     JArray filteredControls = FilterOutNonRenderableControls(controls);
@@ -994,7 +1264,7 @@ namespace K2SmartObjectGenerator
                     // Normalize control grid positions
                     JArray normalizedControls = NormalizeControlGridPositions(filteredControls);
 
-                    // Create view
+                    // Create view XML
                     string viewTitle;
                     XmlDocument viewDoc = _xmlBuilder.CreateViewXmlStructure(viewName, smoDef.Guid.ToString(),
                         smoName, normalizedControls, dataArray,
@@ -1011,6 +1281,21 @@ namespace K2SmartObjectGenerator
 
                     formsManager.DeployViews(viewDoc.OuterXml, categoryPath, true);
                     Console.WriteLine($"    Successfully deployed: {viewName}");
+
+                    // DIAGNOSTIC: Dump view XML after deployment
+                    try
+                    {
+                        string diagDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "DIAG_PreDeploy");
+                        System.IO.Directory.CreateDirectory(diagDir);
+                        string safeViewName = viewName.Replace(" ", "_").Replace("\\", "_").Replace("/", "_");
+                        string diagPath = System.IO.Path.Combine(diagDir, $"PRE_View_{safeViewName}.xml");
+                        System.IO.File.WriteAllText(diagPath, viewDoc.OuterXml);
+                        Console.WriteLine($"    [DIAG] Wrote view XML to: {diagPath}");
+                    }
+                    catch (Exception diagEx)
+                    {
+                        Console.WriteLine($"    [DIAG] Failed to write diagnostic: {diagEx.Message}");
+                    }
 
                     // REGISTER WITH THE REGISTRY
                     var metadata = new SmartObjectViewRegistry.ViewMetadata
@@ -1031,15 +1316,29 @@ namespace K2SmartObjectGenerator
                         metadata
                     );
 
-                    CheckInView(viewName);
+                    CheckInView(viewName, formsManager);
+
+                    // DIAGNOSTIC: Dump post-deploy view XML (what K2 stored)
+                    try
+                    {
+                        string deployedViewXml = formsManager.GetViewDefinition(viewName);
+                        if (!string.IsNullOrEmpty(deployedViewXml))
+                        {
+                            string diagDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "DIAG_PreDeploy");
+                            string safeViewName = viewName.Replace(" ", "_").Replace("\\", "_").Replace("/", "_");
+                            string diagPath = System.IO.Path.Combine(diagDir, $"POST_View_{safeViewName}.xml");
+                            System.IO.File.WriteAllText(diagPath, deployedViewXml);
+                            Console.WriteLine($"    [DIAG] Wrote post-deploy view XML to: {diagPath}");
+                        }
+                    }
+                    catch (Exception diagEx)
+                    {
+                        Console.WriteLine($"    [DIAG] Failed to write post-deploy diagnostic: {diagEx.Message}");
+                    }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"    Warning: Could not deploy view {viewName}: {ex.Message}");
-                }
-                finally
-                {
-                    _connectionManager.Disconnect();
                 }
             }
         }
@@ -1307,9 +1606,17 @@ namespace K2SmartObjectGenerator
                                         }
                                     }
 
+                                    // FUZZY MATCHING REMOVED: DisplayName and suffix matching removed.
+                                    // Field names now come from binding-derived pipeline and should match directly.
+                                    // If a field is not found here, it means the binding pipeline didn't produce
+                                    // a matching name - this should be investigated as a data issue.
+
                                     if (fieldFound && !string.IsNullOrEmpty(actualFieldName))
                                     {
-                                        validFields.Add(actualFieldName);
+                                        if (!validFields.Contains(actualFieldName))
+                                        {
+                                            validFields.Add(actualFieldName);
+                                        }
                                         Console.WriteLine($"        Validated field: {field} -> {actualFieldName}");
                                     }
                                     else
@@ -1362,9 +1669,7 @@ namespace K2SmartObjectGenerator
                         {
                             try
                             {
-                                _connectionManager.Connect();
-                                string smoXml = _connectionManager.ManagementServer.GetSmartObjectDefinition(smoName);
-                                SmartObjectDefinition smoDef = SmartObjectDefinition.Create(smoXml);
+                                SmartObjectDefinition smoDef = GetCachedSmartObjectDefinition(smoName);
 
                                 for (int i = 0; i < smoDef.Properties.Count; i++)
                                 {
@@ -1382,10 +1687,6 @@ namespace K2SmartObjectGenerator
                             catch (Exception ex)
                             {
                                 Console.WriteLine($"        ERROR getting SmartObject definition: {ex.Message}");
-                            }
-                            finally
-                            {
-                                _connectionManager.Disconnect();
                             }
                         }
 
@@ -1492,8 +1793,8 @@ namespace K2SmartObjectGenerator
                             ViewTitles[viewName] = itemViewTitle;
                         }
 
-                        // Check in the view after deployment
-                        CheckInView(viewName);
+                        // Check in the view after deployment (reuse existing connection)
+                        CheckInView(viewName, formsManager);
                     }
                 }
                 catch (Exception ex)
@@ -2201,8 +2502,9 @@ namespace K2SmartObjectGenerator
                     {
                         // Remove common suffixes from control name
                         string cleanedControlName = controlName;
-                        string[] suffixes = { " Text Box", " TextBox", " Calendar", " Drop Down",
-                                     " DropDown", " Check Box", " CheckBox" };
+                        string[] suffixes = { " Text Box", " TextBox", " Calendar", " Date Picker",
+                                     " DatePicker", " Drop Down", " DropDown", " Check Box",
+                                     " CheckBox", " Numeric Text Box", " Data Label" };
                         foreach (string suffix in suffixes)
                         {
                             if (cleanedControlName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
@@ -2228,18 +2530,39 @@ namespace K2SmartObjectGenerator
 
                     if (!foundFields.Contains(sanitizedFieldName))
                     {
+                        // Resolve SmartObject property name and display name
+                        string smoPropertyName = sanitizedFieldName;
+                        string smoDisplayName = controlName;
+                        if (_smoFieldMappings != null && _smoFieldMappings.ContainsKey(smoName))
+                        {
+                            if (_smoFieldMappings[smoName].ContainsKey(sanitizedFieldName))
+                            {
+                                var fi = _smoFieldMappings[smoName][sanitizedFieldName];
+                                smoPropertyName = fi.FieldName;
+                                smoDisplayName = fi.DisplayName;
+                            }
+                            else if (_smoFieldMappings[smoName].ContainsKey(sanitizedFieldName.ToUpper()))
+                            {
+                                var fi = _smoFieldMappings[smoName][sanitizedFieldName.ToUpper()];
+                                smoPropertyName = fi.FieldName;
+                                smoDisplayName = fi.DisplayName;
+                            }
+                        }
+
                         editableControlMappings[sanitizedFieldName] = new ControlMapping
                         {
                             ControlId = controlId,
                             ControlName = controlName,
                             ControlType = controlType,
                             FieldName = sanitizedFieldName,
-                            DataType = GetFieldDataType(smoName, sanitizedFieldName)
+                            DataType = GetFieldDataType(smoName, sanitizedFieldName),
+                            SmoPropertyName = smoPropertyName,
+                            SmoDisplayName = smoDisplayName
                         };
 
                         foundFields.Add(sanitizedFieldName);
 
-                        Console.WriteLine($"            Found editable control: {controlName} (Type: {controlType}, ID: {controlId}) for field: {sanitizedFieldName}");
+                        Console.WriteLine($"            Found editable control: {controlName} (Type: {controlType}, ID: {controlId}) for field: {sanitizedFieldName} (SmoProperty: {smoPropertyName})");
                     }
                 }
             }
@@ -2291,7 +2614,7 @@ namespace K2SmartObjectGenerator
                 }
             }
 
-            // Final fallback: If K2 generated the controls with the exact field names
+            // Final fallback: Match remaining controls by their name containing the field name
             if (editableControlMappings.Count < visibleFields.Count)
             {
                 Console.WriteLine($"        Attempting final fallback search for missing fields...");
@@ -2303,7 +2626,7 @@ namespace K2SmartObjectGenerator
                     if (foundFields.Contains(sanitizedField))
                         continue;
 
-                    // Look for any control with ID that might be for this field
+                    // Look for a control whose name matches this field
                     foreach (XmlElement control in allControls)
                     {
                         string controlType = control.GetAttribute("Type");
@@ -2324,9 +2647,7 @@ namespace K2SmartObjectGenerator
 
                         if (!alreadyMapped)
                         {
-                            // This unmapped control might be for our field
-                            // Add it tentatively
-                            string controlId = control.GetAttribute("ID");
+                            // Get the control name to check for field name match
                             string controlName = "Unknown_" + field;
 
                             XmlNodeList nameNodes = control.GetElementsByTagName("Name");
@@ -2335,18 +2656,61 @@ namespace K2SmartObjectGenerator
                                 controlName = nameNodes[0].InnerText;
                             }
 
-                            editableControlMappings[sanitizedField] = new ControlMapping
-                            {
-                                ControlId = controlId,
-                                ControlName = controlName,
-                                ControlType = controlType,
-                                FieldName = sanitizedField,
-                                DataType = GetFieldDataType(smoName, sanitizedField)
-                            };
+                            // Check if this control's name matches the field name
+                            // Use the same matching logic as ProcessControlForMapping
+                            bool nameMatch = controlName.IndexOf(field, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                controlName.IndexOf(field.Replace("_", ""), StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                controlName.IndexOf(field.Replace("_", " "), StringComparison.OrdinalIgnoreCase) >= 0;
 
-                            foundFields.Add(sanitizedField);
-                            Console.WriteLine($"            Tentatively mapped control: {controlName} (Type: {controlType}, ID: {controlId}) to field: {sanitizedField}");
-                            break;
+                            // Also check by SmartObject DisplayName
+                            if (!nameMatch && _smoFieldMappings != null && _smoFieldMappings.ContainsKey(smoName))
+                            {
+                                foreach (var smoField in _smoFieldMappings[smoName])
+                                {
+                                    string smoSanitized = NameSanitizer.SanitizePropertyName(smoField.Key);
+                                    if (smoSanitized.Equals(sanitizedField, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        string displayName = smoField.Value.DisplayName ?? "";
+                                        if (!string.IsNullOrEmpty(displayName) &&
+                                            controlName.IndexOf(displayName, StringComparison.OrdinalIgnoreCase) >= 0)
+                                        {
+                                            nameMatch = true;
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (nameMatch)
+                            {
+                                string controlId = control.GetAttribute("ID");
+
+                                // Resolve SmartObject property info
+                                string smoPropName = sanitizedField;
+                                string smoDispName = controlName;
+                                if (_smoFieldMappings != null && _smoFieldMappings.ContainsKey(smoName))
+                                {
+                                    if (_smoFieldMappings[smoName].ContainsKey(sanitizedField))
+                                    { smoPropName = _smoFieldMappings[smoName][sanitizedField].FieldName; smoDispName = _smoFieldMappings[smoName][sanitizedField].DisplayName; }
+                                    else if (_smoFieldMappings[smoName].ContainsKey(sanitizedField.ToUpper()))
+                                    { smoPropName = _smoFieldMappings[smoName][sanitizedField.ToUpper()].FieldName; smoDispName = _smoFieldMappings[smoName][sanitizedField.ToUpper()].DisplayName; }
+                                }
+
+                                editableControlMappings[sanitizedField] = new ControlMapping
+                                {
+                                    ControlId = controlId,
+                                    ControlName = controlName,
+                                    ControlType = controlType,
+                                    FieldName = sanitizedField,
+                                    DataType = GetFieldDataType(smoName, sanitizedField),
+                                    SmoPropertyName = smoPropName,
+                                    SmoDisplayName = smoDispName
+                                };
+
+                                foundFields.Add(sanitizedField);
+                                Console.WriteLine($"            Tentatively mapped control: {controlName} (Type: {controlType}, ID: {controlId}) to field: {sanitizedField} (SmoProperty: {smoPropName})");
+                                break;
+                            }
                         }
                     }
                 }
@@ -2385,6 +2749,7 @@ namespace K2SmartObjectGenerator
         {
             string controlType = control.GetAttribute("Type");
             string controlId = control.GetAttribute("ID");
+            string fieldIdAttr = control.GetAttribute("FieldID");
 
             if (!IsEditableControlType(controlType))
                 return;
@@ -2396,7 +2761,43 @@ namespace K2SmartObjectGenerator
                 controlName = nameNodes[0].InnerText;
             }
 
-            // Try to match to a field
+            // PRIMARY: Use FieldID to match control to SmartObject field (deterministic binding pipeline)
+            if (!string.IsNullOrEmpty(fieldIdAttr) && _smoFieldMappings != null && _smoFieldMappings.ContainsKey(smoName))
+            {
+                foreach (var smoField in _smoFieldMappings[smoName])
+                {
+                    string sanitizedField = NameSanitizer.SanitizePropertyName(smoField.Key);
+                    if (foundFields.Contains(sanitizedField))
+                        continue;
+
+                    // The FieldID on the control matches a field GUID we assigned in CreateControlFromJson
+                    // Check if this control's FieldID corresponds to this SmartObject field
+                    if (visibleFields.Any(f => NameSanitizer.SanitizePropertyName(f).Equals(sanitizedField, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        // Check by looking up the field name from the control's display name
+                        string fieldDisplayName = smoField.Value.DisplayName?.Replace("_", " ") ?? "";
+                        if (controlName.IndexOf(fieldDisplayName, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            mappings[sanitizedField] = new ControlMapping
+                            {
+                                ControlId = controlId,
+                                ControlName = controlName,
+                                ControlType = controlType,
+                                FieldName = sanitizedField,
+                                DataType = GetFieldDataType(smoName, sanitizedField),
+                                SmoPropertyName = smoField.Value.FieldName,
+                                SmoDisplayName = smoField.Value.DisplayName
+                            };
+
+                            foundFields.Add(sanitizedField);
+                            Console.WriteLine($"                Mapped control via FieldID+DisplayName: {controlName} to field: {sanitizedField} (SmoProperty: {smoField.Value.FieldName})");
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // FALLBACK: Match by control name containing field name OR SmartObject DisplayName
             foreach (string field in visibleFields)
             {
                 string sanitizedField = NameSanitizer.SanitizePropertyName(field);
@@ -2404,22 +2805,59 @@ namespace K2SmartObjectGenerator
                 if (foundFields.Contains(sanitizedField))
                     continue;
 
-                // Check if this control matches the field
-                if (controlName.Contains(field) ||
-                    controlName.Contains(field.Replace("_", "")) ||
-                    controlName.Contains(field.ToUpper()))
+                // Check if this control matches the field by name
+                bool matched = controlName.IndexOf(field, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    controlName.IndexOf(field.Replace("_", ""), StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    controlName.IndexOf(field.Replace("_", " "), StringComparison.OrdinalIgnoreCase) >= 0;
+
+                // Also check by SmartObject field DisplayName (critical for fields like ISROUNDTRIP/INCLUDECAR
+                // where the binding-derived field name differs from the display name)
+                if (!matched && _smoFieldMappings != null && _smoFieldMappings.ContainsKey(smoName))
                 {
+                    var smoFields = _smoFieldMappings[smoName];
+                    foreach (var smoField in smoFields)
+                    {
+                        string smoSanitized = NameSanitizer.SanitizePropertyName(smoField.Key);
+                        if (smoSanitized.Equals(sanitizedField, StringComparison.OrdinalIgnoreCase))
+                        {
+                            string displayName = smoField.Value.DisplayName ?? "";
+                            if (!string.IsNullOrEmpty(displayName) &&
+                                controlName.IndexOf(displayName, StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                matched = true;
+                                Console.WriteLine($"                Matched via DisplayName '{displayName}' for field: {sanitizedField}");
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (matched)
+                {
+                    // Resolve SmartObject property info
+                    string smoPropN = sanitizedField;
+                    string smoDispN = controlName;
+                    if (_smoFieldMappings != null && _smoFieldMappings.ContainsKey(smoName))
+                    {
+                        if (_smoFieldMappings[smoName].ContainsKey(sanitizedField))
+                        { smoPropN = _smoFieldMappings[smoName][sanitizedField].FieldName; smoDispN = _smoFieldMappings[smoName][sanitizedField].DisplayName; }
+                        else if (_smoFieldMappings[smoName].ContainsKey(sanitizedField.ToUpper()))
+                        { smoPropN = _smoFieldMappings[smoName][sanitizedField.ToUpper()].FieldName; smoDispN = _smoFieldMappings[smoName][sanitizedField.ToUpper()].DisplayName; }
+                    }
+
                     mappings[sanitizedField] = new ControlMapping
                     {
                         ControlId = controlId,
                         ControlName = controlName,
                         ControlType = controlType,
                         FieldName = sanitizedField,
-                        DataType = GetFieldDataType(smoName, sanitizedField)
+                        DataType = GetFieldDataType(smoName, sanitizedField),
+                        SmoPropertyName = smoPropN,
+                        SmoDisplayName = smoDispN
                     };
 
                     foundFields.Add(sanitizedField);
-                    Console.WriteLine($"                Mapped control in edit row: {controlName} to field: {sanitizedField}");
+                    Console.WriteLine($"                Mapped control by name match: {controlName} to field: {sanitizedField} (SmoProperty: {smoPropN})");
                     break;
                 }
             }
@@ -2427,8 +2865,8 @@ namespace K2SmartObjectGenerator
         private bool IsEditableControlType(string controlType)
         {
             string[] editableTypes = {
-        "TextBox", "TextArea", "Calendar", "CheckBox",
-        "DropDown", "AutoComplete", "RadioButtonList",
+        "TextBox", "TextArea", "DatePicker", "Calendar", "CheckBox",
+        "DropDown", "AutoComplete", "RadioButtonList", "NumericTextBox",
         "CheckBoxList", "Picker", "FilePostBack",
         "ImagePostBack", "SharePointHyperLink", "HTMLEditor"
     };
@@ -2982,13 +3420,14 @@ namespace K2SmartObjectGenerator
                                 filterProp.AppendChild(nameElement);
 
                                 // Create the filter XML structure using actual field GUID
-                                string filterXml = $@"<Filter isSimple=""True""><Equals>" +
+                                // K2 requires PropertyExpressions (Equals) to be wrapped in a LogicalExpression (And)
+                                string filterXml = $@"<Filter isSimple=""True""><And><Equals>" +
                                     $@"<Item SourceType=""ViewField"" SourceID=""{parentIdFieldGuid}"" DataType=""number"" " +
                                     $@"Name=""{sourceGuid}_{parentIdFieldGuid}"" SourceName=""Parent ID"" SourceDisplayName=""Parent ID"">Parent ID</Item>" +
                                     @"<Item SourceType=""Value""><SourceValue>" +
                                     @"<Item SourceType=""ViewParameter"" DataType=""Text"" SourceID=""ID"" " +
                                     @"SourceName=""ID"" SourceDisplayName=""ID"" SourceSubFormID=""00000000-0000-0000-0000-000000000000"">ID</Item>" +
-                                    @"</SourceValue></Item></Equals></Filter>";
+                                    @"</SourceValue></Item></Equals></And></Filter>";
 
                                 XmlElement valueElement = viewDoc.CreateElement("Value");
                                 valueElement.InnerText = filterXml;
@@ -3026,6 +3465,10 @@ namespace K2SmartObjectGenerator
                             // Note: You might want to add a RemoveView method to the registry
                         }
                     }
+
+                    // Wait for K2 to fully clean up EventInstance records after delete
+                    // Without this delay, re-deploying immediately can hit duplicate key constraints
+                    System.Threading.Thread.Sleep(1500);
                 }
             }
             catch (Exception ex)
@@ -3173,6 +3616,14 @@ public bool TryCleanupExistingViews(string jsonContent)
             public string ControlType { get; set; }
             public string FieldName { get; set; }
             public string DataType { get; set; }
+            /// <summary>
+            /// The SmartObject property Name (e.g., "NONSMOKINGROOM") - used for SourceID/TargetID in method mappings
+            /// </summary>
+            public string SmoPropertyName { get; set; }
+            /// <summary>
+            /// The SmartObject property DisplayName (e.g., "Non-smoking hotel room required") - used for SourceDisplayName/TargetDisplayName
+            /// </summary>
+            public string SmoDisplayName { get; set; }
         }
         private class ViewSegment
         {

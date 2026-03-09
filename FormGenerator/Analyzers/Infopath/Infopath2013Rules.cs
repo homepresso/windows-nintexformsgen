@@ -347,9 +347,27 @@ namespace FormGenerator.Analyzers.Infopath
 
         private string ExtractFieldFromCondition(string condition)
         {
-            // Extract field name from conditions like "my:field = 'value'"
-            var match = System.Text.RegularExpressions.Regex.Match(condition, @"my:(\w+)");
-            return match.Success ? match.Groups[1].Value : "";
+            // Extract the LEAF field name from XPath conditions.
+            // For "my:preferences/my:seatLocation='Aisle'" we need "seatLocation", not "preferences".
+            // For "my:isRoundTrip='true'" we need "isRoundTrip".
+            // The leaf field is the last my:xxx segment before the operator (=, !=, etc.) or quote.
+
+            // First, extract the full XPath field reference (everything before the operator)
+            var fieldPathMatch = System.Text.RegularExpressions.Regex.Match(condition,
+                @"((?:my:\w+)(?:/my:\w+)*)");
+
+            if (fieldPathMatch.Success)
+            {
+                string fullPath = fieldPathMatch.Groups[1].Value;
+                // Take the last segment and strip the my: prefix
+                string[] segments = fullPath.Split('/');
+                string lastSegment = segments[segments.Length - 1];
+                return lastSegment.Replace("my:", "");
+            }
+
+            // Fallback: try plain field name pattern
+            var plainMatch = System.Text.RegularExpressions.Regex.Match(condition, @"my:(\w+)");
+            return plainMatch.Success ? plainMatch.Groups[1].Value : "";
         }
 
         private bool IsCalculation(string expression)
