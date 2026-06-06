@@ -196,9 +196,10 @@ namespace K2SmartObjectGenerator
             string childSmoName = $"{formName}_{NameSanitizer.SanitizeSmartObjectName(sectionName)}";
             _connectionManager.Connect();
 
-            if (CheckSmartObjectExists(childSmoName))
-                return childSmoName;
-
+            // Always (re)create so this generator's FieldMappings[childSmoName] is populated — the item +
+            // list views bind through it (and CreateChildSmartObject deletes+recreates cleanly). Without
+            // this, an existing child would leave FieldMappings empty and the item↔list field transfer
+            // (the Add-saves-to-list behaviour) would have nothing to map.
             var publishSmo = new SmartObjectDefinitionsPublish();
             SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, sectionFields ?? new List<JObject>(),
                 formName, formName, targetFolder);

@@ -386,32 +386,12 @@ namespace K2SmartObjectGenerator
                         continue;
                     }
 
-                    // Binding bridge: InfoPath control key -> child column (sanitized from the control's binding/name,
-                    // which matches the columns EnsureChildSmartObject created from the same section fields).
-                    var inner = new Dictionary<string, FieldInfo>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var c in sectionControls)
-                    {
-                        string cname = c["Name"]?.Value<string>();
-                        if (string.IsNullOrEmpty(cname)) continue;
-                        string col = NameSanitizer.SanitizePropertyName(
-                            NameSanitizer.ExtractFieldNameFromBinding(c["Binding"]?.Value<string>()) ?? cname);
-                        if (string.IsNullOrEmpty(col)) continue;
-                        var fi = new FieldInfo
-                        {
-                            FieldGuid = Guid.NewGuid().ToString(),
-                            FieldName = col,
-                            DisplayName = col,
-                            DataType = MapInfoPathToK2DataType(c["Type"]?.Value<string>())
-                        };
-                        AddSmoKey(inner, cname, fi);
-                        AddSmoKey(inner, NameSanitizer.ExtractFieldNameFromBinding(c["Binding"]?.Value<string>()), fi);
-                        AddSmoKey(inner, col, fi);
-                    }
-                    var smoFieldMappings = new Dictionary<string, Dictionary<string, FieldInfo>> { [childSmoName] = inner };
-
                     try
                     {
-                        var vg = new ViewGenerator(_connectionManager, smoFieldMappings, smoGen, _config, infoPathDef);
+                        // Bind item + list views through the generator's OWN FieldMappings (populated by
+                        // EnsureChildSmartObject) — same source as from-scratch, so the item↔list field
+                        // transfer (Add → save) maps correctly.
+                        var vg = new ViewGenerator(_connectionManager, smoGen.FieldMappings, smoGen, _config, infoPathDef);
                         var sectionArray = new JArray(sectionControls.Cast<object>().ToArray());
                         var res = vg.GenerateChildSectionViewPair(formName, ipViewName, sectionName, childSmoName,
                             sectionArray, dataArray ?? new JArray(), viewCategory);
