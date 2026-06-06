@@ -60,17 +60,21 @@ namespace K2SmartObjectGenerator
                 return result;
             }
 
-            // Parse the visibility data from the form JSON in the exact shape the rule builder expects.
+            // Parse the InfoPath model from the form JSON: views/controls, data, and visibility rules.
             JArray dynamicSections = null;
             JObject conditionalVisibility = null;
+            JArray viewsArray = null;
+            JArray dataArray = null;
             try
             {
                 var jo = JObject.Parse(jsonContent);
                 var fd = jo.Properties().First().Value?["FormDefinition"];
                 dynamicSections = fd?["DynamicSections"] as JArray;
                 conditionalVisibility = fd?["ConditionalVisibility"] as JObject;
+                viewsArray = fd?["Views"] as JArray;
+                dataArray = fd?["Data"] as JArray;
             }
-            catch { /* visibility rules optional */ }
+            catch { /* tolerate */ }
 
             // 1) Optionally create + populate the SmartBox lookups first so wiring can reference them.
             string lookupSmoName = null;
@@ -158,20 +162,28 @@ namespace K2SmartObjectGenerator
 
                 _log($"  [UpdateExisting] Existing form '{mapping.K2FormDisplayName}' has {views.Count} view(s): {string.Join(", ", views.Select(v => v.Name))}");
 
-                // Flatten all InfoPath controls across views for matching.
-                var infoPathControls = (infoPathDef.Views ?? new List<ViewDefinition>())
-                    .Where(v => v?.Controls != null)
-                    .SelectMany(v => v.Controls)
-                    .Where(c => c != null)
-                    .ToList();
+                // Reconnect (lookup creation above disconnects) so dropdown lookup resolution works.
+                try { _connectionManager.Connect(); } catch { }
+                var smoGen = new SmartObjectGenerator(_connectionManager, _config);
 
                 foreach (var view in views)
                 {
+                    // Rebuild only capture/data-entry views; skip SharePoint attachment/list views.
+                    string vname = view.Name ?? string.Empty;
+                    bool isAttachmentOrList = vname.IndexOf("Attachment", StringComparison.OrdinalIgnoreCase) >= 0
+                        || vname.EndsWith("_List", StringComparison.OrdinalIgnoreCase)
+                        || (view.Type.ToString().IndexOf("List", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (isAttachmentOrList)
+                    {
+                        _log($"    [View {vname}] skipped (attachment/list view)");
+                        continue;
+                    }
+
                     try
                     {
-                        UpdateSingleView(formsManager, view, infoPathControls, infoPathDef,
-                            dynamicSections, conditionalVisibility,
-                            createSmartBoxLookups, lookupSmoName, result, explicitFieldMap);
+                        RebuildView(formsManager, view, viewsArray, dataArray,
+                            dynamicSections, conditionalVisibility, infoPathDef,
+                            explicitFieldMap, smoGen, result);
                     }
                     catch (Exception ex)
                     {
@@ -188,133 +200,152 @@ namespace K2SmartObjectGenerator
             return result;
         }
 
-        private void UpdateSingleView(FormsManager formsManager, ViewInfo view,
-            List<ControlDefinition> infoPathControls, InfoPathFormDefinition infoPathDef,
-            JArray dynamicSections, JObject conditionalVisibility,
-            bool wireLookups, string lookupSmoName, UpdateResult result,
-            IDictionary<string, string> explicitFieldMap)
+        /// <summary>
+        /// Rebuilds an existing capture view's content from the InfoPath model using the real
+        /// generation engine (ViewXmlBuilder), bound to the view's EXISTING SmartObject and
+        /// deployed over the EXISTING view GUID. Only InfoPath controls that resolve to an
+        /// existing SmartObject field are placed; the rest are skipped.
+        /// </summary>
+        private void RebuildView(FormsManager formsManager, ViewInfo view, JArray viewsArray, JArray dataArray,
+            JArray dynamicSections, JObject conditionalVisibility, InfoPathFormDefinition infoPathDef,
+            IDictionary<string, string> explicitFieldMap, SmartObjectGenerator smoGen, UpdateResult result)
         {
             string viewXml = formsManager.GetViewDefinition(view.Guid);
-            if (string.IsNullOrEmpty(viewXml))
-            {
-                _log($"    [View {view.Name}] empty definition - skipped");
-                return;
-            }
+            if (string.IsNullOrEmpty(viewXml)) { _log($"    [View {view.Name}] empty definition - skipped"); return; }
 
-            // Dump the raw deployed view XML so the exact K2 schema can be inspected offline.
+            // Dump raw XML for offline inspection.
             try
             {
                 string dumpDir = Path.Combine(Path.GetTempPath(), "FormGenerator_K2Views");
                 Directory.CreateDirectory(dumpDir);
-                string safe = Regex.Replace(view.Name ?? "view", "[^A-Za-z0-9_.-]", "_");
-                string dumpPath = Path.Combine(dumpDir, safe + ".xml");
-                File.WriteAllText(dumpPath, viewXml);
-                _log($"    [View {view.Name}] dumped raw view XML ({viewXml.Length} chars) → {dumpPath}");
+                File.WriteAllText(Path.Combine(dumpDir, Regex.Replace(view.Name ?? "view", "[^A-Za-z0-9_.-]", "_") + ".xml"), viewXml);
             }
-            catch (Exception exDump)
-            {
-                _log($"    [View {view.Name}] could not dump view XML: {exDump.Message}");
-            }
+            catch { }
 
             var xdoc = new XmlDocument { PreserveWhitespace = false };
             xdoc.LoadXml(viewXml);
 
-            // ── Component 3: match existing K2 controls to InfoPath controls ──
-            var matcher = new ExistingViewControlMatcher(xdoc, infoPathControls, infoPathDef, explicitFieldMap);
-            var matches = matcher.Match();
+            string existingViewGuid = (xdoc.SelectSingleNode("//View") as XmlElement)?.GetAttribute("ID") ?? view.Guid.ToString();
 
-            // Structural + inventory diagnostics so matching failures are visible in the log.
-            int rawControlCount = xdoc.GetElementsByTagName("Control").Count;
-            int controlsPath = xdoc.SelectNodes("//Controls/Control")?.Count ?? 0;
-            _log($"    [View {view.Name}] root=<{xdoc.DocumentElement?.Name}> rawControls={rawControlCount} //Controls/Control={controlsPath}");
-            _log($"    [View {view.Name}] K2 candidates={matcher.K2Candidates.Count} infoPath={matcher.InfoPathNames.Count} matched={matches.Count}");
-            if (matcher.K2Candidates.Count > 0)
-                _log($"      K2: {string.Join(", ", matcher.K2Candidates.Take(50))}");
-            if (matcher.InfoPathNames.Count > 0)
-                _log($"      InfoPath: {string.Join(", ", matcher.InfoPathNames.Take(50))}");
-            if (matches.Count > 0)
-                _log($"      matched pairs (InfoPath@grid → K2): {string.Join(", ", matches.Select(m => $"{m.InfoPathControl.Label ?? m.InfoPathControl.Name}@{m.InfoPathControl.GridPosition}→{m.K2ControlName}"))}");
+            // Primary SmartObject source (binding target).
+            var primarySource = (xdoc.SelectSingleNode("//Sources/Source[@ContextType='Primary']")
+                                 ?? xdoc.SelectSingleNode("//Sources/Source[@SourceType='Object']")) as XmlElement;
+            if (primarySource == null) { _log($"    [View {view.Name}] no primary SmartObject source - skipping rebuild"); return; }
+            string smoGuid = primarySource.GetAttribute("SourceID");
+            string smoName = primarySource.GetAttribute("SourceName");
 
-            bool changed = false;
-
-            // ── Component 4: reposition matched controls to the InfoPath grid order (fail-safe) ──
-            try
+            // FieldID → FieldInfo (from the primary source's <Fields>).
+            var fieldByFieldId = new Dictionary<string, FieldInfo>(StringComparer.OrdinalIgnoreCase);
+            foreach (XmlElement fld in primarySource.SelectNodes("Fields/Field")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
             {
-                int moved = ControlRepositioner.Reposition(xdoc, matches);
-                if (moved > 0) { result.ControlsRepositioned += moved; changed = true; }
-                _log($"    [View {view.Name}] repositioned {moved} control(s)");
-            }
-            catch (Exception ex)
-            {
-                _log($"    [View {view.Name}] reposition skipped: {ex.Message}");
-            }
-
-            // ── Component 6 (wire): point matched dropdowns at the lookup SmartObject (fail-safe) ──
-            if (wireLookups && !string.IsNullOrEmpty(lookupSmoName))
-            {
-                try
+                string fid = fld.GetAttribute("ID");
+                string fname = ReaderChildText(fld, "FieldName") ?? ReaderChildText(fld, "Name");
+                if (string.IsNullOrEmpty(fid) || string.IsNullOrEmpty(fname)) continue;
+                string fdisp = ReaderChildText(fld, "FieldDisplayName") ?? ReaderChildText(fld, "Name") ?? fname;
+                string dtype = fld.GetAttribute("DataType");
+                fieldByFieldId[fid] = new FieldInfo
                 {
-                    int wired = DropdownLookupWirer.Wire(xdoc, matches, lookupSmoName);
-                    if (wired > 0) { result.DropdownsWired += wired; changed = true; }
-                    _log($"    [View {view.Name}] wired {wired} dropdown(s) to {lookupSmoName}");
-                }
-                catch (Exception ex)
-                {
-                    _log($"    [View {view.Name}] dropdown wiring skipped: {ex.Message}");
-                }
-            }
-
-            string currentXml = xdoc.OuterXml;
-
-            // ── Component 5: apply InfoPath rules to the (possibly modified) view XML ──
-            string finalXml = currentXml;
-            try
-            {
-                var builder = new ViewXmlBuilder(_connectionManager,
-                    new Dictionary<string, Dictionary<string, FieldInfo>>(), null, _config, infoPathDef);
-
-                var ctx = new ViewXmlBuilder.ViewRuleContext
-                {
-                    ViewName = view.Name,
-                    ViewGuid = view.Guid.ToString(),
-                    ControlIdMap = matcher.ControlIdMap,
-                    ControlToFieldMap = matcher.ControlToFieldMap,
-                    JsonToK2ControlIdMap = new Dictionary<string, string>(),
-                    DynamicSections = dynamicSections,
-                    ConditionalVisibility = conditionalVisibility,
-                    Controls = null
+                    FieldGuid = Guid.NewGuid().ToString(),
+                    FieldName = fname,
+                    DisplayName = fdisp,
+                    DataType = string.IsNullOrEmpty(dtype) ? "Text" : dtype
                 };
+            }
 
-                string withRules = builder.ApplyRulesToDeployedView(finalXml, ctx);
-                if (!string.IsNullOrEmpty(withRules) && !string.Equals(withRules, finalXml, StringComparison.Ordinal))
+            // K2 control ID → FieldID (so the field-mapping UI can resolve to a SmartObject field).
+            var fieldIdByControlId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (XmlElement ctrl in xdoc.SelectNodes("//Controls/Control[@FieldID]")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
+            {
+                string cid = ctrl.GetAttribute("ID");
+                string f = ctrl.GetAttribute("FieldID");
+                if (!string.IsNullOrEmpty(cid) && !string.IsNullOrEmpty(f)) fieldIdByControlId[cid] = f;
+            }
+
+            // Build the binding bridge: _smoFieldMappings[smoName][sanitizedKey] = FieldInfo(existing field).
+            var fieldMap = new Dictionary<string, FieldInfo>(StringComparer.OrdinalIgnoreCase);
+            void AddKey(string rawKey, FieldInfo fi)
+            {
+                if (string.IsNullOrWhiteSpace(rawKey) || fi == null) return;
+                string k = NameSanitizer.SanitizePropertyName(rawKey);
+                if (string.IsNullOrEmpty(k)) return;
+                fieldMap[k] = fi;
+                fieldMap[k.ToUpperInvariant()] = fi;
+            }
+
+            // (a) every existing field is matchable by its own name / display name.
+            foreach (var fi in fieldByFieldId.Values) { AddKey(fi.FieldName, fi); AddKey(fi.DisplayName, fi); }
+
+            // InfoPath controls for this rebuild (first InfoPath view).
+            JObject ipView = viewsArray?.OfType<JObject>().FirstOrDefault();
+            JArray ipControls = ipView?["Controls"] as JArray ?? new JArray();
+            var ipByName = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
+            foreach (JObject c in ipControls.OfType<JObject>())
+            {
+                var nm = c["Name"]?.Value<string>();
+                if (!string.IsNullOrEmpty(nm) && !ipByName.ContainsKey(nm)) ipByName[nm] = c;
+            }
+
+            // (b) user-confirmed field mappings win: InfoPath control name → K2 control → field.
+            if (explicitFieldMap != null)
+            {
+                foreach (var kv in explicitFieldMap)
                 {
-                    finalXml = withRules;
-                    changed = true;
-                    result.RulesAppliedViews++;
+                    if (string.IsNullOrEmpty(kv.Value)) continue;
+                    if (!fieldIdByControlId.TryGetValue(kv.Value, out var fid)) continue;
+                    if (!fieldByFieldId.TryGetValue(fid, out var fi)) continue;
+                    AddKey(kv.Key, fi);
+                    if (ipByName.TryGetValue(kv.Key, out var ipc))
+                        AddKey(NameSanitizer.ExtractFieldNameFromBinding(ipc["Binding"]?.Value<string>()), fi);
                 }
+            }
+
+            var smoFieldMappings = new Dictionary<string, Dictionary<string, FieldInfo>> { [smoName] = fieldMap };
+
+            // Keep non-data controls (labels/layout); keep data controls that resolve to a field; drop the rest.
+            var filtered = new JArray();
+            int kept = 0, dropped = 0;
+            foreach (JObject c in ipControls.OfType<JObject>())
+            {
+                string binding = c["Binding"]?.Value<string>();
+                string name = c["Name"]?.Value<string>();
+                bool isData = !string.IsNullOrWhiteSpace(binding);
+                if (!isData) { filtered.Add(c.DeepClone()); continue; }
+
+                string k1 = NameSanitizer.SanitizePropertyName(NameSanitizer.ExtractFieldNameFromBinding(binding) ?? string.Empty);
+                string k2 = NameSanitizer.SanitizePropertyName(name ?? string.Empty);
+                bool resolvable = (!string.IsNullOrEmpty(k1) && fieldMap.ContainsKey(k1))
+                               || (!string.IsNullOrEmpty(k2) && fieldMap.ContainsKey(k2));
+                if (resolvable) { filtered.Add(c.DeepClone()); kept++; }
+                else dropped++;
+            }
+
+            _log($"    [View {view.Name}] rebuild → SmartObject '{smoName}' [{smoGuid}], {fieldByFieldId.Count} field(s); controls kept={kept} dropped={dropped}");
+            if (kept == 0) { _log($"    [View {view.Name}] no bindable InfoPath controls - skipping rebuild"); return; }
+
+            // Build the view XML via the real engine, reusing the existing view GUID + SmartObject.
+            string rebuiltXml;
+            try
+            {
+                var builder = new ViewXmlBuilder(_connectionManager, smoFieldMappings, smoGen, _config, infoPathDef);
+                var newDoc = builder.CreateViewXmlStructure(
+                    view.Name, smoGuid, smoName, filtered,
+                    dataArray ?? new JArray(), dynamicSections ?? new JArray(), conditionalVisibility ?? new JObject(),
+                    isItemView: false, out _, existingViewGuid: existingViewGuid);
+                rebuiltXml = newDoc.OuterXml;
             }
             catch (Exception ex)
             {
-                _log($"    [View {view.Name}] rule application skipped: {ex.Message}");
-            }
-
-            // Push harder: whenever we matched controls, always redeploy so the latest
-            // InfoPath-driven layout/order is (re)applied even if change-detection is conservative.
-            if (matches.Count > 0) changed = true;
-
-            if (!changed)
-            {
-                _log($"    [View {view.Name}] no matched controls - not redeploying");
+                _log($"    [View {view.Name}] rebuild failed (engine): {ex.Message} - leaving view untouched");
                 return;
             }
 
-            // ── Deploy: checkout → deploy (updates existing view by GUID) → check in ──
+            // Deploy over the existing view.
             try
             {
                 formsManager.CheckOutView(view.Guid);
-                formsManager.DeployViews(finalXml, view.CategoryPath, true);
+                formsManager.DeployViews(rebuiltXml, view.CategoryPath, true);
                 result.ViewsUpdated++;
-                _log($"    [View {view.Name}] deployed");
+                _log($"    [View {view.Name}] rebuilt & deployed ({kept} control(s) bound to {smoName})");
             }
             catch (Exception ex)
             {

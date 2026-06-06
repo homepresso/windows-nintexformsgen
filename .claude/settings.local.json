@@ -35,7 +35,10 @@
       "PowerShell($asm = [System.Reflection.Assembly]::LoadFrom\\(\"c:\\\\development\\\\windows-nintexformsgen\\\\FormGenerator\\\\Writers\\\\K2\\\\References\\\\SourceCode.Forms.Client.dll\"\\); $t = $asm.GetType\\(\"SourceCode.Forms.Client.Form\"\\); if \\($t\\) { \"=== Form properties ===\"; $t.GetProperties\\(\\) | ForEach-Object { \"$\\($_.PropertyType.Name\\) $\\($_.Name\\)\" } } else { \"Form type not found; listing types with 'Form' in name:\"; $asm.GetTypes\\(\\) | Where-Object { $_.Name -match 'Form' } | Select-Object -First 20 -ExpandProperty FullName })",
       "Bash(cd c:/development/windows-nintexformsgen && git show HEAD:FormGenerator/Views/MainWindow.xaml.cs > /tmp/head_mw.cs && grep -nE \"\\(void|Task|string|bool\\) \\(RefreshJsonOutputWithCurrentData|CollapseAllButton_Click|ExpandAllButton_Click|TreeSearchBox_TextChanged|TreeSearchButton_Click|StructureTreeView_SelectedItemChanged|JsonSelectAll_Click|JsonCopy_Click|JsonCopyFormatted_Click|JsonCopyMinified_Click|JsonSaveToFile_Click|OpenSupportWebsite_Click|DownloadK2Log_Click|RefreshRulesMapping_Click|ExportRulesMapping_Click|RuleFilter_TextChanged|RuleStatusFilter_Changed|RulesMappingList_SelectionChanged|CopyRuleDetails_Click|CopyAllFilteredRules_Click|CopyK2Xml_Click|K2XmlOutput_TextChanged|MappingNotes_TextChanged|SaveRuleMapping_Click\\)\\\\b\" /tmp/head_mw.cs)",
       "PowerShell(Stop-Process -Name NintexFormsGenerator -Force -ErrorAction SilentlyContinue)",
-      "PowerShell(\"stopped\")"
+      "PowerShell(\"stopped\")",
+      "Bash(git log *)",
+      "Bash(git config *)",
+      "Bash(git var *)"
     ],
     "deny": [],
     "ask": [],

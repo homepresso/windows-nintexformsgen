@@ -75,7 +75,7 @@ namespace K2SmartObjectGenerator
         public XmlDocument CreateViewXmlStructure(string viewName, string smoGuid, string smoName,
                              JArray controls, JArray dataArray,
                              JArray dynamicSections, JObject conditionalVisibility,
-                             bool isItemView, out string viewTitle)
+                             bool isItemView, out string viewTitle, string existingViewGuid = null)
         {
             // Store conditional visibility data for use during control creation
             _conditionalVisibility = conditionalVisibility;
@@ -107,7 +107,9 @@ namespace K2SmartObjectGenerator
             root.AppendChild(views);
 
             XmlElement view = doc.CreateElement("View");
-            string viewGuid = Guid.NewGuid().ToString();
+            // Reuse an existing view's GUID when rebuilding it in place, so the parent form's
+            // <Item ViewID="..."> references stay valid and DeployViews updates that view.
+            string viewGuid = !string.IsNullOrEmpty(existingViewGuid) ? existingViewGuid : Guid.NewGuid().ToString();
             view.SetAttribute("ID", viewGuid);
             view.SetAttribute("Type", "Capture");
             view.SetAttribute("IsUserModified", "True");
