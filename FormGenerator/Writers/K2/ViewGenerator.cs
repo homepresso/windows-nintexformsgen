@@ -118,13 +118,341 @@ namespace K2SmartObjectGenerator
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"    List view '{listViewName}' generation failed: {ex.Message} (item view still created)");
+                // K2's AutoGenerator can't build list views on SharePoint-backed SmartObjects
+                // (CreateDefaultEvents looks up CRUD methods by name). Fall back to a hand-built minimal
+                // list view that depends only on the SmartObject's list method.
+                Console.WriteLine($"    List view '{listViewName}' AutoGenerator failed ({ex.Message}); building minimal list view manually");
+                listOk = GenerateSpListViewManual(listViewName, childSmoName, viewCategory);
             }
 
+            // Always register with the (intended) list-view name — never null (the registry uses it as a key).
             SmartObjectViewRegistry.RegisterRepeatingSectionViews(formName, $"{infopathViewName}_{sectionName}",
-                itemViewName, listOk ? listViewName : null, childSmoName);
+                itemViewName, listViewName, childSmoName);
 
             return (itemViewName, listOk ? listViewName : "(list failed)", gridRow == int.MaxValue ? 9999 : gridRow);
+        }
+
+        private static readonly HashSet<string> ListViewSystemFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "ContentType","ContentTypeId","_UIVersionString","Author","Author_Value","Editor","Editor_Value",
+            "FileLeafRef","Folder","LinkFilename","LinkToItem","Created","Modified","ComplianceAssetId",
+            "Attachments","SharePoint_TimeZone","Version","ID","ParentID","Parent_ID",
+            "Parent_x0020_Item","Parent_x0020_Item_Value"
+        };
+
+        private static bool IsListSystemField(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return true;
+            if (name.StartsWith("K2_Int_", StringComparison.OrdinalIgnoreCase)) return true;
+            if (name.StartsWith("_", StringComparison.Ordinal)) return true;
+            return ListViewSystemFields.Contains(name);
+        }
+
+        private static string DecodeSpName(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            return System.Text.RegularExpressions.Regex.Replace(s, "_x([0-9A-Fa-f]{4})_",
+                m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+        }
+
+        private static string MapPropTypeToViewDataType(SourceCode.SmartObjects.Authoring.PropertyDefinitionType t)
+        {
+            switch (t)
+            {
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.Memo: return "Memo";
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.Number:
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.Autonumber: return "Number";
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.Decimal: return "Decimal";
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.YesNo: return "YesNo";
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.DateTime: return "DateTime";
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.Date: return "Date";
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.Time: return "Time";
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.HyperLink: return "Hyperlink";
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.File:
+                case SourceCode.SmartObjects.Authoring.PropertyDefinitionType.Image: return "File";
+                default: return "Text";
+            }
+        }
+
+        /// <summary>
+        /// Builds and deploys a MINIMAL read-only K2 list view bound to an existing SmartObject — used
+        /// for SharePoint-backed SmartObjects where K2's AutoGenerator fails. Depends only on the
+        /// SmartObject's "list" method (no CRUD/toolbar events). Returns true on success.
+        /// </summary>
+        public bool GenerateSpListViewManual(string listViewName, string smoName, string categoryPath)
+        {
+            try
+            {
+                var smoDef = GetCachedSmartObjectDefinition(smoName);
+                string smoGuid = smoDef.Guid.ToString();
+                string smoDisplay = smoName;
+
+                string listMethod = null, listMethodDisp = null;
+                foreach (SourceCode.SmartObjects.Authoring.SmartMethodDefinition m in smoDef.Methods)
+                {
+                    if (m.Type == SourceCode.SmartObjects.Authoring.MethodDefinitionType.list)
+                    {
+                        listMethod = m.Name;
+                        listMethodDisp = string.IsNullOrEmpty(m.DisplayName) ? m.Name : m.DisplayName;
+                        break;
+                    }
+                }
+                if (string.IsNullOrEmpty(listMethod))
+                {
+                    Console.WriteLine($"    [ManualList] no 'list' method on '{smoName}' - cannot build list view");
+                    return false;
+                }
+
+                var cols = new List<(string Name, string Disp, string DataType)>();
+                foreach (SourceCode.SmartObjects.Authoring.SmartPropertyDefinition p in smoDef.Properties)
+                {
+                    string pn = p.Name;
+                    if (string.IsNullOrEmpty(pn) || IsListSystemField(pn)) continue;
+                    string disp = DecodeSpName(pn);
+                    cols.Add((pn, disp, MapPropTypeToViewDataType(p.Type)));
+                }
+                if (cols.Count == 0)
+                {
+                    Console.WriteLine($"    [ManualList] no data columns on '{smoName}' - cannot build list view");
+                    return false;
+                }
+
+                string xml = BuildListViewXml(listViewName, smoGuid, smoName, smoDisplay, listMethod, listMethodDisp, cols);
+
+                using (FormsManager fm = new FormsManager())
+                {
+                    fm.CreateConnection();
+                    fm.Connection.Open(_connectionManager.ConnectionString.ConnectionString);
+                    DeleteExistingView(fm, listViewName);
+                    fm.DeployViews(xml, categoryPath, true);
+                }
+                Console.WriteLine($"    [ManualList] deployed '{listViewName}' bound to '{smoName}' ({cols.Count} cols, method '{listMethod}')");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    [ManualList] failed for '{listViewName}': {ex.Message}");
+                return false;
+            }
+        }
+
+        private string BuildListViewXml(string viewName, string smoGuid, string smoName, string smoDisplay,
+            string listMethod, string listMethodDisp, List<(string Name, string Disp, string DataType)> cols)
+        {
+            var doc = new XmlDocument();
+            XmlElement root = doc.CreateElement("SourceCode.Forms");
+            root.SetAttribute("Version", "31");
+            doc.AppendChild(root);
+            XmlElement views = doc.CreateElement("Views");
+            root.AppendChild(views);
+
+            string viewGuid = Guid.NewGuid().ToString();
+            XmlElement view = doc.CreateElement("View");
+            view.SetAttribute("ID", viewGuid);
+            view.SetAttribute("Type", "List");
+            view.SetAttribute("IsGenerated", "False");
+            view.SetAttribute("RenderVersion", "3");
+            views.AppendChild(view);
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, view, "Name", viewName);
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, view, "DisplayName", viewName);
+
+            // Pre-mint GUIDs.
+            string tableGuid = Guid.NewGuid().ToString();
+            string headerRowGuid = Guid.NewGuid().ToString();
+            string displayRowGuid = Guid.NewGuid().ToString();
+            string sourceGuid = Guid.NewGuid().ToString();
+            var colInfos = cols.Select(c => new
+            {
+                c.Name, c.Disp, c.DataType,
+                FieldGuid = Guid.NewGuid().ToString(),
+                ColGuid = Guid.NewGuid().ToString(),
+                HdrCtrlGuid = Guid.NewGuid().ToString(),
+                DataCtrlGuid = Guid.NewGuid().ToString(),
+                HdrCellGuid = Guid.NewGuid().ToString(),
+                DataCellGuid = Guid.NewGuid().ToString()
+            }).ToList();
+
+            // ── Controls ──
+            XmlElement controls = doc.CreateElement("Controls");
+            view.AppendChild(controls);
+
+            // View control with the list method binding.
+            XmlElement viewCtrl = doc.CreateElement("Control");
+            viewCtrl.SetAttribute("ID", viewGuid);
+            viewCtrl.SetAttribute("Type", "View");
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, viewCtrl, "Name", viewName);
+            XmlElement viewProps = doc.CreateElement("Properties");
+            AddSimpleProp(doc, viewProps, "ControlName", viewName);
+            AddSimpleProp(doc, viewProps, "ListEditable", "none");
+            AddFullProp(doc, viewProps, "DefaultMethod", listMethodDisp, listMethod, listMethod);
+            viewCtrl.AppendChild(viewProps);
+            controls.AppendChild(viewCtrl);
+
+            // List table.
+            XmlElement tableCtrl = doc.CreateElement("Control");
+            tableCtrl.SetAttribute("ID", tableGuid);
+            tableCtrl.SetAttribute("Type", "ListTable");
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, tableCtrl, "Name", "Body List Table");
+            XmlElement tableProps = doc.CreateElement("Properties");
+            AddSimpleProp(doc, tableProps, "ControlName", "Body List Table");
+            tableCtrl.AppendChild(tableProps);
+            controls.AppendChild(tableCtrl);
+
+            // Header + display row controls.
+            controls.AppendChild(MakeRowControl(doc, headerRowGuid, "Header Row", "Header"));
+            controls.AppendChild(MakeRowControl(doc, displayRowGuid, "Display Row", "Display"));
+
+            int colCount = colInfos.Count;
+            int pct = Math.Max(1, 100 / colCount);
+            foreach (var ci in colInfos)
+            {
+                // Column control.
+                XmlElement colCtrl = doc.CreateElement("Control");
+                colCtrl.SetAttribute("ID", ci.ColGuid);
+                colCtrl.SetAttribute("Type", "Column");
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, colCtrl, "Name", ci.Disp + " Column");
+                XmlElement colProps = doc.CreateElement("Properties");
+                AddSimpleProp(doc, colProps, "ControlName", ci.Disp + " Column");
+                AddSimpleProp(doc, colProps, "Size", pct + "%");
+                colCtrl.AppendChild(colProps);
+                controls.AppendChild(colCtrl);
+
+                // Header label control.
+                XmlElement hdr = doc.CreateElement("Control");
+                hdr.SetAttribute("ID", ci.HdrCtrlGuid);
+                hdr.SetAttribute("FieldID", ci.FieldGuid);
+                hdr.SetAttribute("Type", "Label");
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, hdr, "Name", ci.Disp + " Label");
+                XmlElement hdrProps = doc.CreateElement("Properties");
+                AddSimpleProp(doc, hdrProps, "ControlName", ci.Disp + " Label");
+                AddSimpleProp(doc, hdrProps, "LiteralVal", "False");
+                AddFullProp(doc, hdrProps, "Field", ci.Disp, ci.Name, ci.FieldGuid);
+                AddSimpleProp(doc, hdrProps, "Text", ci.Disp);
+                hdr.AppendChild(hdrProps);
+                controls.AppendChild(hdr);
+
+                // Data label control.
+                XmlElement data = doc.CreateElement("Control");
+                data.SetAttribute("ID", ci.DataCtrlGuid);
+                data.SetAttribute("FieldID", ci.FieldGuid);
+                data.SetAttribute("Type", "DataLabel");
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, data, "Name", ci.Disp + " Data Label");
+                XmlElement dataProps = doc.CreateElement("Properties");
+                AddSimpleProp(doc, dataProps, "ControlName", ci.Disp + " Data Label");
+                AddSimpleProp(doc, dataProps, "DataType", ci.DataType);
+                AddFullProp(doc, dataProps, "Field", ci.Disp, ci.Disp, ci.FieldGuid);
+                AddSimpleProp(doc, dataProps, "LiteralVal", "false");
+                data.AppendChild(dataProps);
+                controls.AppendChild(data);
+            }
+
+            // ── Canvas ──
+            XmlElement canvas = doc.CreateElement("Canvas");
+            view.AppendChild(canvas);
+            XmlElement sections = doc.CreateElement("Sections");
+            canvas.AppendChild(sections);
+            XmlElement section = doc.CreateElement("Section");
+            section.SetAttribute("ID", Guid.NewGuid().ToString());
+            section.SetAttribute("Type", "Body");
+            sections.AppendChild(section);
+            XmlElement grid = doc.CreateElement("Control");
+            grid.SetAttribute("ID", tableGuid);
+            grid.SetAttribute("LayoutType", "Grid");
+            section.AppendChild(grid);
+            XmlElement columnsEl = doc.CreateElement("Columns");
+            grid.AppendChild(columnsEl);
+            foreach (var ci in colInfos)
+            {
+                XmlElement col = doc.CreateElement("Column");
+                col.SetAttribute("ID", ci.ColGuid);
+                col.SetAttribute("Size", pct + "%");
+                columnsEl.AppendChild(col);
+            }
+            XmlElement rowsEl = doc.CreateElement("Rows");
+            grid.AppendChild(rowsEl);
+            rowsEl.AppendChild(MakeCanvasRow(doc, headerRowGuid, colInfos.Select(c => (c.HdrCellGuid, c.HdrCtrlGuid))));
+            rowsEl.AppendChild(MakeCanvasRow(doc, displayRowGuid, colInfos.Select(c => (c.DataCellGuid, c.DataCtrlGuid))));
+
+            // ── Sources ──
+            XmlElement sourcesEl = doc.CreateElement("Sources");
+            view.AppendChild(sourcesEl);
+            XmlElement source = doc.CreateElement("Source");
+            source.SetAttribute("ID", sourceGuid);
+            source.SetAttribute("SourceType", "Object");
+            source.SetAttribute("SourceID", smoGuid);
+            source.SetAttribute("SourceName", smoName);
+            source.SetAttribute("SourceDisplayName", smoDisplay);
+            source.SetAttribute("ContextType", "Primary");
+            source.SetAttribute("ContextID", smoGuid);
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, source, "Name", smoDisplay);
+            XmlElement fieldsEl = doc.CreateElement("Fields");
+            source.AppendChild(fieldsEl);
+            foreach (var ci in colInfos)
+            {
+                XmlElement f = doc.CreateElement("Field");
+                f.SetAttribute("ID", ci.FieldGuid);
+                f.SetAttribute("Type", "ObjectProperty");
+                f.SetAttribute("DataType", ci.DataType);
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, f, "Name", ci.Disp);
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, f, "FieldName", ci.Name);
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, f, "FieldDisplayName", ci.Disp);
+                fieldsEl.AppendChild(f);
+            }
+            sourcesEl.AppendChild(source);
+
+            // Empty Events (data loads via DefaultMethod; no CRUD events to break).
+            view.AppendChild(doc.CreateElement("Events"));
+
+            return doc.OuterXml;
+        }
+
+        private static XmlElement MakeRowControl(XmlDocument doc, string id, string name, string template)
+        {
+            XmlElement row = doc.CreateElement("Control");
+            row.SetAttribute("ID", id);
+            row.SetAttribute("Type", "Row");
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, row, "Name", name);
+            XmlElement props = doc.CreateElement("Properties");
+            AddSimpleProp(doc, props, "ControlName", name);
+            AddSimpleProp(doc, props, "Template", template);
+            row.AppendChild(props);
+            return row;
+        }
+
+        private static XmlElement MakeCanvasRow(XmlDocument doc, string rowId, IEnumerable<(string CellId, string CtrlId)> cells)
+        {
+            XmlElement row = doc.CreateElement("Row");
+            row.SetAttribute("ID", rowId);
+            XmlElement cellsEl = doc.CreateElement("Cells");
+            row.AppendChild(cellsEl);
+            foreach (var (cellId, ctrlId) in cells)
+            {
+                XmlElement cell = doc.CreateElement("Cell");
+                cell.SetAttribute("ID", cellId);
+                XmlElement c = doc.CreateElement("Control");
+                c.SetAttribute("ID", ctrlId);
+                cell.AppendChild(c);
+                cellsEl.AppendChild(cell);
+            }
+            return row;
+        }
+
+        private static void AddSimpleProp(XmlDocument doc, XmlElement props, string name, string value)
+        {
+            XmlElement p = doc.CreateElement("Property");
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, p, "Name", name);
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, p, "Value", value);
+            props.AppendChild(p);
+        }
+
+        private static void AddFullProp(XmlDocument doc, XmlElement props, string name, string display, string nameValue, string value)
+        {
+            XmlElement p = doc.CreateElement("Property");
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, p, "Name", name);
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, p, "DisplayValue", display);
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, p, "NameValue", nameValue);
+            K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, p, "Value", value);
+            props.AppendChild(p);
         }
 
         private string DetermineSegmentPosition(ViewSegment segment, List<ViewSegment> allSegments)

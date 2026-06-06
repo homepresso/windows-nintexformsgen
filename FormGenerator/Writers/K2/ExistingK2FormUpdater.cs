@@ -253,13 +253,24 @@ namespace K2SmartObjectGenerator
                 }
 
                 // Phase B step 1: generate the item/list view pairs bound to the mapped child SmartObjects.
+                List<(string Section, string ItemView, string ListView, int GridRow)> generatedPairs = null;
                 try
                 {
-                    GenerateRepeatingSectionViews(mapping, viewsArray, dataArray, infoPathDef, explicitFieldMap, sectionMappings, smoGen, result);
+                    generatedPairs = GenerateRepeatingSectionViews(mapping, viewsArray, dataArray, infoPathDef, explicitFieldMap, sectionMappings, smoGen, result);
                 }
                 catch (Exception ex)
                 {
                     _log($"  [RepeatingSections] view-pair generation failed (continuing): {ex.Message}");
+                }
+
+                // Phase B step 2: insert the generated pairs into the existing form as new areas.
+                try
+                {
+                    InsertRepeatingPairsIntoForm(formsManager, mapping, generatedPairs);
+                }
+                catch (Exception ex)
+                {
+                    _log($"  [FormInsert] failed (continuing): {ex.Message}");
                 }
             }
             finally
@@ -324,11 +335,13 @@ namespace K2SmartObjectGenerator
         /// from the per-section mapping (bind to an existing SmartObject, or create a SmartBox child if
         /// flagged), then generate + deploy an item/list view pair bound to it.
         /// </summary>
-        private void GenerateRepeatingSectionViews(K2ExistingFormMapping mapping, JArray viewsArray, JArray dataArray,
+        private List<(string Section, string ItemView, string ListView, int GridRow)> GenerateRepeatingSectionViews(
+            K2ExistingFormMapping mapping, JArray viewsArray, JArray dataArray,
             InfoPathFormDefinition infoPathDef, IDictionary<string, string> explicitFieldMap,
             IDictionary<string, K2ExistingSectionMapping> sectionMappings,
             SmartObjectGenerator smoGen, UpdateResult result)
         {
+            var pairs = new List<(string Section, string ItemView, string ListView, int GridRow)>();
             string formName = NameSanitizer.SanitizeSmartObjectName(infoPathDef?.FormName ?? mapping.K2FormName);
             string targetFolder = _config.Form?.TargetFolder ?? "Generated";
             string viewCategory = $"{targetFolder}\\{formName}\\Views";
@@ -446,6 +459,7 @@ namespace K2SmartObjectGenerator
                         var res = vg.GenerateChildSectionViewPair(formName, ipViewName, sectionName, childSmoName,
                             sectionArray, dataArray ?? new JArray(), viewCategory);
                         result.ViewsUpdated += 2;
+                        pairs.Add((sectionName, res.ItemView, res.ListView, res.GridRow));
                         _log($"  [RepeatingSections] '{sectionName}' → child '{childSmoName}': item '{res.ItemView}' + list '{res.ListView}' generated (gridRow {res.GridRow})");
                     }
                     catch (Exception ex)
@@ -454,6 +468,102 @@ namespace K2SmartObjectGenerator
                     }
                 }
             }
+
+            return pairs;
+        }
+
+        /// <summary>
+        /// Phase B step 2: insert each generated item/list view pair into the existing K2 form as new
+        /// areas (after the main view), so the repeating sections appear on the form. Fail-safe.
+        /// </summary>
+        private void InsertRepeatingPairsIntoForm(FormsManager fm, K2ExistingFormMapping mapping,
+            List<(string Section, string ItemView, string ListView, int GridRow)> pairs)
+        {
+            if (pairs == null || pairs.Count == 0) { _log("  [FormInsert] no pairs to insert"); return; }
+
+            string formXml;
+            try { formXml = fm.GetFormDefinition(mapping.K2FormGuid); }
+            catch (Exception ex) { _log($"  [FormInsert] could not read form: {ex.Message}"); return; }
+            if (string.IsNullOrEmpty(formXml)) { _log("  [FormInsert] empty form definition"); return; }
+
+            var doc = new XmlDocument();
+            try { doc.LoadXml(formXml); } catch (Exception ex) { _log($"  [FormInsert] form XML parse failed: {ex.Message}"); return; }
+
+            var panels = doc.SelectSingleNode("//Panels");
+            var form = panels?.ParentNode as XmlElement;
+            var controls = form?.SelectSingleNode("Controls") as XmlElement;
+            var areas = panels?.SelectSingleNode("Panel/Areas") as XmlElement;
+            if (controls == null || areas == null) { _log("  [FormInsert] form Controls/Areas not found - cannot insert"); return; }
+
+            // Resolve view GUIDs and build the insertion list: list view then item view per section, ordered by grid row.
+            var toInsert = new List<(string ViewName, string ViewGuid)>();
+            foreach (var p in pairs.OrderBy(p => p.GridRow))
+            {
+                foreach (var vn in new[] { p.ListView, p.ItemView })
+                {
+                    if (string.IsNullOrEmpty(vn) || vn == "(list failed)") continue;
+                    string vguid = null;
+                    try { vguid = fm.GetView(vn)?.Guid.ToString(); } catch { }
+                    if (string.IsNullOrEmpty(vguid)) { _log($"  [FormInsert] could not resolve view GUID for '{vn}' - skipping"); continue; }
+                    if (areas.SelectSingleNode($".//Item[@ViewID='{vguid}']") != null) { _log($"  [FormInsert] '{vn}' already on form"); continue; }
+                    toInsert.Add((vn, vguid));
+                }
+            }
+            if (toInsert.Count == 0) { _log("  [FormInsert] nothing new to insert"); return; }
+
+            // Insert after the first existing area (the main view area) so sections sit below the main fields.
+            XmlNode anchor = areas.SelectSingleNode("Area");
+            foreach (var v in toInsert)
+            {
+                string areaGuid = Guid.NewGuid().ToString();
+                string areaItemGuid = Guid.NewGuid().ToString();
+
+                controls.AppendChild(MakeFormControlDef(doc, areaGuid, "Area", "Area_" + v.ViewName));
+                controls.AppendChild(MakeFormControlDef(doc, areaItemGuid, "AreaItem", v.ViewName));
+
+                var areaEl = doc.CreateElement("Area");
+                areaEl.SetAttribute("ID", areaGuid);
+                var itemsEl = doc.CreateElement("Items");
+                var itemEl = doc.CreateElement("Item");
+                itemEl.SetAttribute("ID", areaItemGuid);
+                itemEl.SetAttribute("ViewID", v.ViewGuid);
+                itemEl.SetAttribute("ViewName", v.ViewName);
+                itemEl.SetAttribute("ViewDisplayName", v.ViewName);
+                AddChild(doc, itemEl, "Name", v.ViewName);
+                AddChild(doc, itemEl, "DisplayName", v.ViewName);
+                itemsEl.AppendChild(itemEl);
+                areaEl.AppendChild(itemsEl);
+
+                if (anchor != null) { areas.InsertAfter(areaEl, anchor); anchor = areaEl; }
+                else areas.AppendChild(areaEl);
+            }
+
+            try
+            {
+                try { fm.CheckOutForm(mapping.K2FormGuid); } catch { }
+                fm.DeployForms(doc.OuterXml, true);
+                _log($"  [FormInsert] inserted {toInsert.Count} view area(s) into form '{mapping.K2FormDisplayName}'");
+            }
+            catch (Exception ex)
+            {
+                _log($"  [FormInsert] form deploy failed: {ex.Message}");
+                try { fm.UndoFormCheckOut(mapping.K2FormGuid); } catch { }
+            }
+        }
+
+        private static XmlElement MakeFormControlDef(XmlDocument doc, string id, string type, string name)
+        {
+            var c = doc.CreateElement("Control");
+            c.SetAttribute("ID", id);
+            c.SetAttribute("Type", type);
+            AddChild(doc, c, "Name", name);
+            var props = doc.CreateElement("Properties");
+            var prop = doc.CreateElement("Property");
+            AddChild(doc, prop, "Name", "ControlName");
+            AddChild(doc, prop, "Value", name);
+            props.AppendChild(prop);
+            c.AppendChild(props);
+            return c;
         }
 
         private static List<JObject> GetSectionDataFields(JArray dataArray, string sectionName)
