@@ -191,6 +191,17 @@ namespace K2SmartObjectGenerator
                         try { formsManager.UndoViewCheckOut(view.Guid); } catch { }
                     }
                 }
+
+                // ── Phase B groundwork: detect repeating sections and dump the existing form XML ──
+                // so the item/list-pair insertion can be implemented against the real form schema.
+                try
+                {
+                    InspectRepeatingSectionsAndForm(formsManager, mapping, viewsArray, infoPathDef);
+                }
+                catch (Exception ex)
+                {
+                    _log($"  [UpdateExisting] repeating-section inspection failed (continuing): {ex.Message}");
+                }
             }
             finally
             {
@@ -198,6 +209,55 @@ namespace K2SmartObjectGenerator
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Phase B groundwork: logs the InfoPath repeating sections (and the child SmartObject name
+        /// we'd bind/create per the naming convention) and dumps the existing K2 form's XML so the
+        /// item/list view-pair insertion can be built against the real form schema.
+        /// </summary>
+        private void InspectRepeatingSectionsAndForm(FormsManager formsManager, K2ExistingFormMapping mapping,
+            JArray viewsArray, InfoPathFormDefinition infoPathDef)
+        {
+            // Repeating sections from the InfoPath JSON (controls with a RepeatingSectionName).
+            var sections = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (JObject view in (viewsArray?.OfType<JObject>() ?? Enumerable.Empty<JObject>()))
+            {
+                foreach (JObject c in ((view["Controls"] as JArray)?.OfType<JObject>() ?? Enumerable.Empty<JObject>()))
+                {
+                    string sec = c["RepeatingSectionName"]?.Value<string>();
+                    bool isRep = c["IsInRepeatingSection"]?.Value<bool>() ?? false;
+                    if (string.IsNullOrWhiteSpace(sec)) continue;
+                    if (!isRep && !string.Equals(c["Type"]?.Value<string>(), "RepeatingTable", StringComparison.OrdinalIgnoreCase)) continue;
+                    sections.TryGetValue(sec, out int n);
+                    sections[sec] = n + 1;
+                }
+            }
+
+            string formName = NameSanitizer.SanitizeSmartObjectName(infoPathDef?.FormName ?? mapping.K2FormName);
+            if (sections.Count == 0)
+                _log("  [RepeatingSections] none detected in the InfoPath form");
+            else
+                foreach (var s in sections)
+                    _log($"  [RepeatingSections] '{s.Key}' ({s.Value} control(s)) → child SmartObject would be '{formName}_{NameSanitizer.SanitizeSmartObjectName(s.Key)}'");
+
+            // Dump the existing form XML for offline schema inspection (mirrors the view dump).
+            try
+            {
+                string formXml = formsManager.GetFormDefinition(mapping.K2FormGuid);
+                if (!string.IsNullOrEmpty(formXml))
+                {
+                    string dumpDir = Path.Combine(Path.GetTempPath(), "FormGenerator_K2Views");
+                    Directory.CreateDirectory(dumpDir);
+                    string path = Path.Combine(dumpDir, "_FORM_" + Regex.Replace(mapping.K2FormName ?? "form", "[^A-Za-z0-9_.-]", "_") + ".xml");
+                    File.WriteAllText(path, formXml);
+                    _log($"  [RepeatingSections] dumped existing form XML ({formXml.Length} chars) → {path}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log($"  [RepeatingSections] could not dump form XML: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -374,7 +434,7 @@ namespace K2SmartObjectGenerator
                                ?? newDoc.SelectSingleNode("//Control[@LayoutType='Grid']")) as XmlElement;
                 var newRows = newGrid?.SelectSingleNode("Rows") as XmlElement;
                 var newEvents = newDoc.SelectSingleNode("//View/Events") as XmlElement;
-                if (newControls == null) { _log($"    [View {viewName}] preserve: rebuilt Controls missing - skipped"); return; }
+                if (newControls == null || newRows == null) { _log($"    [View {viewName}] preserve: rebuilt Controls/Rows missing - skipped"); return; }
 
                 // 1) Replace rebuilt Sources with the original (keeps the SmartObject source element +
                 //    method bindings the buttons reference; rebuilt controls use existing field IDs).
@@ -383,65 +443,52 @@ namespace K2SmartObjectGenerator
                 if (origSources != null && newSources?.ParentNode != null)
                     newSources.ParentNode.ReplaceChild(newDoc.ImportNode(origSources, true), newSources);
 
-                // 2) Preserved controls: buttons + auto-generated controls.
+                // 2) Preserved controls: buttons + auto-generated controls (keep document order).
                 var preserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var nameById = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var buttonCtrls = new List<XmlElement>();
+                var hiddenCtrls = new List<XmlElement>();
                 foreach (XmlElement c in origDoc.SelectNodes("//View/Controls/Control")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
                 {
                     string id = c.GetAttribute("ID");
                     if (string.IsNullOrEmpty(id)) continue;
-                    nameById[id] = ReaderChildText(c, "Name");
                     bool isButton = string.Equals(c.GetAttribute("Type"), "Button", StringComparison.OrdinalIgnoreCase);
                     bool autoGen = string.Equals(c.SelectSingleNode("Properties/Property[Name='AutoGenerated']/Value")?.InnerText, "true", StringComparison.OrdinalIgnoreCase);
-                    if (isButton || autoGen) preserved.Add(id);
+                    if (isButton) { buttonCtrls.Add(c); preserved.Add(id); }
+                    else if (autoGen) { hiddenCtrls.Add(c); preserved.Add(id); }
                 }
                 if (preserved.Count == 0) { _log($"    [View {viewName}] preserve: no buttons/auto-generated controls found"); return; }
 
-                // 3) Original canvas rows containing a preserved control (or spacer rows).
-                var origGrid = (origDoc.SelectSingleNode("//View/Canvas//Control[@LayoutType='Grid']")
-                                ?? origDoc.SelectSingleNode("//Control[@LayoutType='Grid']")) as XmlElement;
-                var origRows = origGrid?.SelectSingleNode("Rows");
-                var rowsToCarry = new List<XmlElement>();
-                var carryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (XmlElement row in origRows?.SelectNodes("Row")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
-                {
-                    bool hasPreserved = (row.SelectNodes(".//Control[@ID]")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
-                        .Any(rc => preserved.Contains(rc.GetAttribute("ID")));
-                    string rowId = row.GetAttribute("ID");
-                    nameById.TryGetValue(rowId ?? string.Empty, out var rowName);
-                    bool isSpacer = (rowName ?? string.Empty).StartsWith("space", StringComparison.OrdinalIgnoreCase);
-                    if (!hasPreserved && !isSpacer) continue;
-
-                    rowsToCarry.Add(row);
-                    if (!string.IsNullOrEmpty(rowId)) carryIds.Add(rowId);
-                    foreach (XmlElement cell in row.SelectNodes("Cells/Cell")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
-                    {
-                        string cellId = cell.GetAttribute("ID");
-                        if (!string.IsNullOrEmpty(cellId)) carryIds.Add(cellId);
-                        foreach (XmlElement cc in cell.SelectNodes("Control")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
-                        {
-                            string ccId = cc.GetAttribute("ID");
-                            if (!string.IsNullOrEmpty(ccId)) carryIds.Add(ccId);
-                        }
-                    }
-                }
-                foreach (var p in preserved) carryIds.Add(p);
-
-                // 4) Carry control definitions (rows, cells, buttons, hidden controls).
+                // 3) Carry the button + hidden control definitions into the rebuilt <Controls>.
                 int ctlCount = 0;
-                foreach (XmlElement c in origDoc.SelectNodes("//View/Controls/Control")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
+                foreach (var c in buttonCtrls.Concat(hiddenCtrls))
                 {
                     string id = c.GetAttribute("ID");
-                    if (string.IsNullOrEmpty(id) || !carryIds.Contains(id)) continue;
                     if (newControls.SelectSingleNode($"Control[@ID='{id}']") != null) continue;
                     newControls.AppendChild(newDoc.ImportNode(c, true));
                     ctlCount++;
                 }
 
-                // 5) Carry the rows into the rebuilt grid (after the data rows).
-                int rowCount = 0;
-                if (newRows != null)
-                    foreach (var row in rowsToCarry) { newRows.AppendChild(newDoc.ImportNode(row, true)); rowCount++; }
+                // 4) Build ONE fresh button row so the buttons stay side by side (one right-aligned
+                //    cell spanning all columns, with both buttons inline). Hidden controls ride along.
+                int colCount = newGrid?.SelectNodes("Columns/Column")?.Count ?? 1;
+                if (colCount < 1) colCount = 1;
+                string rowId = Guid.NewGuid().ToString();
+                string cellId = Guid.NewGuid().ToString();
+                newControls.AppendChild(CreateLayoutControlDef(newDoc, rowId, "Row", "Buttons Row", false));
+                newControls.AppendChild(CreateLayoutControlDef(newDoc, cellId, "Cell", "Buttons Cell", true));
+
+                var rowEl = newDoc.CreateElement("Row");
+                rowEl.SetAttribute("ID", rowId);
+                var cellsEl = newDoc.CreateElement("Cells");
+                var cellEl = newDoc.CreateElement("Cell");
+                cellEl.SetAttribute("ID", cellId);
+                if (colCount > 1) cellEl.SetAttribute("ColumnSpan", colCount.ToString());
+                foreach (var c in buttonCtrls.Concat(hiddenCtrls))
+                    cellEl.AppendChild(ControlRef(newDoc, c.GetAttribute("ID")));
+                cellsEl.AppendChild(cellEl);
+                rowEl.AppendChild(cellsEl);
+                newRows.AppendChild(rowEl);
+                int rowCount = 1;
 
                 // 6) Carry events whose triggering control is a preserved control (button OnClick, etc.).
                 int evtCount = 0;
@@ -462,6 +509,47 @@ namespace K2SmartObjectGenerator
             {
                 _log($"    [View {viewName}] button preservation failed (continuing): {ex.Message}");
             }
+        }
+
+        private static XmlElement CreateLayoutControlDef(XmlDocument doc, string id, string type, string name, bool alignRight)
+        {
+            var c = doc.CreateElement("Control");
+            c.SetAttribute("ID", id);
+            c.SetAttribute("Type", type);
+            AddChild(doc, c, "Name", name);
+            AddChild(doc, c, "DisplayName", name);
+            if (alignRight)
+            {
+                var styles = doc.CreateElement("Styles");
+                var style = doc.CreateElement("Style");
+                style.SetAttribute("IsDefault", "True");
+                var text = doc.CreateElement("Text");
+                AddChild(doc, text, "Align", "Right");
+                style.AppendChild(text);
+                styles.AppendChild(style);
+                c.AppendChild(styles);
+            }
+            var props = doc.CreateElement("Properties");
+            var prop = doc.CreateElement("Property");
+            AddChild(doc, prop, "Name", "ControlName");
+            AddChild(doc, prop, "Value", name);
+            props.AppendChild(prop);
+            c.AppendChild(props);
+            return c;
+        }
+
+        private static XmlElement ControlRef(XmlDocument doc, string id)
+        {
+            var e = doc.CreateElement("Control");
+            e.SetAttribute("ID", id);
+            return e;
+        }
+
+        private static void AddChild(XmlDocument doc, XmlElement parent, string name, string value)
+        {
+            var e = doc.CreateElement(name);
+            e.InnerText = value ?? string.Empty;
+            parent.AppendChild(e);
         }
 
         // ── Field-mapping support: read the existing form's data controls for the mapping UI ──
