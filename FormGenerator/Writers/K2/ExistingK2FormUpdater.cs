@@ -11,6 +11,7 @@ using K2SmartObjectGenerator.Models;
 using K2SmartObjectGenerator.Utilities;
 using FormGenerator.Analyzers.Infopath;
 using FormGenerator.Services;
+using SourceCode.SmartObjects.Management;
 using SourceCode.Forms.Management;
 
 namespace K2SmartObjectGenerator
@@ -51,7 +52,8 @@ namespace K2SmartObjectGenerator
             InfoPathFormDefinition infoPathDef,
             string jsonContent,
             bool createSmartBoxLookups,
-            IDictionary<string, string> explicitFieldMap = null)
+            IDictionary<string, string> explicitFieldMap = null,
+            IDictionary<string, K2ExistingSectionMapping> sectionMappings = null)
         {
             var result = new UpdateResult();
             if (mapping == null || infoPathDef == null)
@@ -154,17 +156,64 @@ namespace K2SmartObjectGenerator
                     }
                 }
 
+                // Retry once on a fresh FormsManager — the SmartObject operations during lookup creation
+                // can leave the form/view catalog query briefly returning nothing.
                 if (views.Count == 0)
                 {
-                    _log($"  [UpdateExisting] No views found on existing form '{mapping.K2FormDisplayName}' - nothing to modify");
-                    return result;
+                    _log("  [UpdateExisting] 0 views - retrying with a fresh FormsManager...");
+                    try { formsManager.Dispose(); } catch { }
+                    System.Threading.Thread.Sleep(1500);
+                    formsManager = new FormsManager();
+                    if (formsManager.Open(host, port))
+                    {
+                        try
+                        {
+                            var ex2 = formsManager.GetViewsForForm(mapping.K2FormGuid);
+                            if (ex2?.Views != null) views = ex2.Views.Cast<ViewInfo>().Where(v => v != null).ToList();
+                        }
+                        catch { }
+                        if (views.Count == 0)
+                        {
+                            try
+                            {
+                                var ids = formsManager.GetViewIdsForForm(mapping.K2FormGuid);
+                                if (ids != null) foreach (var id in ids) { try { var vi = formsManager.GetView(id); if (vi != null) views.Add(vi); } catch { } }
+                            }
+                            catch { }
+                        }
+                        _log($"  [UpdateExisting] retry resolved {views.Count} view(s)");
+                    }
                 }
 
-                _log($"  [UpdateExisting] Existing form '{mapping.K2FormDisplayName}' has {views.Count} view(s): {string.Join(", ", views.Select(v => v.Name))}");
+                // NOTE: do NOT bail when there are 0 existing views — the repeating-section item/list
+                // pair generation is independent of the existing form's views and must still run.
+                if (views.Count > 0)
+                    _log($"  [UpdateExisting] Existing form '{mapping.K2FormDisplayName}' has {views.Count} view(s): {string.Join(", ", views.Select(v => v.Name))}");
+                else
+                    _log("  [UpdateExisting] No existing views resolved - will still generate repeating-section views");
 
                 // Reconnect (lookup creation above disconnects) so dropdown lookup resolution works.
                 try { _connectionManager.Connect(); } catch { }
                 var smoGen = new SmartObjectGenerator(_connectionManager, _config);
+
+                // One-time: dump every existing view's XML so list-view structure can be templated.
+                try
+                {
+                    string dumpDir = Path.Combine(Path.GetTempPath(), "FormGenerator_K2Views");
+                    Directory.CreateDirectory(dumpDir);
+                    foreach (var v in views)
+                    {
+                        try
+                        {
+                            string vx = formsManager.GetViewDefinition(v.Guid);
+                            if (string.IsNullOrEmpty(vx)) continue;
+                            string vp = Path.Combine(dumpDir, "_VIEW_" + Regex.Replace(v.Name ?? v.Guid.ToString(), "[^A-Za-z0-9_.-]", "_") + ".xml");
+                            File.WriteAllText(vp, vx);
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
 
                 foreach (var view in views)
                 {
@@ -201,6 +250,16 @@ namespace K2SmartObjectGenerator
                 catch (Exception ex)
                 {
                     _log($"  [UpdateExisting] repeating-section inspection failed (continuing): {ex.Message}");
+                }
+
+                // Phase B step 1: generate the item/list view pairs bound to the mapped child SmartObjects.
+                try
+                {
+                    GenerateRepeatingSectionViews(mapping, viewsArray, dataArray, infoPathDef, explicitFieldMap, sectionMappings, smoGen, result);
+                }
+                catch (Exception ex)
+                {
+                    _log($"  [RepeatingSections] view-pair generation failed (continuing): {ex.Message}");
                 }
             }
             finally
@@ -257,6 +316,185 @@ namespace K2SmartObjectGenerator
             catch (Exception ex)
             {
                 _log($"  [RepeatingSections] could not dump form XML: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Phase B step 1: for each InfoPath repeating section, resolve the target child SmartObject
+        /// from the per-section mapping (bind to an existing SmartObject, or create a SmartBox child if
+        /// flagged), then generate + deploy an item/list view pair bound to it.
+        /// </summary>
+        private void GenerateRepeatingSectionViews(K2ExistingFormMapping mapping, JArray viewsArray, JArray dataArray,
+            InfoPathFormDefinition infoPathDef, IDictionary<string, string> explicitFieldMap,
+            IDictionary<string, K2ExistingSectionMapping> sectionMappings,
+            SmartObjectGenerator smoGen, UpdateResult result)
+        {
+            string formName = NameSanitizer.SanitizeSmartObjectName(infoPathDef?.FormName ?? mapping.K2FormName);
+            string targetFolder = _config.Form?.TargetFolder ?? "Generated";
+            string viewCategory = $"{targetFolder}\\{formName}\\Views";
+
+            foreach (JObject ipView in (viewsArray?.OfType<JObject>() ?? Enumerable.Empty<JObject>()))
+            {
+                string ipViewName = (ipView["ViewName"]?.Value<string>() ?? "View").Replace(".xsl", "");
+                var ctrls = (ipView["Controls"] as JArray)?.OfType<JObject>() ?? Enumerable.Empty<JObject>();
+
+                var bySection = new Dictionary<string, List<JObject>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var c in ctrls)
+                {
+                    string sec = c["RepeatingSectionName"]?.Value<string>();
+                    if (string.IsNullOrWhiteSpace(sec)) continue;
+                    if (!(c["IsInRepeatingSection"]?.Value<bool>() ?? false)) continue;
+                    if (string.Equals(c["Type"]?.Value<string>(), "RepeatingTable", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!bySection.TryGetValue(sec, out var list)) { list = new List<JObject>(); bySection[sec] = list; }
+                    list.Add(c);
+                }
+
+                foreach (var kv in bySection)
+                {
+                    string sectionName = kv.Key;
+                    var sectionControls = kv.Value;
+
+                    string childSmoName = null;
+                    var fieldByControl = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                    K2ExistingSectionMapping secMap = null;
+                    sectionMappings?.TryGetValue(sectionName, out secMap);
+
+                    if (secMap != null)
+                    {
+                        foreach (var f in secMap.Fields) fieldByControl[f.Key] = f.Value;
+
+                        if (secMap.CreateIfMissing)
+                        {
+                            // Reuse the from-scratch path: create a SmartBox child SmartObject (works with
+                            // K2's list-view generator, unlike SharePoint-list SmartObjects).
+                            try
+                            {
+                                var sectionData = GetSectionDataFields(dataArray, sectionName);
+                                childSmoName = smoGen.EnsureChildSmartObject(formName, sectionName, sectionData, targetFolder);
+                                _log($"  [RepeatingSections] '{sectionName}': SmartBox child ready '{childSmoName}' (create-if-missing)");
+                                // Bind controls to the created columns (sanitized binding/name).
+                                fieldByControl.Clear();
+                                foreach (var c in sectionControls)
+                                {
+                                    string cname = c["Name"]?.Value<string>();
+                                    if (string.IsNullOrEmpty(cname)) continue;
+                                    string col = NameSanitizer.SanitizePropertyName(
+                                        NameSanitizer.ExtractFieldNameFromBinding(c["Binding"]?.Value<string>()) ?? cname);
+                                    if (!string.IsNullOrEmpty(col)) fieldByControl[cname] = col;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _log($"  [RepeatingSections] '{sectionName}': child SmartObject create failed: {ex.Message}");
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            childSmoName = secMap.SmoName;
+                        }
+                    }
+                    else if (explicitFieldMap != null && explicitFieldMap.Count > 0)
+                    {
+                        // Fallback: derive the child SmartObject from the SMO::smo::field map.
+                        var smoVotes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var c in sectionControls)
+                        {
+                            string cname = c["Name"]?.Value<string>();
+                            if (string.IsNullOrEmpty(cname)) continue;
+                            if (!explicitFieldMap.TryGetValue(cname, out var val) || string.IsNullOrEmpty(val)) continue;
+                            if (!val.StartsWith("SMO::", StringComparison.Ordinal)) continue;
+                            var parts = val.Substring("SMO::".Length).Split(new[] { "::" }, StringSplitOptions.None);
+                            if (parts.Length < 2) continue;
+                            smoVotes[parts[0]] = smoVotes.TryGetValue(parts[0], out var n) ? n + 1 : 1;
+                            fieldByControl[cname] = parts[1];
+                        }
+                        if (smoVotes.Count > 0) childSmoName = smoVotes.OrderByDescending(x => x.Value).First().Key;
+                    }
+
+                    if (string.IsNullOrEmpty(childSmoName))
+                    {
+                        _log($"  [RepeatingSections] '{sectionName}': no SmartObject mapping - skipping (use 'Map Sections')");
+                        continue;
+                    }
+
+                    // Binding bridge for the item view: InfoPath control keys -> child column.
+                    var inner = new Dictionary<string, FieldInfo>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var c in sectionControls)
+                    {
+                        string cname = c["Name"]?.Value<string>();
+                        if (cname == null || !fieldByControl.TryGetValue(cname, out var field) || string.IsNullOrEmpty(field)) continue;
+                        var fi = new FieldInfo
+                        {
+                            FieldGuid = Guid.NewGuid().ToString(),
+                            FieldName = field,
+                            DisplayName = field,
+                            DataType = MapInfoPathToK2DataType(c["Type"]?.Value<string>())
+                        };
+                        AddSmoKey(inner, cname, fi);
+                        AddSmoKey(inner, NameSanitizer.ExtractFieldNameFromBinding(c["Binding"]?.Value<string>()), fi);
+                        AddSmoKey(inner, field, fi);
+                    }
+
+                    var smoFieldMappings = new Dictionary<string, Dictionary<string, FieldInfo>> { [childSmoName] = inner };
+
+                    try
+                    {
+                        var vg = new ViewGenerator(_connectionManager, smoFieldMappings, smoGen, _config, infoPathDef);
+                        var sectionArray = new JArray(sectionControls.Cast<object>().ToArray());
+                        var res = vg.GenerateChildSectionViewPair(formName, ipViewName, sectionName, childSmoName,
+                            sectionArray, dataArray ?? new JArray(), viewCategory);
+                        result.ViewsUpdated += 2;
+                        _log($"  [RepeatingSections] '{sectionName}' → child '{childSmoName}': item '{res.ItemView}' + list '{res.ListView}' generated (gridRow {res.GridRow})");
+                    }
+                    catch (Exception ex)
+                    {
+                        _log($"  [RepeatingSections] '{sectionName}' view-pair generation failed: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        private static List<JObject> GetSectionDataFields(JArray dataArray, string sectionName)
+        {
+            var list = new List<JObject>();
+            foreach (JObject d in (dataArray?.OfType<JObject>() ?? Enumerable.Empty<JObject>()))
+            {
+                if (!(d["IsRepeating"]?.Value<bool>() ?? false)) continue;
+                if (!string.Equals(d["RepeatingSectionName"]?.Value<string>(), sectionName, StringComparison.OrdinalIgnoreCase)) continue;
+                list.Add(d);
+            }
+            return list;
+        }
+
+        private static void AddSmoKey(Dictionary<string, FieldInfo> map, string raw, FieldInfo fi)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return;
+            string k = NameSanitizer.SanitizePropertyName(raw);
+            if (string.IsNullOrEmpty(k)) return;
+            map[k] = fi;
+            map[k.ToUpperInvariant()] = fi;
+        }
+
+        private static int GridRowOf(string gridPos)
+        {
+            if (string.IsNullOrEmpty(gridPos)) return int.MaxValue;
+            var m = Regex.Match(gridPos, "\\d+");
+            return m.Success && int.TryParse(m.Value, out int r) ? r : int.MaxValue;
+        }
+
+        private static string MapInfoPathToK2DataType(string ipType)
+        {
+            switch ((ipType ?? string.Empty).ToLowerInvariant())
+            {
+                case "datepicker":
+                case "date": return "DateTime";
+                case "checkbox": return "YesNo";
+                case "number":
+                case "decimal": return "Number";
+                case "richtext": return "Memo";
+                default: return "Text";
             }
         }
 
@@ -362,13 +600,41 @@ namespace K2SmartObjectGenerator
 
             var smoFieldMappings = new Dictionary<string, Dictionary<string, FieldInfo>> { [smoName] = fieldMap };
 
+            // Compute the grid-row range of each repeating section so we can keep the main view clean
+            // (repeating-section controls + their column labels belong in the item/list views).
+            int repMinRow = int.MaxValue, repMaxRow = int.MinValue;
+            foreach (JObject c in ipControls.OfType<JObject>())
+            {
+                bool inRep = (c["IsInRepeatingSection"]?.Value<bool>() ?? false)
+                             || string.Equals(c["Type"]?.Value<string>(), "RepeatingTable", StringComparison.OrdinalIgnoreCase)
+                             || !string.IsNullOrWhiteSpace(c["RepeatingSectionName"]?.Value<string>());
+                if (!inRep) continue;
+                int r = GridRowOf(c["GridPosition"]?.Value<string>());
+                if (r == int.MaxValue) continue;
+                if (r < repMinRow) repMinRow = r;
+                if (r > repMaxRow) repMaxRow = r;
+            }
+
             // Keep non-data controls (labels/layout); keep data controls that resolve to a field; drop the rest.
+            // Exclude everything belonging to (or sitting within) a repeating section.
             var filtered = new JArray();
             int kept = 0, dropped = 0;
             foreach (JObject c in ipControls.OfType<JObject>())
             {
                 string binding = c["Binding"]?.Value<string>();
                 string name = c["Name"]?.Value<string>();
+
+                bool inRepeating = (c["IsInRepeatingSection"]?.Value<bool>() ?? false)
+                    || string.Equals(c["Type"]?.Value<string>(), "RepeatingTable", StringComparison.OrdinalIgnoreCase)
+                    || !string.IsNullOrWhiteSpace(c["RepeatingSectionName"]?.Value<string>());
+                if (!inRepeating && repMinRow != int.MaxValue)
+                {
+                    // A label sitting on a row owned by a repeating section is a column header for it.
+                    int r = GridRowOf(c["GridPosition"]?.Value<string>());
+                    if (r >= repMinRow && r <= repMaxRow) inRepeating = true;
+                }
+                if (inRepeating) { dropped++; continue; }
+
                 bool isData = !string.IsNullOrWhiteSpace(binding);
                 if (!isData) { filtered.Add(c.DeepClone()); continue; }
 
@@ -580,6 +846,7 @@ namespace K2SmartObjectGenerator
                     catch { }
                 }
 
+                string mainSmoName = null;
                 foreach (var v in views)
                 {
                     string xml;
@@ -588,6 +855,14 @@ namespace K2SmartObjectGenerator
 
                     var doc = new XmlDocument();
                     try { doc.LoadXml(xml); } catch { continue; }
+
+                    // Capture the primary SmartObject name (used to find sibling/child list SmartObjects).
+                    if (string.IsNullOrEmpty(mainSmoName))
+                    {
+                        var ps = (doc.SelectSingleNode("//Sources/Source[@ContextType='Primary']")
+                                  ?? doc.SelectSingleNode("//Sources/Source[@SourceType='Object']")) as XmlElement;
+                        mainSmoName = ps?.GetAttribute("SourceName");
+                    }
 
                     var fdisp = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     var fint = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -623,8 +898,148 @@ namespace K2SmartObjectGenerator
                         });
                     }
                 }
+
+                // Surface sibling/child SmartObject columns (repeating-section lists on the same site)
+                // so the field-mapping dialog can map repeating InfoPath controls to them.
+                try { AppendSiblingSmartObjectFields(host, port, mainSmoName, result); } catch { }
             }
             finally { try { fm.Dispose(); } catch { } }
+            return result;
+        }
+
+        private static readonly HashSet<string> SpSystemFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "ContentType","ContentTypeId","_UIVersionString","Author","Author_Value","Editor","Editor_Value",
+            "FileLeafRef","Folder","LinkFilename","LinkToItem","Created","Modified","ComplianceAssetId",
+            "Attachments","SharePoint_TimeZone","Version","ID","ParentID","Parent_ID"
+        };
+
+        private static bool IsSystemSpField(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return true;
+            if (name.StartsWith("K2_Int_", StringComparison.OrdinalIgnoreCase)) return true;
+            if (name.StartsWith("_", StringComparison.Ordinal)) return true;
+            return SpSystemFields.Contains(name);
+        }
+
+        /// <summary>
+        /// Adds the columns of sibling/child SmartObjects (other SharePoint lists on the same site,
+        /// i.e. the repeating-section lists) to the field-mapping options. Each is given a synthetic
+        /// ControlId "SMO::{smoName}::{field}" so it is distinguishable from a real view control.
+        /// Best-effort and capped.
+        /// </summary>
+        private static void AppendSiblingSmartObjectFields(string host, uint port, string mainSmoName, List<K2FieldDescriptor> result)
+        {
+            if (string.IsNullOrWhiteSpace(mainSmoName)) return;
+
+            // Prefix up to and including "_Lists_" → all SharePoint-list SmartObjects on the site.
+            string prefix = mainSmoName;
+            int idx = mainSmoName.IndexOf("_Lists_", StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0) prefix = mainSmoName.Substring(0, idx + "_Lists_".Length);
+
+            var conn = new ServerConnectionManager(host, port);
+            try
+            {
+                conn.Connect();
+                var mgmt = conn.ManagementServer;
+                var explorer = mgmt.GetSmartObjectsStartsWith(prefix);
+                var infos = (explorer?.SmartObjects?.Cast<SmartObjectInfo>() ?? Enumerable.Empty<SmartObjectInfo>())
+                    .Where(s => s != null && !string.Equals(s.Name, mainSmoName, StringComparison.OrdinalIgnoreCase))
+                    .Take(50)
+                    .ToList();
+
+                foreach (var info in infos)
+                {
+                    SmartObjectInfo full;
+                    try { full = mgmt.GetSmartObjectInfo(info.Guid); } catch { full = info; }
+                    foreach (SmartPropertyInfo p in (full?.Properties?.Cast<SmartPropertyInfo>() ?? Enumerable.Empty<SmartPropertyInfo>()))
+                    {
+                        string sysName = p?.Name;                       // exact internal column (used for binding)
+                        if (string.IsNullOrEmpty(sysName) || IsSystemSpField(sysName)) continue;
+                        string disp = p.Metadata?.DisplayName;          // friendly name (shown + auto-matched)
+                        if (string.IsNullOrWhiteSpace(disp)) disp = sysName;
+                        result.Add(new K2FieldDescriptor
+                        {
+                            ViewName = info.Name,
+                            ControlId = $"SMO::{info.Name}::{sysName}",  // store the EXACT internal column
+                            ControlName = disp,
+                            FieldId = info.Guid.ToString(),
+                            FieldName = sysName,
+                            FieldDisplayName = disp,
+                            Type = p.Type.ToString()
+                        });
+                    }
+                }
+            }
+            catch { /* best-effort */ }
+            finally { try { conn.Disconnect(); } catch { } }
+        }
+
+        /// <summary>
+        /// Lists all SmartObject names on the K2 server (for the per-section SmartObject picker).
+        /// Lightweight (names only). Optional prefix narrows to a site's lists.
+        /// </summary>
+        public static List<string> LoadAllSmartObjectNames(string host, uint port, string prefix = null)
+        {
+            var names = new List<string>();
+            var conn = new ServerConnectionManager(host, port);
+            try
+            {
+                conn.Connect();
+                var mgmt = conn.ManagementServer;
+                var explorer = string.IsNullOrWhiteSpace(prefix) ? mgmt.GetSmartObjects() : mgmt.GetSmartObjectsStartsWith(prefix);
+                foreach (SmartObjectInfo s in (explorer?.SmartObjects?.Cast<SmartObjectInfo>() ?? Enumerable.Empty<SmartObjectInfo>()))
+                    if (!string.IsNullOrEmpty(s?.Name)) names.Add(s.Name);
+            }
+            catch { /* best-effort */ }
+            finally { try { conn.Disconnect(); } catch { } }
+            return names.Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+        }
+
+        /// <summary>
+        /// Loads a single SmartObject's real columns (friendly name shown, exact internal name stored
+        /// in ControlId as "SMO::{smo}::{sysname}"). Used for field-mapping a section to a chosen SmartObject.
+        /// </summary>
+        public static List<K2FieldDescriptor> LoadSmartObjectColumns(string host, uint port, string smoName)
+        {
+            var result = new List<K2FieldDescriptor>();
+            if (string.IsNullOrWhiteSpace(smoName)) return result;
+            var conn = new ServerConnectionManager(host, port);
+            try
+            {
+                conn.Connect();
+                var mgmt = conn.ManagementServer;
+                var explorer = mgmt.GetSmartObjects(smoName);
+                var info = (explorer?.SmartObjects?.Cast<SmartObjectInfo>() ?? Enumerable.Empty<SmartObjectInfo>())
+                    .FirstOrDefault(s => string.Equals(s?.Name, smoName, StringComparison.OrdinalIgnoreCase))
+                    ?? (explorer?.SmartObjects?.Cast<SmartObjectInfo>() ?? Enumerable.Empty<SmartObjectInfo>()).FirstOrDefault();
+                if (info != null)
+                {
+                    SmartObjectInfo full;
+                    try { full = mgmt.GetSmartObjectInfo(info.Guid); } catch { full = info; }
+                    foreach (SmartPropertyInfo p in (full?.Properties?.Cast<SmartPropertyInfo>() ?? Enumerable.Empty<SmartPropertyInfo>()))
+                    {
+                        string sysName = p?.Name;
+                        if (string.IsNullOrEmpty(sysName) || IsSystemSpField(sysName)) continue;
+                        string disp = p.Metadata?.DisplayName;
+                        if (string.IsNullOrWhiteSpace(disp)) disp = sysName;
+                        result.Add(new K2FieldDescriptor
+                        {
+                            ViewName = smoName,
+                            ControlId = $"SMO::{smoName}::{sysName}",
+                            ControlName = disp,
+                            FieldId = info.Guid.ToString(),
+                            FieldName = sysName,
+                            FieldDisplayName = disp,
+                            Type = p.Type.ToString()
+                        });
+                    }
+                }
+            }
+            catch { /* best-effort */ }
+            finally { try { conn.Disconnect(); } catch { } }
             return result;
         }
 

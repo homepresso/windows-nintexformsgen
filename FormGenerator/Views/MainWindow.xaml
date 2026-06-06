@@ -2464,7 +2464,14 @@
                                                             Style="{StaticResource ModernButton}"
                                                             Width="180"
                                                             Height="40"
+                                                            Margin="0,0,10,0"
                                                             Click="MapK2Fields_Click"/>
+                                                    <Button Name="MapK2SectionsButton"
+                                                            Content="🗂 Map Sections"
+                                                            Style="{StaticResource ModernButton}"
+                                                            Width="180"
+                                                            Height="40"
+                                                            Click="MapK2Sections_Click"/>
                                                 </StackPanel>
 
                                                 <TextBlock Name="SelectedK2FormTextBlock"

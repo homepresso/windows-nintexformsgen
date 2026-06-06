@@ -185,6 +185,33 @@ namespace K2SmartObjectGenerator
         }
 
         /// <summary>
+        /// Ensures a SmartBox child SmartObject exists for a repeating section (creating + publishing it
+        /// from the section's data fields if missing), and returns its name. Used by the "modify existing
+        /// K2 form" path so repeating-section item/list views bind to a SmartBox child (which K2's
+        /// list-view generator supports), reusing the same creation logic as from-scratch generation.
+        /// Does not manage the connection lifecycle (the caller owns it).
+        /// </summary>
+        public string EnsureChildSmartObject(string formName, string sectionName, List<JObject> sectionFields, string targetFolder)
+        {
+            string childSmoName = $"{formName}_{NameSanitizer.SanitizeSmartObjectName(sectionName)}";
+            _connectionManager.Connect();
+
+            if (CheckSmartObjectExists(childSmoName))
+                return childSmoName;
+
+            var publishSmo = new SmartObjectDefinitionsPublish();
+            SmartObjectDefinition childSmo = CreateChildSmartObject(childSmoName, sectionFields ?? new List<JObject>(),
+                formName, formName, targetFolder);
+            publishSmo.SmartObjects.Add(childSmo);
+            PublishSmartObjectsAsync(publishSmo).GetAwaiter().GetResult();
+
+            System.Threading.Thread.Sleep(1500); // brief indexing delay
+            try { RefreshSmartObjectGuidFromServerAsync(childSmoName).GetAwaiter().GetResult(); } catch { }
+
+            return childSmoName;
+        }
+
+        /// <summary>
         /// Creates and populates ONLY the consolidated SmartBox lookup SmartObject(s) for a form,
         /// without creating the main/child SmartObjects. Used by the "modify existing K2 form"
         /// path where the main SmartObjects already exist but lookups may be missing.

@@ -38,7 +38,9 @@
       "PowerShell(\"stopped\")",
       "Bash(git log *)",
       "Bash(git config *)",
-      "Bash(git var *)"
+      "Bash(git var *)",
+      "Bash(ls -1 _VIEW_*.xml)",
+      "Bash(wc -c _VIEW_AttachmentsList*.xml)"
     ],
     "deny": [],
     "ask": [],

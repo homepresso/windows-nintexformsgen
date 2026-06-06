@@ -1144,7 +1144,21 @@ namespace FormGenerator.Views
                     ExistingFieldMappings = useExisting && _mainWindow._k2FieldMappings != null
                         ? new Dictionary<string, Dictionary<string, string>>(_mainWindow._k2FieldMappings, StringComparer.OrdinalIgnoreCase)
                         : new Dictionary<string, Dictionary<string, string>>(),
-                    CreateSmartBoxLookups = _mainWindow.CreateSmartBoxLookupsCheckBox.IsChecked == true
+                    CreateSmartBoxLookups = _mainWindow.CreateSmartBoxLookupsCheckBox.IsChecked == true,
+                    ExistingSectionMappings = (useExisting && _mainWindow._k2SectionMappings != null)
+                        ? _mainWindow._k2SectionMappings.ToDictionary(
+                            kv => kv.Key,
+                            kv => kv.Value.ToDictionary(
+                                s => s.Key,
+                                s => new K2ExistingSectionMapping
+                                {
+                                    SmoName = s.Value.SmoName,
+                                    CreateIfMissing = s.Value.CreateIfMissing,
+                                    Fields = new Dictionary<string, string>(s.Value.Fields, StringComparer.OrdinalIgnoreCase)
+                                },
+                                StringComparer.OrdinalIgnoreCase),
+                            StringComparer.OrdinalIgnoreCase)
+                        : new Dictionary<string, Dictionary<string, K2ExistingSectionMapping>>()
                 };
 
                 // Generate K2 artifacts

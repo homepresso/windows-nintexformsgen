@@ -380,6 +380,10 @@ namespace FormGenerator.Services
                             if (mappedKey != null && request.ExistingFieldMappings != null)
                                 request.ExistingFieldMappings.TryGetValue(mappedKey, out fieldMap);
 
+                            Dictionary<string, K2ExistingSectionMapping> sectionMap = null;
+                            if (mappedKey != null && request.ExistingSectionMappings != null)
+                                request.ExistingSectionMappings.TryGetValue(mappedKey, out sectionMap);
+
                             _logger.LogSubSection($"Update Existing K2 Form ({formDisplayName} → {existingMapping.K2FormDisplayName})");
                             _logger.Info($"Mapped to existing K2 form '{existingMapping.K2FormDisplayName}' [{existingMapping.K2FormGuid}] - modifying in place (no SmartObject/View/Form creation)");
                             OnProgressUpdate(new K2GenerationProgress { Stage = $"Update Existing ({formDisplayName})", PercentComplete = formBasePercent + (formRangePercent * 50 / 100) });
@@ -389,7 +393,7 @@ namespace FormGenerator.Services
                                 // Route updater diagnostics through OnStatusUpdate so they are ALWAYS
                                 // visible in the live log (independent of the verbose-logging level).
                                 var updater = new ExistingK2FormUpdater(_connectionManager, _config, msg => OnStatusUpdate(msg));
-                                var upd = await updater.UpdateAsync(existingMapping, mappedInfoPathDef, jsonContent, request.CreateSmartBoxLookups, fieldMap);
+                                var upd = await updater.UpdateAsync(existingMapping, mappedInfoPathDef, jsonContent, request.CreateSmartBoxLookups, fieldMap, sectionMap);
 
                                 updatedViewsTotal += upd.ViewsUpdated;
                                 createdLookupsTotal += upd.LookupsCreated;
@@ -1033,6 +1037,23 @@ namespace FormGenerator.Services
         /// from InfoPath dropdown options and wire matching dropdown controls to them.
         /// </summary>
         public bool CreateSmartBoxLookups { get; set; }
+
+        /// <summary>
+        /// Per-repeating-section SmartObject choices, keyed by the same file-name key as
+        /// <see cref="FormDefinitions"/> → section name → mapping (which SmartObject to bind/create,
+        /// and InfoPath control → column).
+        /// </summary>
+        public Dictionary<string, Dictionary<string, K2ExistingSectionMapping>> ExistingSectionMappings { get; set; } = new();
+    }
+
+    /// <summary>
+    /// A repeating section's target SmartObject (existing or to-create) and its field mapping.
+    /// </summary>
+    public class K2ExistingSectionMapping
+    {
+        public string SmoName { get; set; }                 // chosen child SmartObject (existing or to-create)
+        public bool CreateIfMissing { get; set; }           // create a SmartBox child if it doesn't exist
+        public Dictionary<string, string> Fields { get; set; } = new();   // InfoPath control name → column (internal)
     }
 
     /// <summary>

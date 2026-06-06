@@ -56,6 +56,77 @@ namespace K2SmartObjectGenerator
             ViewControlMappings = new Dictionary<string, Dictionary<string, ControlMapping>>();
         }
 
+        /// <summary>
+        /// Phase B: generates and deploys a repeating-section item+list view pair bound to an existing
+        /// child SmartObject. The caller must have constructed this ViewGenerator with an
+        /// _smoFieldMappings[childSmoName] populated so the item view's controls bind to the child fields.
+        /// Returns the created view names and the InfoPath grid row of the section.
+        /// </summary>
+        public (string ItemView, string ListView, int GridRow) GenerateChildSectionViewPair(
+            string formName, string infopathViewName, string sectionName, string childSmoName,
+            JArray sectionControls, JArray dataArray, string viewCategory)
+        {
+            string normalizedSectionName = NormalizeRepeatingSectionName(sectionName);
+            string itemViewName = $"{formName}_{infopathViewName}_{normalizedSectionName}_Item";
+            string listViewName = $"{formName}_{infopathViewName}_{normalizedSectionName}_List";
+
+            int gridRow = int.MaxValue;
+            foreach (var ctrl in sectionControls.OfType<JObject>())
+            {
+                string gp = ctrl["GridPosition"]?.Value<string>();
+                if (!string.IsNullOrEmpty(gp)) { int r = ExtractRowNumber(gp); if (r < gridRow) gridRow = r; }
+            }
+            if (gridRow != int.MaxValue)
+            {
+                ViewGridPositions[itemViewName] = gridRow;
+                ViewGridPositions[listViewName] = gridRow;
+            }
+
+            // Item (data-entry) view bound to the child SmartObject.
+            GenerateXmlBasedView(itemViewName, childSmoName, sectionControls, dataArray, viewCategory,
+                new JArray(), new JObject(), true, infopathViewName, 0, sectionName);
+
+            // List view — drive it from the child SmartObject's REAL columns (read from its
+            // definition), NOT InfoPath-derived names. Passing names that aren't actual SmartObject
+            // property sysnames makes K2's view generator throw "Key could not be found".
+            // The item view is already deployed, so a list-view failure must not abort the pair.
+            bool listOk = false;
+            try
+            {
+                var realFields = new List<string>();
+                try
+                {
+                    var smoDef = GetCachedSmartObjectDefinition(childSmoName);
+                    foreach (SourceCode.SmartObjects.Authoring.SmartPropertyDefinition p in smoDef.Properties)
+                    {
+                        string pn = p?.Name;
+                        if (string.IsNullOrEmpty(pn)) continue;
+                        if (pn.Equals("ID", StringComparison.OrdinalIgnoreCase) ||
+                            pn.Equals("ParentID", StringComparison.OrdinalIgnoreCase) ||
+                            pn.Equals("Parent_ID", StringComparison.OrdinalIgnoreCase)) continue;
+                        realFields.Add(pn);
+                    }
+                }
+                catch (Exception exDef)
+                {
+                    Console.WriteLine($"    Could not read child SmartObject '{childSmoName}' columns: {exDef.Message}");
+                }
+
+                GenerateListViewUsingAPI(listViewName, childSmoName, viewCategory,
+                    realFields.Count > 0 ? realFields : null, infopathViewName, sectionName);
+                listOk = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    List view '{listViewName}' generation failed: {ex.Message} (item view still created)");
+            }
+
+            SmartObjectViewRegistry.RegisterRepeatingSectionViews(formName, $"{infopathViewName}_{sectionName}",
+                itemViewName, listOk ? listViewName : null, childSmoName);
+
+            return (itemViewName, listOk ? listViewName : "(list failed)", gridRow == int.MaxValue ? 9999 : gridRow);
+        }
+
         private string DetermineSegmentPosition(ViewSegment segment, List<ViewSegment> allSegments)
         {
             int segmentIndex = allSegments.IndexOf(segment);

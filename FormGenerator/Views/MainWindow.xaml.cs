@@ -54,6 +54,19 @@ namespace FormGenerator.Views
         internal readonly Dictionary<string, Dictionary<string, string>> _k2FieldMappings =
             new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
+        // Per-repeating-section SmartObject choices, keyed by file key → section name → mapping.
+        internal readonly Dictionary<string, Dictionary<string, K2SectionMapping>> _k2SectionMappings =
+            new Dictionary<string, Dictionary<string, K2SectionMapping>>(StringComparer.OrdinalIgnoreCase);
+
+        internal sealed class K2SectionMapping
+        {
+            public string SmoName { get; set; }                 // chosen child SmartObject (existing or to-create)
+            public bool CreateIfMissing { get; set; }           // create a SmartBox child if it doesn't exist
+            // InfoPath control name → child SmartObject column (internal/system name).
+            public Dictionary<string, string> Fields { get; set; } =
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
         // ComboBox item wrapper for the mapping dialog (Form == null means "do not map").
         private sealed class K2FormChoice
         {
@@ -973,7 +986,35 @@ namespace FormGenerator.Views
                 var label = new TextBlock { Text = ipDisplay, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0), TextTrimming = TextTrimming.CharacterEllipsis };
                 Grid.SetColumn(label, 0);
 
-                var combo = new ComboBox { ItemsSource = choices, SelectedIndex = 0, VerticalAlignment = VerticalAlignment.Center, MaxDropDownHeight = 300, ItemContainerStyle = comboItemStyle };
+                // Searchable, per-row filtered combo (the K2 field list can be large with child SmartObjects).
+                var view = new System.Windows.Data.ListCollectionView(choices);
+                string filterText = null;
+                view.Filter = item =>
+                {
+                    if (!(item is K2FieldChoice c) || string.IsNullOrEmpty(c.Display)) return false;
+                    if (string.IsNullOrWhiteSpace(filterText)) return true;
+                    if (choices.Any(x => string.Equals(x.Display, filterText, StringComparison.Ordinal))) return true;
+                    return c.Display.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+                };
+                var combo = new ComboBox
+                {
+                    ItemsSource = view,
+                    IsEditable = true,
+                    IsTextSearchEnabled = false,
+                    StaysOpenOnEdit = true,
+                    IsSynchronizedWithCurrentItem = false,
+                    SelectedIndex = 0,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    MaxDropDownHeight = 300,
+                    ItemContainerStyle = comboItemStyle
+                };
+                combo.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
+                    new TextChangedEventHandler((s, e) =>
+                    {
+                        filterText = (e.OriginalSource as TextBox)?.Text ?? combo.Text;
+                        view.Refresh();
+                        if (combo.IsKeyboardFocusWithin && !string.IsNullOrEmpty(filterText)) combo.IsDropDownOpen = true;
+                    }));
 
                 // Restore an existing mapping; otherwise auto-match by normalized name.
                 if (existing != null && existing.TryGetValue(ip.Name, out var savedId) && !string.IsNullOrEmpty(savedId))
@@ -1045,23 +1086,393 @@ namespace FormGenerator.Views
             UpdateStatus($"Saved {mapped} K2 field mapping(s)", MessageSeverity.Info);
         }
 
+        // ── Per-repeating-section SmartObject mapping (pick SmartObject, then field-map) ──
+
+        private sealed class SmoChoice
+        {
+            public string Display { get; set; }
+            public string Name { get; set; }      // SmartObject name; null for "create new" / "do not map"
+            public bool CreateNew { get; set; }
+            public override string ToString() => Display;
+        }
+
+        private List<(string Section, List<ControlDefinition> Controls)> GetRepeatingSectionsForMapping(InfoPathFormDefinition formDef)
+        {
+            var dict = new Dictionary<string, List<ControlDefinition>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in formDef.Views ?? new List<ViewDefinition>())
+                foreach (var c in v.Controls ?? new List<ControlDefinition>())
+                {
+                    if (c == null || string.IsNullOrWhiteSpace(c.Name)) continue;
+                    string sec = c.RepeatingSectionName;
+                    if (string.IsNullOrWhiteSpace(sec) || !c.IsInRepeatingSection) continue;
+                    if (string.Equals(c.Type, "RepeatingTable", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.Equals(c.Type, "Label", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!dict.TryGetValue(sec, out var list)) { list = new List<ControlDefinition>(); dict[sec] = list; }
+                    list.Add(c);
+                }
+            return dict.Select(kv => (kv.Key, kv.Value)).ToList();
+        }
+
+        private async void MapK2Sections_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_k2FormMappings == null || _k2FormMappings.Count == 0)
+                {
+                    MessageBox.Show("Map your InfoPath form(s) to existing K2 forms first using \"Map Existing Forms\".",
+                                    "No Form Mapping", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var serverName = (K2ServerTextBox.Text ?? string.Empty).Trim()
+                    .Replace("https://", "").Replace("http://", "");
+                if (string.IsNullOrEmpty(serverName)) serverName = "localhost";
+                uint port = 5555;
+                if (!string.IsNullOrWhiteSpace(K2PortTextBox.Text)) uint.TryParse(K2PortTextBox.Text.Trim(), out port);
+
+                MapK2SectionsButton.IsEnabled = false;
+                K2GenerationLog.Text += "Loading K2 SmartObjects for section mapping...\n";
+                var allSmoNames = await Task.Run(() => K2SmartObjectGenerator.ExistingK2FormUpdater.LoadAllSmartObjectNames(serverName, port));
+                K2GenerationLog.Text += $"  Found {allSmoNames.Count} SmartObject(s).\n";
+
+                foreach (var kv in _k2FormMappings.ToList())
+                {
+                    string fileKey = kv.Key;
+                    var mapping = kv.Value;
+                    if (!_allFormDefinitions.TryGetValue(fileKey, out var formDef) || formDef == null) continue;
+
+                    var sections = GetRepeatingSectionsForMapping(formDef);
+                    if (sections.Count == 0)
+                    {
+                        K2GenerationLog.Text += $"  '{mapping.InfoPathFormDisplay}': no repeating sections.\n";
+                        continue;
+                    }
+
+                    var picks = ShowSectionSmoPickerDialog(fileKey, mapping, sections, allSmoNames);
+                    if (picks == null) continue; // cancelled
+
+                    if (!_k2SectionMappings.TryGetValue(fileKey, out var secMap))
+                    {
+                        secMap = new Dictionary<string, K2SectionMapping>(StringComparer.OrdinalIgnoreCase);
+                        _k2SectionMappings[fileKey] = secMap;
+                    }
+
+                    int mappedSections = 0;
+                    foreach (var sec in sections)
+                    {
+                        if (!picks.TryGetValue(sec.Section, out var pick) || pick == null) continue;
+                        if (!pick.CreateNew && string.IsNullOrEmpty(pick.Name)) continue; // "do not map"
+
+                        var sm = new K2SectionMapping { SmoName = pick.Name, CreateIfMissing = pick.CreateNew };
+
+                        if (pick.CreateNew)
+                        {
+                            foreach (var c in sec.Controls)
+                                if (!string.IsNullOrWhiteSpace(c.Name)) sm.Fields[c.Name] = c.Name;
+                        }
+                        else
+                        {
+                            var cols = await Task.Run(() => K2SmartObjectGenerator.ExistingK2FormUpdater.LoadSmartObjectColumns(serverName, port, pick.Name));
+                            var fieldMap = ShowSectionFieldMappingDialog(sec.Section, pick.Name, sec.Controls, cols);
+                            if (fieldMap == null) continue; // cancelled this section
+                            sm.Fields = fieldMap;
+                        }
+
+                        secMap[sec.Section] = sm;
+                        mappedSections++;
+                    }
+
+                    K2GenerationLog.Text += $"  '{mapping.InfoPathFormDisplay}': mapped {mappedSections} of {sections.Count} section(s).\n";
+                }
+
+                UpdateStatus("Saved repeating-section SmartObject mappings", MessageSeverity.Info);
+            }
+            catch (Exception ex)
+            {
+                K2GenerationLog.Text += $"❌ Section mapping failed: {ex.Message}\n";
+                MessageBox.Show($"Section mapping failed:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                MapK2SectionsButton.IsEnabled = true;
+            }
+        }
+
+        // Stage 1: choose a SmartObject (existing or create-new) for each repeating section.
+        private Dictionary<string, SmoChoice> ShowSectionSmoPickerDialog(string fileKey, K2FormMapping mapping,
+            List<(string Section, List<ControlDefinition> Controls)> sections, List<string> allSmoNames)
+        {
+            var baseChoices = new List<SmoChoice>
+            {
+                new SmoChoice { Display = "➕ Create new SmartObject", Name = null, CreateNew = true },
+                new SmoChoice { Display = "— Do not map —", Name = null, CreateNew = false }
+            };
+            baseChoices.AddRange(allSmoNames.Select(n => new SmoChoice { Display = n, Name = n, CreateNew = false }));
+
+            _k2SectionMappings.TryGetValue(fileKey, out var existingSecMap);
+
+            var comboItemStyle = new Style(typeof(ComboBoxItem));
+            comboItemStyle.Setters.Add(new Setter(System.Windows.Controls.Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Left));
+
+            var rowPanel = new StackPanel { Margin = new Thickness(12, 4, 12, 4) };
+            var rows = new List<(string Section, ComboBox Combo)>();
+
+            foreach (var sec in sections)
+            {
+                var rowGrid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.6, GridUnitType.Star) });
+
+                var label = new TextBlock { Text = $"{sec.Section}  ({sec.Controls.Count} field(s))", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+                Grid.SetColumn(label, 0);
+
+                var view = new System.Windows.Data.ListCollectionView(baseChoices);
+                string filterText = null;
+                view.Filter = item =>
+                {
+                    if (!(item is SmoChoice c) || string.IsNullOrEmpty(c.Display)) return false;
+                    if (string.IsNullOrWhiteSpace(filterText)) return true;
+                    if (baseChoices.Any(x => string.Equals(x.Display, filterText, StringComparison.Ordinal))) return true;
+                    return c.Display.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+                };
+                var combo = new ComboBox
+                {
+                    ItemsSource = view,
+                    IsEditable = true,
+                    IsTextSearchEnabled = false,
+                    StaysOpenOnEdit = true,
+                    IsSynchronizedWithCurrentItem = false,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    MaxDropDownHeight = 320,
+                    ItemContainerStyle = comboItemStyle
+                };
+                combo.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
+                    new TextChangedEventHandler((s, ev) =>
+                    {
+                        filterText = (ev.OriginalSource as TextBox)?.Text ?? combo.Text;
+                        view.Refresh();
+                        if (combo.IsKeyboardFocusWithin && !string.IsNullOrEmpty(filterText)) combo.IsDropDownOpen = true;
+                    }));
+
+                // Default: restore prior choice, else best-match an existing SmartObject by section name, else create-new.
+                SmoChoice preset = null;
+                if (existingSecMap != null && existingSecMap.TryGetValue(sec.Section, out var prior) && prior != null)
+                {
+                    preset = prior.CreateIfMissing
+                        ? baseChoices.First(c => c.CreateNew)
+                        : baseChoices.FirstOrDefault(c => string.Equals(c.Name, prior.SmoName, StringComparison.OrdinalIgnoreCase));
+                }
+                if (preset == null)
+                {
+                    string secNorm = FieldNormalize(sec.Section);
+                    preset = baseChoices.FirstOrDefault(c => !c.CreateNew && c.Name != null
+                                 && FieldNormalize(c.Name).Contains(secNorm)
+                                 && !FieldNormalize(c.Name).Contains("ATTACHMENT"))
+                             ?? baseChoices.First(c => c.CreateNew);
+                }
+                combo.SelectedItem = preset;
+
+                Grid.SetColumn(combo, 1);
+                rowGrid.Children.Add(label);
+                rowGrid.Children.Add(combo);
+                rowPanel.Children.Add(rowGrid);
+                rows.Add((sec.Section, combo));
+            }
+
+            var header = new TextBlock
+            {
+                Text = $"Choose the K2 SmartObject for each repeating section on '{mapping.InfoPathFormDisplay}'. Pick an existing SmartObject to bind to, or “Create new” to generate one. {allSmoNames.Count} SmartObject(s).",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(12, 12, 12, 6)
+            };
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rowPanel };
+            var okButton = new Button { Content = "Next", Width = 120, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+            var cancelButton = new Button { Content = "Cancel", Width = 90, IsCancel = true };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12) };
+            buttons.Children.Add(okButton);
+            buttons.Children.Add(cancelButton);
+            var dock = new DockPanel();
+            DockPanel.SetDock(header, Dock.Top);
+            DockPanel.SetDock(buttons, Dock.Bottom);
+            dock.Children.Add(header);
+            dock.Children.Add(buttons);
+            dock.Children.Add(scroll);
+
+            var dialog = new Window
+            {
+                Title = $"Map Sections → {mapping.K2FormDisplayName}",
+                Width = 760,
+                Height = 480,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                Content = dock
+            };
+            okButton.Click += (s, ev) => { dialog.DialogResult = true; };
+            if (dialog.ShowDialog() != true) return null;
+
+            var result = new Dictionary<string, SmoChoice>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (section, combo) in rows)
+            {
+                var choice = combo.SelectedItem as SmoChoice;
+                if (choice == null && combo.Text != null)
+                    choice = baseChoices.FirstOrDefault(c => string.Equals(c.Display, combo.Text, StringComparison.OrdinalIgnoreCase));
+                result[section] = choice ?? baseChoices.First(c => c.CreateNew);
+            }
+            return result;
+        }
+
+        // Stage 2: map a section's InfoPath controls to the chosen SmartObject's real columns.
+        private Dictionary<string, string> ShowSectionFieldMappingDialog(string section, string smoName,
+            List<ControlDefinition> controls, List<K2SmartObjectGenerator.K2FieldDescriptor> columns)
+        {
+            var choices = new List<K2FieldChoice> { new K2FieldChoice { Display = "— Do not map —", Field = null } };
+            choices.AddRange(columns.Select(f => new K2FieldChoice { Display = f.Display, Field = f }));
+
+            var comboItemStyle = new Style(typeof(ComboBoxItem));
+            comboItemStyle.Setters.Add(new Setter(System.Windows.Controls.Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Left));
+
+            var rowPanel = new StackPanel { Margin = new Thickness(12, 4, 12, 4) };
+            var rows = new List<(string IpName, ComboBox Combo)>();
+
+            foreach (var ip in controls)
+            {
+                string ipDisplay = !string.IsNullOrWhiteSpace(ip.Label) ? $"{ip.Label}  ({ip.Name})" : ip.Name;
+                var rowGrid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
+                var label = new TextBlock { Text = ipDisplay, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+                Grid.SetColumn(label, 0);
+
+                var view = new System.Windows.Data.ListCollectionView(choices);
+                string filterText = null;
+                view.Filter = item =>
+                {
+                    if (!(item is K2FieldChoice c) || string.IsNullOrEmpty(c.Display)) return false;
+                    if (string.IsNullOrWhiteSpace(filterText)) return true;
+                    if (choices.Any(x => string.Equals(x.Display, filterText, StringComparison.Ordinal))) return true;
+                    return c.Display.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+                };
+                var combo = new ComboBox
+                {
+                    ItemsSource = view, IsEditable = true, IsTextSearchEnabled = false, StaysOpenOnEdit = true,
+                    IsSynchronizedWithCurrentItem = false, VerticalAlignment = VerticalAlignment.Center,
+                    MaxDropDownHeight = 300, ItemContainerStyle = comboItemStyle
+                };
+                combo.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
+                    new TextChangedEventHandler((s, ev) =>
+                    {
+                        filterText = (ev.OriginalSource as TextBox)?.Text ?? combo.Text;
+                        view.Refresh();
+                        if (combo.IsKeyboardFocusWithin && !string.IsNullOrEmpty(filterText)) combo.IsDropDownOpen = true;
+                    }));
+
+                var auto = AutoMatchField(ip, choices);
+                if (auto != null) combo.SelectedItem = auto;
+
+                Grid.SetColumn(combo, 1);
+                rowGrid.Children.Add(label);
+                rowGrid.Children.Add(combo);
+                rowPanel.Children.Add(rowGrid);
+                rows.Add((ip.Name, combo));
+            }
+
+            var header = new TextBlock
+            {
+                Text = $"Map section '{section}' fields (left) to columns of SmartObject '{smoName}' (right). {columns.Count} column(s).",
+                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12, 12, 12, 6)
+            };
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rowPanel };
+            var okButton = new Button { Content = "Save", Width = 120, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+            var cancelButton = new Button { Content = "Skip", Width = 90, IsCancel = true };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12) };
+            buttons.Children.Add(okButton);
+            buttons.Children.Add(cancelButton);
+            var dock = new DockPanel();
+            DockPanel.SetDock(header, Dock.Top);
+            DockPanel.SetDock(buttons, Dock.Bottom);
+            dock.Children.Add(header);
+            dock.Children.Add(buttons);
+            dock.Children.Add(scroll);
+
+            var dialog = new Window
+            {
+                Title = $"Map '{section}' → {smoName}",
+                Width = 760, Height = 520,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, Content = dock
+            };
+            okButton.Click += (s, ev) => { dialog.DialogResult = true; };
+            if (dialog.ShowDialog() != true) return null;
+
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (ipName, combo) in rows)
+                if (combo.SelectedItem is K2FieldChoice choice && choice.Field != null)
+                    map[ipName] = choice.Field.FieldName; // exact internal column name
+            return map;
+        }
+
         private static K2FieldChoice AutoMatchField(ControlDefinition ip, List<K2FieldChoice> choices)
         {
-            string n1 = FieldNormalize(ip.Name);
-            string n2 = FieldNormalize(ip.Label);
+            string ipName = FieldNormalize(ip.Name);
+            string ipLabel = FieldNormalize(ip.Label);
+            string ipLeaf = FieldNormalize(BindingLeafName(ip.Binding));
+
+            // Short token = label after the section prefix ("Discussion Item: Title" → "Title").
+            string shortLabel = ip.Label;
+            if (!string.IsNullOrEmpty(shortLabel) && shortLabel.Contains(":"))
+                shortLabel = shortLabel.Substring(shortLabel.LastIndexOf(':') + 1);
+            string ipShort = FieldNormalize(shortLabel);
+
+            // Section hint = RepeatingSectionName, else the label prefix before ":".
+            string sectionHint = FieldNormalize(ip.RepeatingSectionName);
+            if (string.IsNullOrEmpty(sectionHint) && !string.IsNullOrEmpty(ip.Label) && ip.Label.Contains(":"))
+                sectionHint = FieldNormalize(ip.Label.Substring(0, ip.Label.IndexOf(':')));
+
+            K2FieldChoice best = null;
+            int bestScore = 0;
             foreach (var c in choices)
             {
                 if (c.Field == null) continue;
-                var keys = new[]
+
+                string colDisp = FieldNormalize(c.Field.FieldDisplayName);
+                string colName = FieldNormalize(c.Field.FieldName);
+                string colCtrl = FieldStripSuffix(FieldNormalize(c.Field.ControlName));
+                string smo = FieldNormalize(c.Field.ViewName);
+                bool sectionRelated = !string.IsNullOrEmpty(sectionHint) && !string.IsNullOrEmpty(smo)
+                    && (smo.Contains(sectionHint) || sectionHint.Contains(smo));
+
+                int score = 0;
+                foreach (var col in new[] { colDisp, colName, colCtrl })
                 {
-                    FieldNormalize(c.Field.FieldDisplayName),
-                    FieldNormalize(c.Field.FieldName),
-                    FieldStripSuffix(FieldNormalize(c.Field.ControlName))
-                };
-                if (keys.Any(k => !string.IsNullOrEmpty(k) && (k == n1 || k == n2)))
-                    return c;
+                    if (string.IsNullOrEmpty(col) || col.Length < 2) continue;
+                    if (col == ipName || col == ipLabel || col == ipLeaf || col == ipShort)
+                        score = Math.Max(score, 100);
+                    else if (col.Length >= 3 && (ipName.EndsWith(col, StringComparison.Ordinal)
+                             || ipLabel.EndsWith(col, StringComparison.Ordinal)
+                             || ipLeaf.EndsWith(col, StringComparison.Ordinal)))
+                        score = Math.Max(score, 55);
+                    else if (ipShort.Length >= 3 && col.EndsWith(ipShort, StringComparison.Ordinal))
+                        score = Math.Max(score, 50);
+                }
+                if (score > 0 && sectionRelated) score += 30;
+
+                // Penalise sub-lists (e.g. "…_Attachments") so a non-attachment field maps to the
+                // real child list rather than its attachments sub-SmartObject.
+                bool smoIsAttachment = smo.Contains("ATTACHMENT");
+                bool ipIsAttachment = (ip.Type ?? string.Empty).IndexOf("attach", StringComparison.OrdinalIgnoreCase) >= 0
+                    || (ip.Label ?? string.Empty).IndexOf("attach", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (score > 0 && smoIsAttachment && !ipIsAttachment) score -= 40;
+
+                if (score > bestScore) { bestScore = score; best = c; }
             }
-            return null;
+
+            return bestScore >= 50 ? best : null;
+        }
+
+        private static string BindingLeafName(string binding)
+        {
+            if (string.IsNullOrEmpty(binding)) return null;
+            var parts = binding.Split(new[] { '/', '\\', ':' }, StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 0 ? parts[parts.Length - 1] : binding;
         }
 
         private static string FieldNormalize(string s)
