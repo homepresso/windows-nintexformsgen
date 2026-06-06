@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "r3WwZxoD76Y=",
+  "dgSpecHash": "HofmD9BWGjI=",
   "success": true,
-  "projectFilePath": "C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
+  "projectFilePath": "C:\\development\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\k2admin\\.nuget\\packages\\azure.core\\1.25.0\\azure.core.1.25.0.nupkg.sha512",
     "C:\\Users\\k2admin\\.nuget\\packages\\azure.identity\\1.7.0\\azure.identity.1.7.0.nupkg.sha512",
@@ -49,13 +49,13 @@
       "code": "NU1903",
       "level": "Warning",
       "message": "Package 'Microsoft.Data.SqlClient' 5.1.1 has a known high severity vulnerability, https://github.com/advisories/GHSA-98g6-xh36-x2p7",
-      "projectPath": "C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
+      "projectPath": "C:\\development\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
       "warningLevel": 1,
-      "filePath": "C:\\Users\\k2admin\\source\\repos\\homepresso\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
+      "filePath": "C:\\development\\windows-nintexformsgen\\FormGenerator\\FormGenerator.csproj",
       "libraryId": "Microsoft.Data.SqlClient",
       "targetGraphs": [
-        ".NETFramework,Version=v4.8",
-        ".NETFramework,Version=v4.8/win-x86"
+        "net48",
+        "net48/win-x86"
       ]
     }
   ]

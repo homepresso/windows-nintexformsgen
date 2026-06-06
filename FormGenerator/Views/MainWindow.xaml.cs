@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Collections.ObjectModel;
@@ -13,11 +13,13 @@ using Microsoft.Win32;
 using Newtonsoft.Json;
 
 using FormGenerator.Analyzers.Infopath;
-// using FormGenerator.Analyzers.InfoPath; // (Duplicate/typo namespace—remove if not needed)
+// using FormGenerator.Analyzers.InfoPath; // (Duplicate/typo namespace�remove if not needed)
 using FormGenerator.Core.Interfaces;
 using FormGenerator.Core.Models;
 using FormGenerator.Services;
 using FormGenerator.Analyzers.InfoPath;
+using SourceCode.Forms.Authoring;
+using SourceCode.Hosting.Client.BaseAPI;
 
 namespace FormGenerator.Views
 {
@@ -32,6 +34,33 @@ namespace FormGenerator.Views
         private FormAnalysisResult _currentAnalysis;
         internal Dictionary<string, FormAnalysisResult> _allAnalysisResults = new Dictionary<string, FormAnalysisResult>();
         internal Dictionary<string, InfoPathFormDefinition> _allFormDefinitions = new Dictionary<string, InfoPathFormDefinition>();
+
+        // Mappings from imported InfoPath forms (keyed by the _allFormDefinitions file-name key)
+        // to existing K2 forms selected via the "Map Existing Forms" dialog.
+        internal readonly Dictionary<string, K2FormMapping> _k2FormMappings =
+            new Dictionary<string, K2FormMapping>(StringComparer.OrdinalIgnoreCase);
+
+        internal sealed class K2FormMapping
+        {
+            public string InfoPathFormKey { get; set; }
+            public string InfoPathFormDisplay { get; set; }
+            public string K2FormName { get; set; }
+            public string K2FormDisplayName { get; set; }
+            public Guid K2FormGuid { get; set; }
+        }
+
+        // User-confirmed field mappings, keyed by the _allFormDefinitions file-name key.
+        // Inner map: InfoPath control name → existing K2 control ID.
+        internal readonly Dictionary<string, Dictionary<string, string>> _k2FieldMappings =
+            new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+        // ComboBox item wrapper for the mapping dialog (Form == null means "do not map").
+        private sealed class K2FormChoice
+        {
+            public string Display { get; set; }
+            public SourceCode.Forms.Management.FormInfo Form { get; set; }
+            public override string ToString() => Display;
+        }
 
         // Partial class handlers - initialized before InitializeComponent
         private MainWindowGenerationHandlers _generationHandlers;
@@ -70,7 +99,6 @@ namespace FormGenerator.Views
             WireUpEditingControls();
         }
 
-        #region Editing Controls Setup
 
         private void WireUpEditingControls()
         {
@@ -151,13 +179,13 @@ namespace FormGenerator.Views
 
             // Expand All
             var expandAllMenuItem = new MenuItem { Header = "Expand All" };
-            expandAllMenuItem.Icon = new TextBlock { Text = "⊞", FontSize = 14 };
+            expandAllMenuItem.Icon = new TextBlock { Text = "?", FontSize = 14 };
             expandAllMenuItem.Click += (s, e) => ExpandAllTreeItems(StructureTreeView.Items);
             contextMenu.Items.Add(expandAllMenuItem);
 
             // Collapse All
             var collapseAllMenuItem = new MenuItem { Header = "Collapse All" };
-            collapseAllMenuItem.Icon = new TextBlock { Text = "⊟", FontSize = 14 };
+            collapseAllMenuItem.Icon = new TextBlock { Text = "?", FontSize = 14 };
             collapseAllMenuItem.Click += (s, e) => CollapseAllTreeItems(StructureTreeView.Items);
             contextMenu.Items.Add(collapseAllMenuItem);
 
@@ -165,13 +193,13 @@ namespace FormGenerator.Views
 
             // Copy entire tree as JSON
             var copyTreeJsonMenuItem = new MenuItem { Header = "Copy Tree as JSON" };
-            copyTreeJsonMenuItem.Icon = new TextBlock { Text = "📋", FontSize = 14 };
+            copyTreeJsonMenuItem.Icon = new TextBlock { Text = "??", FontSize = 14 };
             copyTreeJsonMenuItem.Click += (s, e) => CopyTreeAsJson();
             contextMenu.Items.Add(copyTreeJsonMenuItem);
 
             // Export tree structure
             var exportTreeMenuItem = new MenuItem { Header = "Export Tree Structure..." };
-            exportTreeMenuItem.Icon = new TextBlock { Text = "📥", FontSize = 14 };
+            exportTreeMenuItem.Icon = new TextBlock { Text = "??", FontSize = 14 };
             exportTreeMenuItem.Click += (s, e) => ExportTreeStructure();
             contextMenu.Items.Add(exportTreeMenuItem);
         }
@@ -230,9 +258,7 @@ namespace FormGenerator.Views
             }
         }
 
-        #endregion
 
-        #region Selection Helpers (NEW)
 
         /// <summary>
         /// Returns the nearest ViewDefinition ancestor for the current selection,
@@ -261,9 +287,7 @@ namespace FormGenerator.Views
         }
 
 
-        #endregion
 
-        #region Edit Control Methods
 
         private void EditSelectedControl()
         {
@@ -457,9 +481,7 @@ namespace FormGenerator.Views
             return found;
         }
 
-        #endregion
 
-        #region File Management
 
         private void BrowseButton_Click(object sender, RoutedEventArgs e)
         {
@@ -576,9 +598,7 @@ namespace FormGenerator.Views
             }
         }
 
-        #endregion
 
-        #region Analysis
 
         private async void AnalyzeButton_Click(object sender, RoutedEventArgs e)
         {
@@ -709,9 +729,7 @@ namespace FormGenerator.Views
             }
         }
 
-        #endregion
 
-        #region Generation Tab Event Handlers (Delegates)
 
         // SQL Generation
         private async void TestSqlConnection_Click(object sender, RoutedEventArgs e)
@@ -752,9 +770,22 @@ namespace FormGenerator.Views
                 await _generationHandlers.TestK2Connection();
         }
 
-        private void BrowseK2Folder_Click(object sender, RoutedEventArgs e)
+        private async void BrowseK2Folder_Click(object sender, RoutedEventArgs e)
         {
-            _generationHandlers?.BrowseK2Folder();
+            if (_generationHandlers != null)
+                await _generationHandlers.BrowseK2Folder();
+        }
+
+        private async void GenerateSPCsv_Click(object sender, RoutedEventArgs e)
+        {
+            if (_generationHandlers != null)
+                await _generationHandlers.GenerateSharePointCsv();
+        }
+
+        private async void GenerateSPPowerShell_Click(object sender, RoutedEventArgs e)
+        {
+            if (_generationHandlers != null)
+                await _generationHandlers.GenerateSharePointPowerShell();
         }
 
         private async void GenerateK2_Click(object sender, RoutedEventArgs e)
@@ -763,16 +794,320 @@ namespace FormGenerator.Views
                 await _generationHandlers.GenerateK2();
         }
 
-        private async void DeployK2_Click(object sender, RoutedEventArgs e)
+        private void UseExistingK2FormsCheckBox_Checked(object sender, RoutedEventArgs e)
         {
-            if (_generationHandlers != null)
-                await _generationHandlers.DeployK2();
+            ExistingK2FormMappingSection.Visibility = Visibility.Visible;
         }
 
-        private async void ExportK2Package_Click(object sender, RoutedEventArgs e)
+        private void UseExistingK2FormsCheckBox_Unchecked(object sender, RoutedEventArgs e)
         {
-            if (_generationHandlers != null)
-                await _generationHandlers.ExportK2Package();
+            ExistingK2FormMappingSection.Visibility = Visibility.Collapsed;
+        }
+
+        private async void MapExistingK2Forms_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_allFormDefinitions == null || _allFormDefinitions.Count == 0)
+                {
+                    MessageBox.Show("Import and analyze at least one InfoPath form before mapping it to an existing K2 form.",
+                                    "No Imported Forms",
+                                    MessageBoxButton.OK,
+                                    MessageBoxImage.Information);
+                    return;
+                }
+
+                MapExistingK2FormsButton.IsEnabled = false;
+                K2GenerationLog.Text += "Loading existing K2 forms from server...\n";
+                UpdateStatus("Loading existing K2 forms...", MessageSeverity.Info);
+
+                // Read UI values on the UI thread; the K2 call runs on a background thread.
+                var serverName = (K2ServerTextBox.Text ?? string.Empty).Trim()
+                    .Replace("https://", "").Replace("http://", "");
+                if (string.IsNullOrEmpty(serverName))
+                {
+                    serverName = "localhost";
+                }
+
+                uint port = 5555;
+                if (!string.IsNullOrWhiteSpace(K2PortTextBox.Text))
+                {
+                    uint.TryParse(K2PortTextBox.Text.Trim(), out port);
+                }
+
+                var forms = await Task.Run(() => LoadExistingK2Forms(serverName, port));
+
+                K2GenerationLog.Text += $"Found {forms.Count} K2 form(s) on the server.\n";
+
+                if (forms.Count == 0)
+                {
+                    MessageBox.Show("No K2 forms were found on the server. Please verify your connection settings and try again.",
+                                    "No Forms Found",
+                                    MessageBoxButton.OK,
+                                    MessageBoxImage.Information);
+                    return;
+                }
+
+                ShowExistingK2FormsMappingDialog(forms);
+            }
+            catch (Exception ex)
+            {
+                K2GenerationLog.Text += $"❌ Failed to load K2 forms: {ex.Message}\n";
+                if (ex.InnerException != null)
+                {
+                    K2GenerationLog.Text += $"   Details: {ex.InnerException.Message}\n";
+                }
+                UpdateStatus("Failed to load existing K2 forms", MessageSeverity.Error);
+                MessageBox.Show($"Failed to load existing K2 forms:\n{ex.Message}",
+                                "Connection Error",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
+            }
+            finally
+            {
+                MapExistingK2FormsButton.IsEnabled = true;
+            }
+        }
+
+        // ── Field-level mapping (InfoPath control → existing K2 control) ──
+
+        private sealed class K2FieldChoice
+        {
+            public string Display { get; set; }
+            public K2SmartObjectGenerator.K2FieldDescriptor Field { get; set; } // null = do not map
+            public override string ToString() => Display;
+        }
+
+        private async void MapK2Fields_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (_k2FormMappings == null || _k2FormMappings.Count == 0)
+                {
+                    MessageBox.Show("Map your InfoPath form(s) to existing K2 forms first using \"Map Existing Forms\".",
+                                    "No Form Mapping", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var serverName = (K2ServerTextBox.Text ?? string.Empty).Trim()
+                    .Replace("https://", "").Replace("http://", "");
+                if (string.IsNullOrEmpty(serverName)) serverName = "localhost";
+                uint port = 5555;
+                if (!string.IsNullOrWhiteSpace(K2PortTextBox.Text)) uint.TryParse(K2PortTextBox.Text.Trim(), out port);
+
+                MapK2FieldsButton.IsEnabled = false;
+
+                foreach (var kv in _k2FormMappings.ToList())
+                {
+                    string fileKey = kv.Key;
+                    var mapping = kv.Value;
+                    if (!_allFormDefinitions.TryGetValue(fileKey, out var formDef) || formDef == null) continue;
+
+                    K2GenerationLog.Text += $"Loading K2 fields for '{mapping.K2FormDisplayName}'...\n";
+                    var guid = mapping.K2FormGuid;
+                    var k2Fields = await Task.Run(() => K2SmartObjectGenerator.ExistingK2FormUpdater.ReadFormControls(serverName, port, guid));
+                    K2GenerationLog.Text += $"  Found {k2Fields.Count} K2 field control(s).\n";
+
+                    if (k2Fields.Count == 0)
+                    {
+                        MessageBox.Show($"No data controls were found on K2 form '{mapping.K2FormDisplayName}'.",
+                                        "No Fields", MessageBoxButton.OK, MessageBoxImage.Information);
+                        continue;
+                    }
+
+                    ShowK2FieldMappingDialog(fileKey, formDef, mapping, k2Fields);
+                }
+            }
+            catch (Exception ex)
+            {
+                K2GenerationLog.Text += $"❌ Field mapping failed: {ex.Message}\n";
+                MessageBox.Show($"Field mapping failed:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                MapK2FieldsButton.IsEnabled = true;
+            }
+        }
+
+        private void ShowK2FieldMappingDialog(string fileKey, InfoPathFormDefinition formDef,
+            K2FormMapping mapping, List<K2SmartObjectGenerator.K2FieldDescriptor> k2Fields)
+        {
+            // Data-bound InfoPath controls (skip pure layout/structure controls).
+            var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { "Label", "RepeatingTable", "Section", "OptionalSection", "Button", "Image" };
+            var ipControls = (formDef.Views ?? new List<ViewDefinition>())
+                .Where(v => v?.Controls != null)
+                .SelectMany(v => v.Controls)
+                .Where(c => c != null && !string.IsNullOrWhiteSpace(c.Name) && !skip.Contains(c.Type ?? ""))
+                .GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+
+            if (ipControls.Count == 0)
+            {
+                MessageBox.Show("No data-bound InfoPath controls were found to map.",
+                                "Nothing to map", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var choices = new List<K2FieldChoice> { new K2FieldChoice { Display = "— Do not map —", Field = null } };
+            choices.AddRange(k2Fields.Select(f => new K2FieldChoice { Display = f.Display, Field = f }));
+
+            _k2FieldMappings.TryGetValue(fileKey, out var existing);
+
+            var rowPanel = new StackPanel { Margin = new Thickness(12, 4, 12, 4) };
+            var rows = new List<(string IpName, ComboBox Combo)>();
+
+            var comboItemStyle = new Style(typeof(ComboBoxItem));
+            comboItemStyle.Setters.Add(new Setter(System.Windows.Controls.Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Left));
+            comboItemStyle.Setters.Add(new Setter(System.Windows.Controls.Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+
+            foreach (var ip in ipControls)
+            {
+                string ipDisplay = !string.IsNullOrWhiteSpace(ip.Label) ? $"{ip.Label}  ({ip.Name})" : ip.Name;
+
+                var rowGrid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.4, GridUnitType.Star) });
+
+                var label = new TextBlock { Text = ipDisplay, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+                Grid.SetColumn(label, 0);
+
+                var combo = new ComboBox { ItemsSource = choices, SelectedIndex = 0, VerticalAlignment = VerticalAlignment.Center, MaxDropDownHeight = 300, ItemContainerStyle = comboItemStyle };
+
+                // Restore an existing mapping; otherwise auto-match by normalized name.
+                if (existing != null && existing.TryGetValue(ip.Name, out var savedId) && !string.IsNullOrEmpty(savedId))
+                {
+                    var m = choices.FirstOrDefault(c => c.Field != null && string.Equals(c.Field.ControlId, savedId, StringComparison.OrdinalIgnoreCase));
+                    if (m != null) combo.SelectedItem = m;
+                }
+                else
+                {
+                    var auto = AutoMatchField(ip, choices);
+                    if (auto != null) combo.SelectedItem = auto;
+                }
+
+                Grid.SetColumn(combo, 1);
+                rowGrid.Children.Add(label);
+                rowGrid.Children.Add(combo);
+                rowPanel.Children.Add(rowGrid);
+                rows.Add((ip.Name, combo));
+            }
+
+            var header = new TextBlock
+            {
+                Text = $"Map each InfoPath control (left) to a control on K2 form '{mapping.K2FormDisplayName}' (right). {k2Fields.Count} K2 field(s).",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(12, 12, 12, 6)
+            };
+
+            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = rowPanel };
+            var okButton = new Button { Content = "Save Mapping", Width = 120, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+            var cancelButton = new Button { Content = "Cancel", Width = 90, IsCancel = true };
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(12) };
+            buttons.Children.Add(okButton);
+            buttons.Children.Add(cancelButton);
+
+            var layout = new DockPanel();
+            DockPanel.SetDock(header, Dock.Top);
+            DockPanel.SetDock(buttons, Dock.Bottom);
+            layout.Children.Add(header);
+            layout.Children.Add(buttons);
+            layout.Children.Add(scroll);
+
+            var dialog = new Window
+            {
+                Title = $"Map Fields → {mapping.K2FormDisplayName}",
+                Width = 760,
+                Height = 560,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                Content = layout
+            };
+            okButton.Click += (s, e) => { dialog.DialogResult = true; };
+
+            if (dialog.ShowDialog() != true) return;
+
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            int mapped = 0;
+            foreach (var (ipName, combo) in rows)
+            {
+                if (combo.SelectedItem is K2FieldChoice choice && choice.Field != null)
+                {
+                    map[ipName] = choice.Field.ControlId;
+                    mapped++;
+                }
+            }
+            _k2FieldMappings[fileKey] = map;
+
+            SelectedK2FormTextBlock.Text = $"{mapping.K2FormDisplayName}: {mapped} of {rows.Count} field(s) mapped.";
+            K2GenerationLog.Text += $"Saved {mapped} field mapping(s) for '{mapping.K2FormDisplayName}'.\n";
+            UpdateStatus($"Saved {mapped} K2 field mapping(s)", MessageSeverity.Info);
+        }
+
+        private static K2FieldChoice AutoMatchField(ControlDefinition ip, List<K2FieldChoice> choices)
+        {
+            string n1 = FieldNormalize(ip.Name);
+            string n2 = FieldNormalize(ip.Label);
+            foreach (var c in choices)
+            {
+                if (c.Field == null) continue;
+                var keys = new[]
+                {
+                    FieldNormalize(c.Field.FieldDisplayName),
+                    FieldNormalize(c.Field.FieldName),
+                    FieldStripSuffix(FieldNormalize(c.Field.ControlName))
+                };
+                if (keys.Any(k => !string.IsNullOrEmpty(k) && (k == n1 || k == n2)))
+                    return c;
+            }
+            return null;
+        }
+
+        private static string FieldNormalize(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            return System.Text.RegularExpressions.Regex.Replace(s, "[^A-Za-z0-9]", "").ToUpperInvariant();
+        }
+
+        private static readonly string[] _fieldSuffixes =
+        { "TEXTBOX", "DROPDOWN", "DROPDOWNLIST", "COMBOBOX", "CALENDAR", "DATEPICKER", "PICKER", "CHECKBOX", "TEXTAREA", "RADIOBUTTON", "LISTBOX", "LISTVIEW", "HYPERLINK", "LABEL" };
+
+        private static string FieldStripSuffix(string normalized)
+        {
+            if (string.IsNullOrEmpty(normalized)) return normalized;
+            foreach (var suffix in _fieldSuffixes)
+                if (normalized.Length > suffix.Length && normalized.EndsWith(suffix, StringComparison.Ordinal))
+                    return normalized.Substring(0, normalized.Length - suffix.Length);
+            return normalized;
+        }
+
+        /// <summary>
+        /// Lists every form on the K2 server using the Forms management API
+        /// (SourceCode.Forms.Management.FormsManager.GetForms()).
+        /// </summary>
+        private List<SourceCode.Forms.Management.FormInfo> LoadExistingK2Forms(string serverName, uint port)
+        {
+            using var formsManager = new SourceCode.Forms.Management.FormsManager();
+
+            if (!formsManager.Open(serverName, port))
+            {
+                throw new InvalidOperationException(
+                    $"Unable to open a connection to the K2 Forms management server at {serverName}:{port}.");
+            }
+
+            var explorer = formsManager.GetForms();
+            var forms = explorer?.Forms?
+                .Cast<SourceCode.Forms.Management.FormInfo>()
+                .Where(f => f != null)
+                .OrderBy(f => f.DisplayName ?? f.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            return forms ?? new List<SourceCode.Forms.Management.FormInfo>();
+        }
+        private async void DeployK2_Click(object sender, RoutedEventArgs e)
+        {
+            await Task.CompletedTask;
         }
 
         private async void DownloadK2Log_Click(object sender, RoutedEventArgs e)
@@ -780,53 +1115,6 @@ namespace FormGenerator.Views
             if (_generationHandlers != null)
                 await _generationHandlers.DownloadK2ConversionLog();
         }
-
-        // Reusable Views (K2 Tab)
-        private async void RefreshReusableViews_Click(object sender, RoutedEventArgs e)
-        {
-            if (_analysisHandlers != null)
-                await _analysisHandlers.RefreshReusableViews();
-        }
-
-        private async void SaveReusableViews_Click(object sender, RoutedEventArgs e)
-        {
-            if (_analysisHandlers != null)
-                await _analysisHandlers.SaveReusableViews();
-        }
-
-        private void MinOccurrences_Changed(object sender, SelectionChangedEventArgs e)
-        {
-            _analysisHandlers?.MinOccurrences_Changed();
-        }
-
-        private void GroupBy_Changed(object sender, SelectionChangedEventArgs e)
-        {
-            _analysisHandlers?.GroupBy_Changed();
-        }
-
-        private void FilterType_Changed(object sender, SelectionChangedEventArgs e)
-        {
-            _analysisHandlers?.FilterType_Changed();
-        }
-
-        private async void CreateReusableView_Click(object sender, RoutedEventArgs e)
-        {
-            if (_analysisHandlers != null)
-                await _analysisHandlers.CreateReusableView();
-        }
-
-        private async void ExportReusableControls_Click(object sender, RoutedEventArgs e)
-        {
-            if (_analysisHandlers != null)
-                await _analysisHandlers.ExportReusableControls();
-        }
-
-        private void GroupNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            _analysisHandlers?.GroupNameTextBox_TextChanged(sender, e);
-        }
-
-        #endregion
 
         #region JSON Context Menu Handlers
 
@@ -996,251 +1284,8 @@ namespace FormGenerator.Views
 
         #endregion
 
-        #region Helper Methods
+        #region Form Structure Tree Handlers
 
-        internal void UpdateStatus(string message, MessageSeverity severity = MessageSeverity.Info)
-        {
-            Dispatcher.Invoke(() =>
-            {
-                StatusText.Text = message;
-
-                StatusText.Foreground = severity switch
-                {
-                    MessageSeverity.Error => Brushes.Red,
-                    MessageSeverity.Warning => Brushes.Orange,
-                    _ => (Brush)FindResource("TextSecondary")
-                };
-            });
-        }
-
-        private string GetSelectedFormType()
-        {
-            var selectedItem = FormTypeSelector.SelectedItem as ComboBoxItem;
-            return selectedItem?.Tag?.ToString() ?? "InfoPath2013";
-        }
-
-        private void EnableGenerationTabs()
-        {
-            // Enable generation tabs if forms have been analyzed
-            if (_allAnalysisResults != null && _allAnalysisResults.Any())
-            {
-                // Enable the tabs
-                GenerateSqlTab.IsEnabled = true;
-                GenerateNintexTab.IsEnabled = true;
-                GenerateK2Tab.IsEnabled = true;
-
-                // Also enable the generation buttons within each tab
-                GenerateSqlButton.IsEnabled = true;
-                DownloadNintexButton.IsEnabled = true;
-                GenerateK2Button.IsEnabled = true;
-
-                // Show a subtle notification that new tabs are available
-                UpdateStatus("Generation tabs are now available", MessageSeverity.Info);
-            }
-        }
-
-        private void SqlAuth_Changed(object sender, RoutedEventArgs e)
-        {
-            if (SqlAuthRadio?.IsChecked == true)
-            {
-                // Show username and password fields
-                SqlUsernameLabel.Visibility = Visibility.Visible;
-                SqlUsernameTextBox.Visibility = Visibility.Visible;
-                SqlPasswordLabel.Visibility = Visibility.Visible;
-                SqlPasswordBox.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                // Hide username and password fields
-                SqlUsernameLabel.Visibility = Visibility.Collapsed;
-                SqlUsernameTextBox.Visibility = Visibility.Collapsed;
-                SqlPasswordLabel.Visibility = Visibility.Collapsed;
-                SqlPasswordBox.Visibility = Visibility.Collapsed;
-            }
-        }
-
-        #endregion
-
-
-        #region Form Structure Tab Event Handlers
-
-        /// <summary>
-        /// Handles Add Control button click
-        /// </summary>
-        private void AddControlButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Get the currently selected view
-                var view = GetSelectedView();
-                if (view != null)
-                {
-                    // Get selected section if any
-                    string parentSection = null;
-                    var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-
-                    if (selectedItem?.Tag is string sectionName)
-                    {
-                        parentSection = sectionName;
-                    }
-                    else if (selectedItem?.Tag is ViewDefinition)
-                    {
-                        // View is selected, no parent section
-                        parentSection = null;
-                    }
-
-                    // Call the handler to show add control dialog
-                    _analysisHandlers.ShowAddControlDialog(view, parentSection);
-                }
-                else
-                {
-                    MessageBox.Show("Please select a form view first.", "No View Selected",
-                                  MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"Error adding control: {ex.Message}", MessageSeverity.Error);
-            }
-        }
-
-        /// <summary>
-        /// Handles Edit Control button click
-        /// </summary>
-        private void EditControlButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-                if (selectedItem?.Tag is ControlDefinition control)
-                {
-                    // Call the ShowControlEditDialog directly, not ShowEditPanel
-                    _analysisHandlers?.ShowControlEditDialog(control);
-                }
-                else
-                {
-                    MessageBox.Show("Please select a control to edit.",
-                                  "No Control Selected",
-                                  MessageBoxButton.OK,
-                                  MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"Error editing control: {ex.Message}", MessageSeverity.Error);
-            }
-        }
-
-        /// <summary>
-        /// Handles Delete Control button click
-        /// </summary>
-        private void DeleteControlButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-                if (selectedItem?.Tag is ControlDefinition control)
-                {
-                    var result = MessageBox.Show(
-                        $"Are you sure you want to delete '{control.Label ?? control.Name}'?",
-                        "Confirm Delete",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Warning);
-
-                    if (result == MessageBoxResult.Yes)
-                    {
-                        _analysisHandlers?.DeleteControl(control);
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("Please select a control to delete.",
-                                  "No Control Selected",
-                                  MessageBoxButton.OK,
-                                  MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"Error deleting control: {ex.Message}", MessageSeverity.Error);
-            }
-        }
-
-        /// <summary>
-        /// Handles Convert to Repeating button click
-        /// </summary>
-        private void ConvertToRepeatingButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-
-                if (selectedItem?.Tag is ControlDefinition control)
-                {
-                    // Move control to repeating section
-                    _analysisHandlers?.ShowMoveSectionDialog(control);
-                }
-                else if (selectedItem?.Tag is string sectionName)
-                {
-                    // Convert section to repeating
-                    var view = GetSelectedView();
-                    if (view != null)
-                    {
-                        var section = view.Sections.FirstOrDefault(s => s.Name == sectionName);
-                        if (section != null && section.Type != "repeating")
-                        {
-                            var result = MessageBox.Show(
-                                $"Convert '{section.Name}' to a repeating section?\n\n" +
-                                "This will make all controls in this section repeatable.",
-                                "Convert to Repeating Section",
-                                MessageBoxButton.YesNo,
-                                MessageBoxImage.Question);
-
-                            if (result == MessageBoxResult.Yes)
-                            {
-                                section.Type = "repeating";
-                                foreach (var ctrl in view.Controls.Where(c => c.ParentSection == section.Name))
-                                {
-                                    ctrl.IsInRepeatingSection = true;
-                                    ctrl.RepeatingSectionName = section.Name;
-                                    ctrl.SectionType = "repeating";
-                                }
-
-                                // Refresh the display
-                                if (_allAnalysisResults != null)
-                                {
-                                    _analysisHandlers.DisplayCombinedAnalysisResults(_allAnalysisResults);
-                                }
-
-                                UpdateStatus($"Converted '{section.Name}' to repeating section", MessageSeverity.Info);
-                            }
-                        }
-                        else if (section?.Type == "repeating")
-                        {
-                            MessageBox.Show("This section is already a repeating section.",
-                                          "Already Repeating",
-                                          MessageBoxButton.OK,
-                                          MessageBoxImage.Information);
-                        }
-                    }
-                }
-                else
-                {
-                    MessageBox.Show("Please select a control or section to convert.",
-                                  "No Selection",
-                                  MessageBoxButton.OK,
-                                  MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"Error converting section: {ex.Message}", MessageSeverity.Error);
-            }
-        }
-
-        /// <summary>
-        /// Handles Collapse All button click
-        /// </summary>
         private void CollapseAllButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -1254,9 +1299,6 @@ namespace FormGenerator.Views
             }
         }
 
-        /// <summary>
-        /// Handles Expand All button click
-        /// </summary>
         private void ExpandAllButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -1270,10 +1312,6 @@ namespace FormGenerator.Views
             }
         }
 
-
-        /// <summary>
-        /// Handles Tree Search button click
-        /// </summary>
         private void TreeSearchButton_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -1286,9 +1324,6 @@ namespace FormGenerator.Views
             }
         }
 
-        /// <summary>
-        /// Handles Tree Search text changed
-        /// </summary>
         private void TreeSearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             try
@@ -1310,10 +1345,6 @@ namespace FormGenerator.Views
             }
         }
 
-
-        /// <summary>
-        /// Handles TreeView selection changed
-        /// </summary>
         private void StructureTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
             try
@@ -1359,147 +1390,10 @@ namespace FormGenerator.Views
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
-        #endregion
-
-        #region Helper Methods for Form Structure Tab
 
         /// <summary>
-        /// Gets the currently selected view from the tree
+        /// Refreshes the JSON output using the currently loaded analysis data.
         /// </summary>
-        private ViewDefinition GetSelectedView()
-        {
-            var selectedItem = StructureTreeView.SelectedItem as TreeViewItem;
-
-            // Walk up the tree to find the view
-            while (selectedItem != null)
-            {
-                if (selectedItem.Tag is ViewDefinition view)
-                {
-                    return view;
-                }
-                selectedItem = selectedItem.Parent as TreeViewItem;
-            }
-
-            // If no selection, try to find the first view
-            if (_allFormDefinitions?.Values?.FirstOrDefault()?.Views?.FirstOrDefault() != null)
-            {
-                return _allFormDefinitions.Values.First().Views.First();
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Collapses all tree view items recursively
-        /// </summary>
-        private void CollapseAllTreeViewItems(ItemCollection items)
-        {
-            foreach (TreeViewItem item in items)
-            {
-                item.IsExpanded = false;
-                if (item.Items.Count > 0)
-                {
-                    CollapseAllTreeViewItems(item.Items);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Expands all tree view items recursively
-        /// </summary>
-        private void ExpandAllTreeViewItems(ItemCollection items)
-        {
-            foreach (TreeViewItem item in items)
-            {
-                item.IsExpanded = true;
-                if (item.Items.Count > 0)
-                {
-                    ExpandAllTreeViewItems(item.Items);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Recursively searches tree view items
-        /// </summary>
-        private int SearchTreeViewItems(ItemCollection items, string searchText)
-        {
-            int matchCount = 0;
-
-            foreach (TreeViewItem item in items)
-            {
-                bool isMatch = false;
-
-                // Check if header contains search text
-                if (item.Header != null)
-                {
-                    string headerText = "";
-
-                    if (item.Header is string str)
-                    {
-                        headerText = str;
-                    }
-                    else if (item.Header is StackPanel panel)
-                    {
-                        // Extract text from StackPanel children
-                        foreach (var child in panel.Children)
-                        {
-                            if (child is TextBlock textBlock)
-                            {
-                                headerText += textBlock.Text + " ";
-                            }
-                        }
-                    }
-
-                    if (headerText.ToLower().Contains(searchText))
-                    {
-                        isMatch = true;
-                        matchCount++;
-                    }
-                }
-
-                // Check tag for ControlDefinition
-                if (item.Tag is ControlDefinition control)
-                {
-                    if ((control.Name?.ToLower().Contains(searchText) ?? false) ||
-                        (control.Label?.ToLower().Contains(searchText) ?? false) ||
-                        (control.Type?.ToLower().Contains(searchText) ?? false))
-                    {
-                        isMatch = true;
-                        if (!isMatch) matchCount++;
-                    }
-                }
-
-                // Highlight if match found
-                if (isMatch)
-                {
-                    item.Background = new SolidColorBrush(Color.FromArgb(50, 0, 120, 212));
-                    item.IsExpanded = true;
-
-                    // Expand parent items
-                    var parent = item.Parent as TreeViewItem;
-                    while (parent != null)
-                    {
-                        parent.IsExpanded = true;
-                        parent = parent.Parent as TreeViewItem;
-                    }
-                }
-
-                // Search children
-                if (item.Items.Count > 0)
-                {
-                    matchCount += SearchTreeViewItems(item.Items, searchText);
-                }
-            }
-
-            return matchCount;
-        }
-
-        private void ClearSqlDeploymentInfo()
-        {
-            InfoPathFormDefinitionExtensions.CurrentSqlDeploymentInfo = null;
-        }
-
         public async Task RefreshJsonOutputWithCurrentData()
         {
             if (_analysisHandlers != null && _allAnalysisResults != null && _allAnalysisResults.Any())
@@ -1508,27 +1402,305 @@ namespace FormGenerator.Views
             }
         }
 
-        /// <summary>
-        /// Resets tree view highlight
-        /// </summary>
-        private void ResetTreeViewHighlight(ItemCollection items)
-        {
-            foreach (TreeViewItem item in items)
-            {
-                item.Background = Brushes.Transparent;
+        #endregion
 
-                if (item.Items.Count > 0)
+        #region Helper Methods
+
+        internal void UpdateStatus(string message, MessageSeverity severity = MessageSeverity.Info)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                StatusText.Text = message;
+
+                StatusText.Foreground = severity switch
                 {
-                    ResetTreeViewHighlight(item.Items);
-                }
+                    MessageSeverity.Error => Brushes.Red,
+                    MessageSeverity.Warning => Brushes.Orange,
+                    _ => (Brush)FindResource("TextSecondary")
+                };
+            });
+        }
+
+        private string GetSelectedFormType()
+        {
+            var selectedItem = FormTypeSelector.SelectedItem as ComboBoxItem;
+            return selectedItem?.Tag?.ToString() ?? "InfoPath2013";
+        }
+
+        private void EnableGenerationTabs()
+        {
+            // Enable generation tabs if forms have been analyzed
+            if (_allAnalysisResults != null && _allAnalysisResults.Any())
+            {
+                // Enable the tabs
+                GenerateSqlTab.IsEnabled = true;
+                GenerateNintexTab.IsEnabled = true;
+                GenerateK2Tab.IsEnabled = true;
+                GenerateSPTab.IsEnabled = true;
+
+                // Also enable the generation buttons within each tab
+                GenerateSqlButton.IsEnabled = true;
+                DownloadNintexButton.IsEnabled = true;
+                GenerateK2Button.IsEnabled = true;
+                GenerateSPCsvButton.IsEnabled = true;
+                GenerateSPPowerShellButton.IsEnabled = true;
+
+                // Show a subtle notification that new tabs are available
+                UpdateStatus("Generation tabs are now available", MessageSeverity.Info);
             }
         }
 
+        private void SqlAuth_Changed(object sender, RoutedEventArgs e)
+        {
+            if (SqlAuthRadio?.IsChecked == true)
+            {
+                // Show username and password fields
+                SqlUsernameLabel.Visibility = Visibility.Visible;
+                SqlUsernameTextBox.Visibility = Visibility.Visible;
+                SqlPasswordLabel.Visibility = Visibility.Visible;
+                SqlPasswordBox.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                // Hide username and password fields
+                SqlUsernameLabel.Visibility = Visibility.Collapsed;
+                SqlUsernameTextBox.Visibility = Visibility.Collapsed;
+                SqlPasswordLabel.Visibility = Visibility.Collapsed;
+                SqlPasswordBox.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        /// <summary>
+        /// Presents every imported InfoPath form alongside a dropdown of the existing K2 forms,
+        /// letting the user map each InfoPath form to a K2 form. Results are stored in
+        /// <see cref="_k2FormMappings"/> for use during K2 generation.
+        /// </summary>
+        private void ShowExistingK2FormsMappingDialog(List<SourceCode.Forms.Management.FormInfo> forms)
+        {
+            // Build the dropdown choices: a "do not map" sentinel followed by every K2 form.
+            var choices = new List<K2FormChoice>
+            {
+                new K2FormChoice { Display = "— Do not map —", Form = null }
+            };
+            choices.AddRange(forms.Select(f => new K2FormChoice
+            {
+                Display = string.IsNullOrWhiteSpace(f.CategoryPath)
+                    ? $"{f.DisplayName ?? f.Name}  ({f.Name})"
+                    : $"{f.DisplayName ?? f.Name}  ({f.Name})  ·  {f.CategoryPath}",
+                Form = f
+            }));
+
+            var rowPanel = new StackPanel { Margin = new Thickness(12, 4, 12, 4) };
+            var rowControls = new List<(string Key, string Display, ComboBox Combo)>();
+
+            // Explicit container alignment so the default ComboBoxItem template does not emit
+            // the noisy (and harmless) "Cannot find source for binding ... ComboBoxItem" warnings.
+            var comboItemStyle = new Style(typeof(ComboBoxItem));
+            comboItemStyle.Setters.Add(new Setter(System.Windows.Controls.Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Left));
+            comboItemStyle.Setters.Add(new Setter(System.Windows.Controls.Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+
+            foreach (var kvp in _allFormDefinitions.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var def = kvp.Value;
+                var ipDisplay = !string.IsNullOrWhiteSpace(def?.Title) ? def.Title
+                                : !string.IsNullOrWhiteSpace(def?.FormName) ? def.FormName
+                                : kvp.Key;
+
+                var rowGrid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5, GridUnitType.Star) });
+
+                var label = new TextBlock
+                {
+                    Text = ipDisplay,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 10, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    ToolTip = kvp.Key
+                };
+                Grid.SetColumn(label, 0);
+
+                // Each combo gets its own independent view so typing in one row does not
+                // filter the dropdowns of the other rows.
+                var view = new System.Windows.Data.ListCollectionView(choices);
+
+                // The filter text is captured per-combo and read straight off the editable
+                // TextBox. We must NOT read ComboBox.Text inside the filter: refreshing the
+                // view resets the view's current item, and a current-item-synchronized combo
+                // would then overwrite the text the user just typed (search appears dead).
+                string filterText = null;
+
+                view.Filter = item =>
+                {
+                    if (!(item is K2FormChoice c) || string.IsNullOrEmpty(c.Display)) return false;
+                    if (string.IsNullOrWhiteSpace(filterText)) return true;
+                    // A complete selection (text equals an item) shows the full list again.
+                    if (choices.Any(x => string.Equals(x.Display, filterText, StringComparison.Ordinal))) return true;
+                    return c.Display.IndexOf(filterText, StringComparison.OrdinalIgnoreCase) >= 0;
+                };
+
+                var combo = new ComboBox
+                {
+                    ItemsSource = view,
+                    IsEditable = true,
+                    IsTextSearchEnabled = false,
+                    StaysOpenOnEdit = true,
+                    // Decouple the combo selection from the view's current item so refreshing
+                    // the filter does not reset the typed text.
+                    IsSynchronizedWithCurrentItem = false,
+                    SelectedIndex = 0,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    MaxDropDownHeight = 300,
+                    ItemContainerStyle = comboItemStyle
+                };
+
+                combo.AddHandler(
+                    System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,
+                    new TextChangedEventHandler((s, e) =>
+                    {
+                        // Read the actual editable TextBox text (ComboBox.Text can lag here).
+                        filterText = (e.OriginalSource as TextBox)?.Text ?? combo.Text;
+                        view.Refresh();
+                        if (combo.IsKeyboardFocusWithin && !string.IsNullOrEmpty(filterText))
+                        {
+                            combo.IsDropDownOpen = true;
+                        }
+                    }));
+
+                // Restore an existing mapping, else attempt a best-effort auto-match by name.
+                if (_k2FormMappings.TryGetValue(kvp.Key, out var existing) && existing != null)
+                {
+                    var match = choices.FirstOrDefault(c => c.Form != null && c.Form.Guid == existing.K2FormGuid);
+                    if (match != null) combo.SelectedItem = match;
+                }
+                else
+                {
+                    var auto = choices.FirstOrDefault(c => c.Form != null &&
+                        (string.Equals(c.Form.DisplayName, ipDisplay, StringComparison.OrdinalIgnoreCase) ||
+                         (!string.IsNullOrWhiteSpace(def?.FormName) &&
+                          string.Equals(c.Form.Name, def.FormName, StringComparison.OrdinalIgnoreCase))));
+                    if (auto != null) combo.SelectedItem = auto;
+                }
+
+                Grid.SetColumn(combo, 1);
+                rowGrid.Children.Add(label);
+                rowGrid.Children.Add(combo);
+                rowPanel.Children.Add(rowGrid);
+
+                rowControls.Add((kvp.Key, ipDisplay, combo));
+            }
+
+            var header = new TextBlock
+            {
+                Text = $"Map each imported InfoPath form (left) to an existing K2 form (right). " +
+                       $"{forms.Count} K2 form(s) available.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(12, 12, 12, 6)
+            };
+
+            var columnHeaders = new Grid { Margin = new Thickness(12, 0, 12, 4) };
+            columnHeaders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            columnHeaders.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.5, GridUnitType.Star) });
+            var ipHeader = new TextBlock { Text = "InfoPath form", FontWeight = FontWeights.SemiBold };
+            var k2Header = new TextBlock { Text = "K2 form", FontWeight = FontWeights.SemiBold };
+            Grid.SetColumn(ipHeader, 0);
+            Grid.SetColumn(k2Header, 1);
+            columnHeaders.Children.Add(ipHeader);
+            columnHeaders.Children.Add(k2Header);
+
+            var topPanel = new StackPanel();
+            topPanel.Children.Add(header);
+            topPanel.Children.Add(columnHeaders);
+
+            var scroll = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = rowPanel
+            };
+
+            var okButton = new Button { Content = "Save Mapping", Width = 120, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+            var cancelButton = new Button { Content = "Cancel", Width = 90, IsCancel = true };
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(12)
+            };
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+
+            var layout = new DockPanel();
+            DockPanel.SetDock(topPanel, Dock.Top);
+            DockPanel.SetDock(buttonPanel, Dock.Bottom);
+            layout.Children.Add(topPanel);
+            layout.Children.Add(buttonPanel);
+            layout.Children.Add(scroll);
+
+            var dialog = new Window
+            {
+                Title = "Map InfoPath Forms to Existing K2 Forms",
+                Width = 760,
+                Height = 540,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                Content = layout
+            };
+
+            okButton.Click += (s, e) => { dialog.DialogResult = true; };
+
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            // Persist the selected mappings.
+            _k2FormMappings.Clear();
+            foreach (var (key, display, combo) in rowControls)
+            {
+                var choice = combo.SelectedItem as K2FormChoice;
+
+                // If the user typed a name but did not click an entry, resolve it from the text.
+                if (choice == null || !string.Equals(choice.Display, combo.Text, StringComparison.Ordinal))
+                {
+                    var typed = combo.Text?.Trim();
+                    if (!string.IsNullOrEmpty(typed))
+                    {
+                        choice = choices.FirstOrDefault(c => string.Equals(c.Display, typed, StringComparison.OrdinalIgnoreCase))
+                                 ?? choices.FirstOrDefault(c => c.Form != null && (
+                                        string.Equals(c.Form.Name, typed, StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(c.Form.DisplayName, typed, StringComparison.OrdinalIgnoreCase)));
+                    }
+                }
+
+                if (choice != null && choice.Form != null)
+                {
+                    _k2FormMappings[key] = new K2FormMapping
+                    {
+                        InfoPathFormKey = key,
+                        InfoPathFormDisplay = display,
+                        K2FormName = choice.Form.Name,
+                        K2FormDisplayName = choice.Form.DisplayName,
+                        K2FormGuid = choice.Form.Guid
+                    };
+                }
+            }
+
+            var mapped = _k2FormMappings.Count;
+            SelectedK2FormTextBlock.Text = mapped == 0
+                ? "No InfoPath forms mapped to existing K2 forms."
+                : $"{mapped} of {rowControls.Count} InfoPath form(s) mapped to existing K2 forms.";
+
+            K2GenerationLog.Text += $"Saved {mapped} K2 form mapping(s).\n";
+            foreach (var m in _k2FormMappings.Values)
+            {
+                K2GenerationLog.Text += $"   • {m.InfoPathFormDisplay} → {m.K2FormDisplayName} [{m.K2FormName}]\n";
+            }
+
+            UpdateStatus($"Saved {mapped} K2 form mapping(s)", MessageSeverity.Info);
+        }
 
         #endregion
-        /// <summary>
-        /// Factory for creating form analyzers
-        /// </summary>
+
         public class AnalyzerFactory
         {
             private readonly Dictionary<string, IFormAnalyzer> _analyzers;
@@ -1536,12 +1708,12 @@ namespace FormGenerator.Views
             public AnalyzerFactory()
             {
                 _analyzers = new Dictionary<string, IFormAnalyzer>
-            {
-                { "InfoPath2013", new InfoPath2013Analyzer() },
-                { "InfoPath2010", new InfoPath2010Analyzer() },
-                { "InfoPath2007", null }, // Not implemented yet
-                { "NintexForms", new NintexFormsAnalyzer() }
-            };
+                {
+                    { "InfoPath2013", new InfoPath2013Analyzer() },
+                    { "InfoPath2010", new InfoPath2010Analyzer() },
+                    { "InfoPath2007", null }, // Not implemented yet
+                    { "NintexForms", new NintexFormsAnalyzer() }
+                };
             }
 
             public IFormAnalyzer GetAnalyzer(string formType)

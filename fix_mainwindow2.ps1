@@ -1,0 +1,6 @@
+$path = 'c:\development\windows-nintexformsgen\FormGenerator\Views\MainWindow.xaml.cs'
+$text = Get-Content $path -Raw
+$pattern = 'private Form\[\] LoadExistingK2Forms\(\)\s*\{.*?return formCollection\?\.Cast<Form>\(\)\.ToArray\(\) \?\? Array\.Empty<Form>\(\);\s*\}'
+$replacement = '        private SourceCode.Forms.Client.Form[] LoadExistingK2Forms()\r\n        {\r\n            var connectionString = BuildK2FormServerConnectionString();\r\n\r\n            using var formsClient = new SourceCode.Forms.Client.FormsClient();\r\n\r\n            if (!formsClient.Open(connectionString))\r\n            {\r\n                throw new InvalidOperationException("Unable to open K2 Forms client connection.");\r\n            }\r\n\r\n            var formCollection = formsClient.GetForms((string[])null);\r\n            return formCollection?.Cast<SourceCode.Forms.Client.Form>().ToArray() ?? Array.Empty<SourceCode.Forms.Client.Form>();\r\n        }'
+$new = [regex]::Replace($text, $pattern, $replacement, [System.Text.RegularExpressions.RegexOptions]::Singleline)
+if ($new -eq $text) { Write-Host 'REPLACE_FAILED' } else { Set-Content -Path $path -Value $new; Write-Host 'REPLACED' }

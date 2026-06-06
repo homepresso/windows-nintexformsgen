@@ -2155,6 +2155,150 @@
                     </ScrollViewer>
                 </TabItem>
 
+                <!-- Generate SharePoint Tab (CSV + PowerShell) -->
+                <TabItem Header="📋 Generate SP" Name="GenerateSPTab" IsEnabled="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="20">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Info Banner -->
+                            <Border Grid.Row="0" Style="{StaticResource CardStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="SharePoint List Generation"
+                                              FontSize="18"
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,10"/>
+                                    <TextBlock Text="Generate a CSV of the SharePoint list columns (using the InfoPath control display names) and a PnP PowerShell script that provisions the list. The PowerShell script works against on-prem SharePoint Server (2016/2019/SE) and SharePoint Online."
+                                              FontSize="13"
+                                              Foreground="{StaticResource TextSecondary}"
+                                              TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Options -->
+                            <Border Grid.Row="1" Style="{StaticResource CardStyle}" Margin="0,15,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Options"
+                                              FontSize="16"
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,12"/>
+
+                                    <TextBlock Text="SharePoint Site URL (for the PowerShell script)"
+                                              Foreground="{StaticResource TextSecondary}"
+                                              Margin="0,0,0,4"/>
+                                    <TextBox Name="SharePointSiteUrlTextBox"
+                                            Style="{StaticResource ModernTextBox}"
+                                            Text="https://your-sharepoint-site/sites/yoursite"
+                                            Margin="0,0,0,12"/>
+
+                                    <TextBlock Text="List Name (leave blank to use each form's title)"
+                                              Foreground="{StaticResource TextSecondary}"
+                                              Margin="0,0,0,4"/>
+                                    <TextBox Name="SharePointListNameTextBox"
+                                            Style="{StaticResource ModernTextBox}"
+                                            Text=""/>
+
+                                    <TextBlock Text="PowerShell script type"
+                                              Foreground="{StaticResource TextSecondary}"
+                                              Margin="0,14,0,6"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton Name="SPScriptPnPRadio"
+                                                     GroupName="SPScriptFlavor"
+                                                     Content="PnP PowerShell (on-prem + online)"
+                                                     Foreground="{StaticResource TextPrimary}"
+                                                     IsChecked="True"
+                                                     Margin="0,0,24,0"
+                                                     ToolTip="Uses the PnP.PowerShell module. Works against SharePoint Server 2016/2019/SE and SharePoint Online."/>
+                                        <RadioButton Name="SPScriptLegacyRadio"
+                                                     GroupName="SPScriptFlavor"
+                                                     Content="Legacy SharePoint Management Shell (on-prem)"
+                                                     Foreground="{StaticResource TextPrimary}"
+                                                     ToolTip="Uses the server-side Microsoft.SharePoint.PowerShell snap-in. Run on the SharePoint server (on-prem only)."/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Action Buttons -->
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,20">
+                                <Button Name="GenerateSPCsvButton"
+                                       Content="📄 Generate CSV"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="220"
+                                       Height="45"
+                                       FontSize="15"
+                                       Margin="0,0,10,0"
+                                       Click="GenerateSPCsv_Click"
+                                       IsEnabled="False"/>
+                                <Button Name="GenerateSPPowerShellButton"
+                                       Content="⚡ Generate PowerShell"
+                                       Style="{StaticResource ModernButton}"
+                                       Width="220"
+                                       Height="45"
+                                       FontSize="15"
+                                       Background="{StaticResource SuccessColor}"
+                                       Click="GenerateSPPowerShell_Click"
+                                       IsEnabled="False"/>
+                            </StackPanel>
+
+                            <!-- Preview -->
+                            <Border Grid.Row="3" Style="{StaticResource CardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0"
+                                              Text="Preview"
+                                              FontSize="16"
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,10"/>
+                                    <TextBox Grid.Row="1"
+                                            Name="SharePointPreview"
+                                            Style="{StaticResource ModernTextBox}"
+                                            IsReadOnly="True"
+                                            FontFamily="Consolas"
+                                            VerticalScrollBarVisibility="Auto"
+                                            HorizontalScrollBarVisibility="Auto"
+                                            TextWrapping="NoWrap"
+                                            MinHeight="200"
+                                            Text="-- Generate a CSV or PowerShell script to preview it here"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- Generation Log -->
+                            <Border Grid.Row="4" Style="{StaticResource CardStyle}" Margin="0,15,0,0">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0"
+                                              Text="Generation Log"
+                                              FontSize="16"
+                                              FontWeight="Medium"
+                                              Foreground="{StaticResource TextPrimary}"
+                                              Margin="0,0,0,10"/>
+                                    <TextBox Grid.Row="1"
+                                            Name="SharePointGenerationLog"
+                                            Style="{StaticResource ModernTextBox}"
+                                            IsReadOnly="True"
+                                            MinHeight="100"
+                                            Text="Ready to generate SharePoint artifacts..."/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+                </TabItem>
+
                 <!-- Generate K2 Tab with Sub-tabs -->
                 <TabItem Header="⚙️ Generate K2" Name="GenerateK2Tab" IsEnabled="False">
                     <TabControl Background="{StaticResource BackgroundDark}" BorderThickness="0">
@@ -2277,11 +2421,66 @@
                                       Foreground="{StaticResource TextPrimary}"
                                       Margin="0,0,0,15"/>
 
-                                            <CheckBox Name="EnableVerboseLoggingK2CheckBox"
+                                            <CheckBox Name="UseExistingK2FormsCheckBox"
+                                         Content="Use existing K2 forms and views"
+                                         Style="{StaticResource ModernCheckBox}"
+                                         IsChecked="False"
+                                         Checked="UseExistingK2FormsCheckBox_Checked"
+                                         Unchecked="UseExistingK2FormsCheckBox_Unchecked"
+                                         ToolTip="Use an existing K2 SmartForms package and map rules/controls instead of generating new forms from scratch."/>
+
+                                        <CheckBox Name="EnableVerboseLoggingK2CheckBox"
                                          Content="Enable Verbose Logging (Debug Mode)"
                                          Style="{StaticResource ModernCheckBox}"
                                          IsChecked="False"
                                          ToolTip="Enable detailed diagnostic logging for troubleshooting K2 generation issues"/>
+
+                                        <Border Name="ExistingK2FormMappingSection"
+                                                Style="{StaticResource CardStyle}"
+                                                Margin="0,15,0,0"
+                                                Visibility="Collapsed">
+                                            <StackPanel>
+                                                <TextBlock Text="Existing K2 Form Mapping"
+                                                           FontSize="18"
+                                                           FontWeight="Medium"
+                                                           Foreground="{StaticResource TextPrimary}"
+                                                           Margin="0,0,0,10"/>
+
+                                                <TextBlock Text="Select this option to map your InfoPath form to existing K2 forms and views. You will be able to choose mapped forms after clicking the button below."
+                                                           TextWrapping="Wrap"
+                                                           Foreground="{StaticResource TextSecondary}"
+                                                           Margin="0,0,0,10"/>
+
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button Name="MapExistingK2FormsButton"
+                                                            Content="🧭 Map Existing Forms"
+                                                            Style="{StaticResource ModernButton}"
+                                                            Width="220"
+                                                            Height="40"
+                                                            Margin="0,0,10,0"
+                                                            Click="MapExistingK2Forms_Click"/>
+                                                    <Button Name="MapK2FieldsButton"
+                                                            Content="🔗 Map Fields"
+                                                            Style="{StaticResource ModernButton}"
+                                                            Width="180"
+                                                            Height="40"
+                                                            Click="MapK2Fields_Click"/>
+                                                </StackPanel>
+
+                                                <TextBlock Name="SelectedK2FormTextBlock"
+                                                           Text="Selected K2 form: none"
+                                                           Foreground="{StaticResource TextSecondary}"
+                                                           Margin="0,10,0,0"
+                                                           TextWrapping="Wrap"/>
+
+                                                <CheckBox Name="CreateSmartBoxLookupsCheckBox"
+                                                          Content="Create &amp; populate SmartBox lookups for dropdowns"
+                                                          Style="{StaticResource ModernCheckBox}"
+                                                          IsChecked="False"
+                                                          Margin="0,12,0,0"
+                                                          ToolTip="Create SmartBox lookup SmartObjects from the InfoPath dropdown options, populate them, and wire the matching dropdown controls in the existing K2 views to them."/>
+                                            </StackPanel>
+                                        </Border>
                                         </StackPanel>
                                     </Border>
 

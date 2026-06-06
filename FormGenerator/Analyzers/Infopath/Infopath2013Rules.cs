@@ -13,6 +13,7 @@ namespace FormGenerator.Analyzers.Infopath
     {
         private XNamespace xsf = "http://schemas.microsoft.com/office/infopath/2003/solutionDefinition";
         private XNamespace xd = "http://schemas.microsoft.com/office/infopath/2003";
+        private XNamespace xsl = "http://www.w3.org/1999/XSL/Transform";
 
         public void ExtractRules(string tempDir, InfoPathFormDefinition formDef)
         {
@@ -211,59 +212,102 @@ namespace FormGenerator.Analyzers.Infopath
 
         private void ExtractViewRules(XDocument viewDoc, InfoPathFormDefinition formDef)
         {
-            var ns = viewDoc.Root.Name.Namespace;
+            if (viewDoc?.Root == null) return;
 
-            // Extract conditional visibility from xsl:if elements
-            var ifElements = viewDoc.Descendants(ns + "if");
+            // Track all examined XSL elements for audit
+            var allViewElements = viewDoc.Descendants().ToList();
+            formDef.DebugInfo.TotalElementsExamined += allViewElements.Count;
 
-            foreach (var ifElem in ifElements)
+            // Extract conditional visibility and when rules
+            var conditionalElements = allViewElements
+                .Where(e => e.Name.LocalName.Equals("if", StringComparison.OrdinalIgnoreCase) ||
+                            e.Name.LocalName.Equals("when", StringComparison.OrdinalIgnoreCase));
+
+            foreach (var condElem in conditionalElements)
             {
-                var testCondition = ifElem.Attribute("test")?.Value;
-                if (!string.IsNullOrEmpty(testCondition))
+                var testCondition = GetAttributeValue(condElem, "test");
+                if (string.IsNullOrWhiteSpace(testCondition))
                 {
-                    var conditionalRule = new ConditionalRule
-                    {
-                        Name = "Conditional_" + Guid.NewGuid().ToString("N").Substring(0, 8),
-                        Type = "Visibility",
-                        Condition = testCondition,
-                        SourceField = ExtractFieldFromCondition(testCondition),
-                        Action = "Show/Hide"
-                    };
-
-                    // Find affected controls
-                    var affectedControls = ifElem.Descendants()
-                        .Where(e => GetAttributeValue(e, "CtrlId") != null)
-                        .Select(e => GetAttributeValue(e, "CtrlId"))
-                        .Distinct()
-                        .ToList();
-
-                    conditionalRule.AffectedControls = affectedControls;
-                    formDef.ConditionalRules.Add(conditionalRule);
+                    RecordDebugSkipped(formDef, condElem, "Conditional element missing test attribute");
+                    continue;
                 }
+
+                var sourceField = RuleConditionParser.ExtractLeafFieldName(testCondition);
+                var targetField = FindTargetFieldFromContext(condElem, xd) ?? sourceField;
+                var affectedControls = GetAffectedControlIds(condElem);
+
+                var conditionalRule = new ConditionalRule
+                {
+                    Name = "Conditional_" + Guid.NewGuid().ToString("N").Substring(0, 8),
+                    Type = "Visibility",
+                    Condition = testCondition,
+                    SourceField = sourceField,
+                    TargetField = targetField,
+                    Action = "Show/Hide",
+                    Value = testCondition,
+                    AffectedControls = affectedControls
+                };
+
+                formDef.ConditionalRules.Add(conditionalRule);
+                RecordDebugProcessed(formDef, condElem, "Extracted conditional visibility rule");
             }
 
             // Extract calculations from xsl:value-of
-            var valueOfElements = viewDoc.Descendants(ns + "value-of");
-
+            var valueOfElements = allViewElements.Where(e => e.Name.LocalName.Equals("value-of", StringComparison.OrdinalIgnoreCase));
             foreach (var valueOfElem in valueOfElements)
             {
-                var select = valueOfElem.Attribute("select")?.Value;
-                if (!string.IsNullOrEmpty(select) && IsCalculation(select))
+                var select = GetAttributeValue(valueOfElem, "select");
+                if (string.IsNullOrWhiteSpace(select) || !IsCalculation(select))
                 {
-                    // Try to determine the target field from the parent element's xd:binding or xd:CtrlId
-                    var targetField = FindTargetFieldFromContext(valueOfElem, xd);
-
-                    var calcRule = new ConditionalRule
-                    {
-                        Name = "Calculation_" + Guid.NewGuid().ToString("N").Substring(0, 8),
-                        Type = "Calculation",
-                        Condition = select,
-                        TargetField = targetField,
-                        Action = "Calculate"
-                    };
-
-                    formDef.ConditionalRules.Add(calcRule);
+                    continue;
                 }
+
+                var targetField = FindTargetFieldFromContext(valueOfElem, xd);
+                var calcRule = new ConditionalRule
+                {
+                    Name = "Calculation_" + Guid.NewGuid().ToString("N").Substring(0, 8),
+                    Type = "Calculation",
+                    Condition = select,
+                    SourceField = RuleConditionParser.ExtractLeafFieldName(select),
+                    TargetField = targetField,
+                    Action = "Calculate",
+                    Value = select
+                };
+
+                formDef.ConditionalRules.Add(calcRule);
+                RecordDebugProcessed(formDef, valueOfElem, "Extracted calculation rule from xsl:value-of");
+            }
+
+            // Extract assignment-style calculations from xsl:attribute select expressions
+            var attributeElements = allViewElements.Where(e => e.Name.LocalName.Equals("attribute", StringComparison.OrdinalIgnoreCase));
+            foreach (var attrElem in attributeElements)
+            {
+                var select = GetAttributeValue(attrElem, "select");
+                if (string.IsNullOrWhiteSpace(select) || !IsCalculation(select))
+                {
+                    continue;
+                }
+
+                var name = GetAttributeValue(attrElem, "name");
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    RecordDebugSkipped(formDef, attrElem, "xsl:attribute rule missing name");
+                    continue;
+                }
+
+                var calcRule = new ConditionalRule
+                {
+                    Name = "Calculation_" + name + "_" + Guid.NewGuid().ToString("N").Substring(0, 4),
+                    Type = "Calculation",
+                    Condition = select,
+                    SourceField = RuleConditionParser.ExtractLeafFieldName(select),
+                    TargetField = name,
+                    Action = "Calculate",
+                    Value = select
+                };
+
+                formDef.ConditionalRules.Add(calcRule);
+                RecordDebugProcessed(formDef, attrElem, "Extracted calculation rule from xsl:attribute");
             }
         }
 
@@ -347,49 +391,34 @@ namespace FormGenerator.Analyzers.Infopath
 
         private string ExtractFieldFromCondition(string condition)
         {
-            // Extract the LEAF field name from XPath conditions.
-            // For "my:preferences/my:seatLocation='Aisle'" we need "seatLocation", not "preferences".
-            // For "my:isRoundTrip='true'" we need "isRoundTrip".
-            // The leaf field is the last my:xxx segment before the operator (=, !=, etc.) or quote.
-
-            // First, extract the full XPath field reference (everything before the operator)
-            var fieldPathMatch = System.Text.RegularExpressions.Regex.Match(condition,
-                @"((?:my:\w+)(?:/my:\w+)*)");
-
-            if (fieldPathMatch.Success)
-            {
-                string fullPath = fieldPathMatch.Groups[1].Value;
-                // Take the last segment and strip the my: prefix
-                string[] segments = fullPath.Split('/');
-                string lastSegment = segments[segments.Length - 1];
-                return lastSegment.Replace("my:", "");
-            }
-
-            // Fallback: try plain field name pattern
-            var plainMatch = System.Text.RegularExpressions.Regex.Match(condition, @"my:(\w+)");
-            return plainMatch.Success ? plainMatch.Groups[1].Value : "";
+            return RuleConditionParser.ExtractLeafFieldName(condition);
         }
 
         private bool IsCalculation(string expression)
         {
-            if (string.IsNullOrEmpty(expression)) return false;
+            if (string.IsNullOrWhiteSpace(expression)) return false;
 
-            // Function calls are always calculations
-            if (expression.Contains("sum(") || expression.Contains("count(") ||
-                expression.Contains("avg(") || expression.Contains("min(") ||
-                expression.Contains("max(") || expression.Contains("concat("))
-                return true;
+            var normalized = RuleConditionParser.NormalizeCondition(expression).ToLowerInvariant();
 
-            // For arithmetic operators (+, -, *, /), need to distinguish from XPath syntax:
-            // - "/" in XPath paths like my:employee/my:name is NOT division
-            // - "-" in field names like my:sub-total is NOT subtraction
-            // Check for operators with surrounding whitespace (actual arithmetic)
-            if (System.Text.RegularExpressions.Regex.IsMatch(expression, @"\s[\+\-\*]\s"))
+            // Function calls and arithmetic expressions are calculations
+            if (normalized.Contains("sum(") || normalized.Contains("count(") ||
+                normalized.Contains("avg(") || normalized.Contains("min(") ||
+                normalized.Contains("max(") || normalized.Contains("concat(") ||
+                normalized.Contains("translate(") || normalized.Contains("substring(") ||
+                normalized.Contains("normalize-space(") || normalized.Contains("contains(") ||
+                normalized.Contains("starts-with(") || normalized.Contains("ends-with(") ||
+                normalized.Contains("substring-before(") || normalized.Contains("substring-after("))
+            {
                 return true;
+            }
 
-            // Division: " / " with spaces to distinguish from XPath path separator
-            if (System.Text.RegularExpressions.Regex.IsMatch(expression, @"\s/\s"))
+            // Arithmetic operators with spacing indicate calculation, not XPath navigation
+            if (System.Text.RegularExpressions.Regex.IsMatch(expression, @"\s[\+\-\*]\s") ||
+                System.Text.RegularExpressions.Regex.IsMatch(expression, @"\s/\s") ||
+                System.Text.RegularExpressions.Regex.IsMatch(expression, @"[<>]=?"))
+            {
                 return true;
+            }
 
             return false;
         }
@@ -561,6 +590,45 @@ namespace FormGenerator.Analyzers.Infopath
             return elem?.Attributes()
                 .FirstOrDefault(a => a.Name.LocalName.Equals(attrName, StringComparison.OrdinalIgnoreCase))
                 ?.Value;
+        }
+
+        private List<string> GetAffectedControlIds(XElement element)
+        {
+            return element.DescendantsAndSelf()
+                .SelectMany(e => new[]
+                {
+                    GetAttributeValue(e, "CtrlId"),
+                    GetAttributeValue(e, "ctrlid"),
+                    GetAttributeValue(e, "binding"),
+                    GetAttributeValue(e, "xd:binding")
+                })
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private void RecordDebugProcessed(InfoPathFormDefinition formDef, XElement element, string note)
+        {
+            if (formDef == null || element == null) return;
+            formDef.DebugInfo.ProcessedElements.Add($"{element.Name.LocalName}: {note}");
+            UpdateElementCounts(formDef, element.Name.LocalName);
+        }
+
+        private void RecordDebugSkipped(InfoPathFormDefinition formDef, XElement element, string note)
+        {
+            if (formDef == null || element == null) return;
+            formDef.DebugInfo.SkippedElements.Add($"{element.Name.LocalName}: {note}");
+            UpdateElementCounts(formDef, element.Name.LocalName);
+        }
+
+        private void UpdateElementCounts(InfoPathFormDefinition formDef, string elementType)
+        {
+            if (formDef == null || string.IsNullOrWhiteSpace(elementType)) return;
+            if (!formDef.DebugInfo.ElementTypeCounts.ContainsKey(elementType))
+            {
+                formDef.DebugInfo.ElementTypeCounts[elementType] = 0;
+            }
+            formDef.DebugInfo.ElementTypeCounts[elementType]++;
         }
     }
 

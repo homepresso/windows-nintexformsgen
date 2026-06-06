@@ -909,48 +909,153 @@ namespace FormGenerator.Views
             }
         }
 
-        public void BrowseK2Folder()
+        public async Task BrowseK2Folder()
         {
-            // Mock folder browser dialog
-            _mainWindow.K2GenerationLog.Text += "Opening K2 folder browser...\n";
-
-            // Simulate folder selection
-            var mockFolders = new List<string>
+            try
             {
-                "/Forms",
-                "/Forms/Generated",
-                "/Forms/InfoPath",
-                "/Workflows",
-                "/SmartObjects"
-            };
+                // Read connection settings on the UI thread.
+                var serverName = (_mainWindow.K2ServerTextBox.Text ?? string.Empty).Trim()
+                    .Replace("https://", "").Replace("http://", "");
+                if (string.IsNullOrEmpty(serverName))
+                {
+                    serverName = "localhost";
+                }
 
-            // Create a simple selection dialog
+                uint port = 5555;
+                if (!string.IsNullOrWhiteSpace(_mainWindow.K2PortTextBox.Text))
+                {
+                    uint.TryParse(_mainWindow.K2PortTextBox.Text.Trim(), out port);
+                }
+
+                _mainWindow.K2GenerationLog.Text += "Loading K2 category folders...\n";
+
+                // The K2 call runs on a background thread.
+                var categoryPaths = await Task.Run(() => LoadK2CategoryPaths(serverName, port));
+
+                _mainWindow.K2GenerationLog.Text += $"Found {categoryPaths.Count} K2 category folder(s).\n";
+
+                if (categoryPaths.Count == 0)
+                {
+                    MessageBox.Show(
+                        "No K2 category folders were found on the server. " +
+                        "Verify your connection settings, or note that only categories that contain forms are listed.",
+                        "No Folders Found",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    return;
+                }
+
+                ShowK2FolderBrowser(categoryPaths);
+            }
+            catch (Exception ex)
+            {
+                _mainWindow.K2GenerationLog.Text += $"❌ Failed to load K2 folders: {ex.Message}\n";
+                if (ex.InnerException != null)
+                {
+                    _mainWindow.K2GenerationLog.Text += $"   Details: {ex.InnerException.Message}\n";
+                }
+                MessageBox.Show($"Failed to load K2 category folders:\n{ex.Message}",
+                                "Connection Error",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Returns the distinct K2 category folder paths by reading the CategoryPath of every
+        /// form on the server via the Forms management API.
+        /// </summary>
+        private List<string> LoadK2CategoryPaths(string serverName, uint port)
+        {
+            using var formsManager = new SourceCode.Forms.Management.FormsManager();
+
+            if (!formsManager.Open(serverName, port))
+            {
+                throw new InvalidOperationException(
+                    $"Unable to open a connection to the K2 Forms management server at {serverName}:{port}.");
+            }
+
+            var explorer = formsManager.GetForms();
+            return explorer?.Forms?
+                .Cast<SourceCode.Forms.Management.FormInfo>()
+                .Where(f => f != null && !string.IsNullOrWhiteSpace(f.CategoryPath))
+                .Select(f => f.CategoryPath.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToList()
+                ?? new List<string>();
+        }
+
+        /// <summary>
+        /// Shows the K2 category paths as an expandable folder tree and writes the chosen
+        /// folder path back into the K2 target-folder textbox.
+        /// </summary>
+        private void ShowK2FolderBrowser(List<string> categoryPaths)
+        {
+            var tree = new TreeView { Margin = new Thickness(10) };
+            var nodeMap = new Dictionary<string, TreeViewItem>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var path in categoryPaths)
+            {
+                // K2 category paths may use either separator.
+                var parts = path.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                var accum = string.Empty;
+                ItemCollection parentItems = tree.Items;
+
+                foreach (var part in parts)
+                {
+                    accum = accum.Length == 0 ? "/" + part : accum + "/" + part;
+
+                    if (!nodeMap.TryGetValue(accum, out var node))
+                    {
+                        node = new TreeViewItem { Header = part, Tag = accum, IsExpanded = true };
+                        nodeMap[accum] = node;
+                        parentItems.Add(node);
+                    }
+
+                    parentItems = node.Items;
+                }
+            }
+
+            var okButton = new Button { Content = "Select", Width = 90, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+            var cancelButton = new Button { Content = "Cancel", Width = 90, IsCancel = true };
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(10)
+            };
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+
+            var layout = new DockPanel();
+            DockPanel.SetDock(buttonPanel, Dock.Bottom);
+            layout.Children.Add(buttonPanel);
+            layout.Children.Add(tree);
+
             var folderDialog = new Window
             {
                 Title = "Select K2 Folder",
-                Width = 400,
-                Height = 300,
+                Width = 460,
+                Height = 460,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = _mainWindow
+                Owner = _mainWindow,
+                Content = layout
             };
 
-            var listBox = new ListBox
+            void Commit()
             {
-                ItemsSource = mockFolders,
-                Margin = new Thickness(10)
-            };
-
-            listBox.MouseDoubleClick += (s, args) =>
-            {
-                if (listBox.SelectedItem != null)
+                if (tree.SelectedItem is TreeViewItem selected && selected.Tag is string folderPath)
                 {
-                    _mainWindow.K2FolderTextBox.Text = listBox.SelectedItem.ToString();
-                    _mainWindow.K2GenerationLog.Text += $"Selected folder: {listBox.SelectedItem}\n";
-                    folderDialog.Close();
+                    _mainWindow.K2FolderTextBox.Text = folderPath;
+                    _mainWindow.K2GenerationLog.Text += $"Selected folder: {folderPath}\n";
+                    folderDialog.DialogResult = true;
                 }
-            };
+            }
 
-            folderDialog.Content = listBox;
+            okButton.Click += (s, args) => Commit();
+            tree.MouseDoubleClick += (s, args) => Commit();
+
             folderDialog.ShowDialog();
         }
 
@@ -1008,6 +1113,23 @@ namespace FormGenerator.Views
                     uint.TryParse(_mainWindow.K2PortTextBox.Text, out port);
                 }
 
+                // When "use existing K2 forms" is on, carry the InfoPath→K2 form mappings so the
+                // service modifies those existing forms in place instead of creating new artifacts.
+                var existingMappings = new Dictionary<string, Services.K2ExistingFormMapping>(StringComparer.OrdinalIgnoreCase);
+                bool useExisting = _mainWindow.UseExistingK2FormsCheckBox.IsChecked == true;
+                if (useExisting && _mainWindow._k2FormMappings != null)
+                {
+                    foreach (var kv in _mainWindow._k2FormMappings)
+                    {
+                        existingMappings[kv.Key] = new Services.K2ExistingFormMapping
+                        {
+                            K2FormName = kv.Value.K2FormName,
+                            K2FormDisplayName = kv.Value.K2FormDisplayName,
+                            K2FormGuid = kv.Value.K2FormGuid
+                        };
+                    }
+                }
+
                 // Generate all forms in a single request (K2GenerationService processes them together)
                 var request = new Services.K2GenerationRequest
                 {
@@ -1017,7 +1139,12 @@ namespace FormGenerator.Views
                     FormDefinitions = _mainWindow._allAnalysisResults,
                     TargetFolder = _mainWindow.K2FolderTextBox.Text,
                     UseTimestamp = false,
-                    ForceCleanup = true // Always cleanup existing artifacts before generation
+                    ForceCleanup = true, // Always cleanup existing artifacts before generation (skipped for mapped forms)
+                    ExistingFormMappings = existingMappings,
+                    ExistingFieldMappings = useExisting && _mainWindow._k2FieldMappings != null
+                        ? new Dictionary<string, Dictionary<string, string>>(_mainWindow._k2FieldMappings, StringComparer.OrdinalIgnoreCase)
+                        : new Dictionary<string, Dictionary<string, string>>(),
+                    CreateSmartBoxLookups = _mainWindow.CreateSmartBoxLookupsCheckBox.IsChecked == true
                 };
 
                 // Generate K2 artifacts
@@ -1345,5 +1472,122 @@ namespace FormGenerator.Views
             // Replace underscores with spaces for better readability in K2 categories
             return formName.Replace("_", " ");
         }
+
+        #region SharePoint Generation
+
+        public async Task GenerateSharePointCsv()
+        {
+            await GenerateSharePointArtifact(isCsv: true);
+        }
+
+        public async Task GenerateSharePointPowerShell()
+        {
+            await GenerateSharePointArtifact(isCsv: false);
+        }
+
+        private async Task GenerateSharePointArtifact(bool isCsv)
+        {
+            string kind = isCsv ? "CSV" : "PowerShell script";
+            try
+            {
+                if (_mainWindow._allFormDefinitions == null || !_mainWindow._allFormDefinitions.Any())
+                {
+                    MessageBox.Show("Please analyze forms first before generating SharePoint artifacts.",
+                                   "No Analysis Results",
+                                   MessageBoxButton.OK,
+                                   MessageBoxImage.Warning);
+                    return;
+                }
+
+                var dialog = new SaveFileDialog
+                {
+                    Title = isCsv ? "Save SharePoint Columns CSV" : "Save SharePoint Provisioning Script",
+                    Filter = isCsv ? "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*"
+                                   : "PowerShell Scripts (*.ps1)|*.ps1|All Files (*.*)|*.*",
+                    FileName = isCsv ? "SharePoint_Columns" : "Provision_SharePoint_List"
+                };
+
+                if (dialog.ShowDialog() != true)
+                    return;
+
+                var generator = new SharePointGeneratorService();
+                string siteUrl = _mainWindow.SharePointSiteUrlTextBox.Text?.Trim();
+                string listNameOverride = _mainWindow.SharePointListNameTextBox.Text?.Trim();
+                var flavor = _mainWindow.SPScriptLegacyRadio.IsChecked == true
+                    ? SharePointScriptFlavor.Legacy
+                    : SharePointScriptFlavor.PnP;
+                string ext = isCsv ? ".csv" : ".ps1";
+
+                _mainWindow.SharePointGenerationLog.Text += $"\nGenerating SharePoint {kind}";
+                if (!isCsv) _mainWindow.SharePointGenerationLog.Text += $" ({flavor})";
+                _mainWindow.SharePointGenerationLog.Text += "...\n";
+
+                int success = 0;
+                string lastContent = null;
+                bool single = _mainWindow._allFormDefinitions.Count == 1;
+
+                foreach (var kvp in _mainWindow._allFormDefinitions)
+                {
+                    var form = kvp.Value;
+                    if (form == null) continue;
+
+                    string formLabel = !string.IsNullOrWhiteSpace(form.Title) ? form.Title
+                                     : !string.IsNullOrWhiteSpace(form.FormName) ? form.FormName
+                                     : Path.GetFileNameWithoutExtension(kvp.Key);
+
+                    string listNameForForm = single && !string.IsNullOrWhiteSpace(listNameOverride)
+                        ? listNameOverride
+                        : formLabel;
+
+                    string content = isCsv
+                        ? generator.GenerateColumnsCsv(form, listNameForForm)
+                        : generator.GeneratePowerShellScript(form, siteUrl, listNameForForm, flavor);
+
+                    string outputFileName = single
+                        ? dialog.FileName
+                        : dialog.FileName.Replace(ext, $"_{SanitizeFileName(formLabel)}{ext}");
+
+                    await NetFrameworkCompatibility.WriteAllTextAsync(outputFileName, content);
+
+                    var listModel = generator.BuildLists(form, listNameForForm);
+                    int columnCount = listModel.Sum(l => l.Columns.Count);
+                    int childCount = listModel.Count(l => l.IsChild);
+                    _mainWindow.SharePointGenerationLog.Text += $"  {formLabel}: {listModel.Count} list(s) ({childCount} child), {columnCount} column(s) → {Path.GetFileName(outputFileName)}\n";
+                    lastContent = content;
+                    success++;
+                }
+
+                if (lastContent != null)
+                    _mainWindow.SharePointPreview.Text = lastContent;
+
+                _mainWindow.SharePointGenerationLog.Text += $"\n✅ Generated {kind} for {success} form(s).\n";
+                _mainWindow.UpdateStatus($"SharePoint {kind} generated for {success} form(s)", MessageSeverity.Info);
+
+                MessageBox.Show($"SharePoint {kind} generated for {success} form(s).",
+                               "Generation Complete",
+                               MessageBoxButton.OK,
+                               MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                _mainWindow.SharePointGenerationLog.Text += $"\n❌ {kind} generation failed: {ex.Message}\n";
+                _mainWindow.UpdateStatus($"SharePoint {kind} generation failed: {ex.Message}", MessageSeverity.Error);
+
+                MessageBox.Show($"Generation failed:\n{ex.Message}",
+                               "Generation Error",
+                               MessageBoxButton.OK,
+                               MessageBoxImage.Error);
+            }
+        }
+
+        private static string SanitizeFileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "form";
+            foreach (var c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name.Replace(' ', '_');
+        }
+
+        #endregion
     }
 }

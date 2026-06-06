@@ -338,6 +338,11 @@ namespace FormGenerator.Services
                     // Track all generated form names for the result
                     var generatedFormNames = new List<string>();
 
+                    // Tallies for the "modify existing form" path (the registry-based aggregation
+                    // below only counts newly-created artifacts, so updates are added separately).
+                    int updatedViewsTotal = 0;
+                    int createdLookupsTotal = 0;
+
                     // ════════════════════════════════════════════════
                     // MULTI-FORM LOOP: Process each form independently
                     // ════════════════════════════════════════════════
@@ -365,6 +370,40 @@ namespace FormGenerator.Services
                         // Calculate progress offsets for this form within the overall pipeline
                         int formBasePercent = (formIndex * 100) / totalForms;
                         int formRangePercent = 100 / totalForms;
+
+                        // ── Existing-form mapping: modify the mapped K2 form in place instead of
+                        //    creating new SmartObjects/Views/Forms. ──
+                        K2ExistingFormMapping existingMapping = ResolveExistingMapping(request, formName, formDisplayName, out var mappedInfoPathDef, out var mappedKey);
+                        if (existingMapping != null)
+                        {
+                            Dictionary<string, string> fieldMap = null;
+                            if (mappedKey != null && request.ExistingFieldMappings != null)
+                                request.ExistingFieldMappings.TryGetValue(mappedKey, out fieldMap);
+
+                            _logger.LogSubSection($"Update Existing K2 Form ({formDisplayName} → {existingMapping.K2FormDisplayName})");
+                            _logger.Info($"Mapped to existing K2 form '{existingMapping.K2FormDisplayName}' [{existingMapping.K2FormGuid}] - modifying in place (no SmartObject/View/Form creation)");
+                            OnProgressUpdate(new K2GenerationProgress { Stage = $"Update Existing ({formDisplayName})", PercentComplete = formBasePercent + (formRangePercent * 50 / 100) });
+
+                            try
+                            {
+                                // Route updater diagnostics through OnStatusUpdate so they are ALWAYS
+                                // visible in the live log (independent of the verbose-logging level).
+                                var updater = new ExistingK2FormUpdater(_connectionManager, _config, msg => OnStatusUpdate(msg));
+                                var upd = await updater.UpdateAsync(existingMapping, mappedInfoPathDef, jsonContent, request.CreateSmartBoxLookups, fieldMap);
+
+                                updatedViewsTotal += upd.ViewsUpdated;
+                                createdLookupsTotal += upd.LookupsCreated;
+                                _logger.Info($"✓ Updated existing form '{existingMapping.K2FormDisplayName}': {upd.ViewsUpdated} view(s) modified, {upd.ControlsRepositioned} control(s) repositioned, {upd.RulesAppliedViews} view(s) with rules, {upd.LookupsCreated} lookup SmartObject(s), {upd.DropdownsWired} dropdown(s) wired");
+                                generatedFormNames.Add(existingMapping.K2FormName);
+                            }
+                            catch (Exception updEx)
+                            {
+                                _logger.Error($"❌ Failed to update existing K2 form '{existingMapping.K2FormDisplayName}': {updEx.Message}");
+                            }
+
+                            FlushConsoleBuffer();
+                            continue; // Skip the create path for this mapped form.
+                        }
 
                         // 5. Optional cleanup (per form)
                         if (request.ForceCleanup)
@@ -498,9 +537,10 @@ namespace FormGenerator.Services
                     // END MULTI-FORM LOOP
                     // ════════════════════════════════════════════════
 
-                    // Aggregate results across all forms
-                    result.SmartObjectsCreated = SmartObjectViewRegistry.GetSmartObjectCount();
-                    result.ViewsCreated = SmartObjectViewRegistry.GetViewCount();
+                    // Aggregate results across all forms (registry = newly created artifacts),
+                    // then add the "modify existing form" tallies so updates are reflected too.
+                    result.SmartObjectsCreated = SmartObjectViewRegistry.GetSmartObjectCount() + createdLookupsTotal;
+                    result.ViewsCreated = SmartObjectViewRegistry.GetViewCount() + updatedViewsTotal;
                     result.FormsCreated = SmartObjectViewRegistry.GetFormCount();
 
                     // 10. Generate summary
@@ -635,6 +675,48 @@ namespace FormGenerator.Services
             config.K2.SmartBoxGuid = request.SmartBoxGuid ?? "e5609413-d844-4325-98c3-db3cacbd406d";
 
             return config;
+        }
+
+        /// <summary>
+        /// Finds the existing-K2-form mapping (if any) for the form currently being processed in
+        /// the generation loop, correlating the JSON form name back to the file-name mapping key.
+        /// </summary>
+        private K2ExistingFormMapping ResolveExistingMapping(K2GenerationRequest request, string formName,
+            string formDisplayName, out InfoPathFormDefinition mappedInfoPathDef, out string matchedKey)
+        {
+            mappedInfoPathDef = null;
+            matchedKey = null;
+            if (request?.ExistingFormMappings == null || request.ExistingFormMappings.Count == 0 || request.FormDefinitions == null)
+                return null;
+
+            foreach (var defKvp in request.FormDefinitions)
+            {
+                var candidateDef = defKvp.Value?.FormDefinition as InfoPathFormDefinition;
+                if (candidateDef == null) continue;
+
+                string candidateName = candidateDef.FormName?.Replace(" ", "_");
+                bool matches = string.Equals(candidateName, formName, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(candidateDef.FormName, formDisplayName, StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(defKvp.Key, formDisplayName, StringComparison.OrdinalIgnoreCase);
+
+                if (matches && request.ExistingFormMappings.TryGetValue(defKvp.Key, out var mapping) && mapping != null)
+                {
+                    mappedInfoPathDef = candidateDef;
+                    matchedKey = defKvp.Key;
+                    return mapping;
+                }
+            }
+
+            // Fallback: a single imported form mapped to a single existing form.
+            if (request.FormDefinitions.Count == 1 && request.ExistingFormMappings.Count == 1)
+            {
+                var only = request.FormDefinitions.First();
+                mappedInfoPathDef = only.Value?.FormDefinition as InfoPathFormDefinition;
+                matchedKey = only.Key;
+                return request.ExistingFormMappings.Values.First();
+            }
+
+            return null;
         }
 
         private string ConvertFormDefinitionsToJson(Dictionary<string, Core.Models.FormAnalysisResult> formDefinitions)
@@ -932,6 +1014,35 @@ namespace FormGenerator.Services
         public string? SmartBoxGuid { get; set; }
         public string? TargetFolder { get; set; }
         public Dictionary<string, Core.Models.FormAnalysisResult> FormDefinitions { get; set; } = new();
+
+        /// <summary>
+        /// Imported InfoPath forms mapped to existing K2 forms, keyed by the same file-name
+        /// key used in <see cref="FormDefinitions"/>. When a form has a mapping, generation
+        /// modifies the existing K2 form in place instead of creating new artifacts.
+        /// </summary>
+        public Dictionary<string, K2ExistingFormMapping> ExistingFormMappings { get; set; } = new();
+
+        /// <summary>
+        /// User-confirmed field mappings for each mapped form, keyed by the same file-name key as
+        /// <see cref="FormDefinitions"/>. Inner map: InfoPath control name → existing K2 control ID.
+        /// </summary>
+        public Dictionary<string, Dictionary<string, string>> ExistingFieldMappings { get; set; } = new();
+
+        /// <summary>
+        /// When modifying a mapped form, also create + populate SmartBox lookup SmartObjects
+        /// from InfoPath dropdown options and wire matching dropdown controls to them.
+        /// </summary>
+        public bool CreateSmartBoxLookups { get; set; }
+    }
+
+    /// <summary>
+    /// A mapping from an imported InfoPath form to an existing K2 form on the server.
+    /// </summary>
+    public class K2ExistingFormMapping
+    {
+        public string K2FormName { get; set; } = string.Empty;
+        public string K2FormDisplayName { get; set; } = string.Empty;
+        public Guid K2FormGuid { get; set; }
     }
 
     public class K2GenerationResult

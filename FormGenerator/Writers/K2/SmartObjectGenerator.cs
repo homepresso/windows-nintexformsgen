@@ -184,6 +184,44 @@ namespace K2SmartObjectGenerator
             }
         }
 
+        /// <summary>
+        /// Creates and populates ONLY the consolidated SmartBox lookup SmartObject(s) for a form,
+        /// without creating the main/child SmartObjects. Used by the "modify existing K2 form"
+        /// path where the main SmartObjects already exist but lookups may be missing.
+        /// </summary>
+        public async Task GenerateLookupSmartObjectsOnlyAsync(string jsonContent)
+        {
+            try
+            {
+                _connectionManager.Connect();
+
+                JObject formData = JObject.Parse(jsonContent);
+                string formDisplayName = formData.Properties().First().Name;
+                string formName = NameSanitizer.SanitizeSmartObjectName(formDisplayName);
+                JObject formDefinition = formData[formDisplayName] as JObject;
+
+                JObject formDefJson = formDefinition?["FormDefinition"] as JObject;
+                string targetFolder = formDefJson?["TargetFolder"]?.Value<string>();
+                if (string.IsNullOrEmpty(targetFolder))
+                {
+                    targetFolder = _config?.Form?.TargetFolder ?? "Generated";
+                }
+
+                JArray dataArray = formDefinition?["FormDefinition"]?["Data"] as JArray;
+                if (dataArray == null)
+                {
+                    Console.WriteLine("No data columns found in JSON - skipping lookup creation");
+                    return;
+                }
+
+                await GenerateLookupSmartObjectsAsync(formName, formDisplayName, dataArray, targetFolder);
+            }
+            finally
+            {
+                _connectionManager.Disconnect();
+            }
+        }
+
         private async Task GenerateLookupSmartObjectsAsync(string formName, string formDisplayName, JArray dataArray, string targetFolder)
         {
             // Collect all dropdown fields and their values

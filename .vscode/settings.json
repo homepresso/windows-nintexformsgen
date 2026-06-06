@@ -1,0 +1,12 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^powershell -NoProfile -Command \"\\$dll='FormGenerator\\\\Writers\\\\K2\\\\References\\\\SourceCode\\.Forms\\.Authoring\\.dll'; if \\(-Not \\(Test-Path \\$dll\\)\\) \\{ Write-Output 'MISSING_DLL'; exit 1 \\}; \\[Reflection\\.Assembly\\]::LoadFrom\\(\\(Resolve-Path \\$dll\\)\\.Path\\)\\.GetTypes\\(\\) \\| Select-Object FullName \\| Sort-Object FullName \\| Out-String\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^powershell -NoProfile -Command \"Set-Location 'c:\\\\development\\\\windows-nintexformsgen'; \\$paths = @\\('FormGenerator\\\\\\\\Writers\\\\\\\\K2\\\\\\\\References\\\\\\\\SourceCode\\.Forms\\.Authoring\\.dll', 'FormGenerator\\\\\\\\Writers\\\\\\\\K2\\\\\\\\References\\\\\\\\SourceCode\\.Forms\\.Management\\.dll', 'FormGenerator\\\\\\\\Writers\\\\\\\\K2\\\\\\\\References\\\\\\\\SourceCode\\.Forms\\.Client\\.dll', 'FormGenerator\\\\\\\\Writers\\\\\\\\K2\\\\\\\\References\\\\\\\\SourceCode\\.Forms\\.Utilities\\.dll'\\); foreach \\(\\$p in \\$paths\\) \\{ if \\(Test-Path \\$p\\) \\{ Write-Output '---' \\+ \\$p; \\[Reflection\\.Assembly\\]::LoadFrom\\(\\(Resolve-Path \\$p\\)\\.Path\\)\\.GetTypes\\(\\) \\| Where-Object \\{ \\$_\\.FullName -like '\\*FormServer\\*' \\} \\| Select-Object -ExpandProperty FullName \\| Sort-Object \\| ForEach-Object \\{ Write-Output \\$_ \\} \\} else \\{ Write-Output 'MISSING: ' \\+ \\$p \\} \\}\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
