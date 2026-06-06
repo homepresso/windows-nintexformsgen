@@ -1910,7 +1910,11 @@ namespace K2SmartObjectGenerator
 
                 if (fieldInfo != null)
                 {
-                    string fieldGuid = Guid.NewGuid().ToString();
+                    // Reuse the field's GUID when supplied (e.g. rebuilding an existing view bound to
+                    // an existing SmartObject) so the control FieldID matches the view's Source fields.
+                    string fieldGuid = !string.IsNullOrEmpty(fieldInfo.FieldGuid)
+                        ? fieldInfo.FieldGuid
+                        : Guid.NewGuid().ToString();
                     control.SetAttribute("FieldID", fieldGuid);
                     fieldMap[fieldGuid] = fieldInfo;
                     controlToFieldMap[controlGuid] = fieldGuid;
