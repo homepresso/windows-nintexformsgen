@@ -78,36 +78,11 @@ namespace K2SmartObjectGenerator
             }
             catch { /* tolerate */ }
 
-            // 1) Optionally create + populate the SmartBox lookups first so wiring can reference them.
+            // NOTE: lookups are created AFTER view resolution below — creating/publishing the lookup
+            // SmartObject first was leaving K2's view-catalog query (GetViewsForForm) returning 0.
             string lookupSmoName = null;
-            if (createSmartBoxLookups)
-            {
-                try
-                {
-                    _log("  [UpdateExisting] Creating + populating SmartBox lookups...");
-                    var smoGen = new SmartObjectGenerator(_connectionManager, _config);
-                    await smoGen.GenerateLookupSmartObjectsOnlyAsync(jsonContent);
 
-                    string formName = NameSanitizer.SanitizeSmartObjectName(infoPathDef.FormName ?? mapping.K2FormName);
-                    string candidate = $"{formName}_Lookups";
-                    if (SmartObjectViewRegistry.SmartObjectExists(candidate))
-                    {
-                        lookupSmoName = candidate;
-                        result.LookupsCreated = 1;
-                        _log($"  [UpdateExisting] Lookup SmartObject ready: {lookupSmoName}");
-                    }
-                    else
-                    {
-                        _log("  [UpdateExisting] No lookup SmartObject was created (no dropdown fields?)");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _log($"  [UpdateExisting] Lookup creation failed (continuing): {ex.Message}");
-                }
-            }
-
-            // 2) Open FormsManager and enumerate the existing form's views.
+            // Open FormsManager and enumerate the existing form's views (BEFORE any SmartObject ops).
             var formsManager = new FormsManager();
             try
             {
@@ -192,9 +167,37 @@ namespace K2SmartObjectGenerator
                 else
                     _log("  [UpdateExisting] No existing views resolved - will still generate repeating-section views");
 
-                // Reconnect (lookup creation above disconnects) so dropdown lookup resolution works.
-                try { _connectionManager.Connect(); } catch { }
                 var smoGen = new SmartObjectGenerator(_connectionManager, _config);
+
+                // Now (AFTER view resolution) optionally create + populate the SmartBox lookups.
+                if (createSmartBoxLookups)
+                {
+                    try
+                    {
+                        _log("  [UpdateExisting] Creating + populating SmartBox lookups...");
+                        await smoGen.GenerateLookupSmartObjectsOnlyAsync(jsonContent);
+
+                        string lkFormName = NameSanitizer.SanitizeSmartObjectName(infoPathDef.FormName ?? mapping.K2FormName);
+                        string candidate = $"{lkFormName}_Lookups";
+                        if (SmartObjectViewRegistry.SmartObjectExists(candidate))
+                        {
+                            lookupSmoName = candidate;
+                            result.LookupsCreated = 1;
+                            _log($"  [UpdateExisting] Lookup SmartObject ready: {lookupSmoName}");
+                        }
+                        else
+                        {
+                            _log("  [UpdateExisting] No lookup SmartObject was created (no dropdown fields?)");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _log($"  [UpdateExisting] Lookup creation failed (continuing): {ex.Message}");
+                    }
+                }
+
+                // Reconnect (lookup creation disconnects) so dropdown lookup resolution works.
+                try { _connectionManager.Connect(); } catch { }
 
                 // One-time: dump every existing view's XML so list-view structure can be templated.
                 try
@@ -367,89 +370,43 @@ namespace K2SmartObjectGenerator
                     string sectionName = kv.Key;
                     var sectionControls = kv.Value;
 
-                    string childSmoName = null;
-                    var fieldByControl = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                    K2ExistingSectionMapping secMap = null;
-                    sectionMappings?.TryGetValue(sectionName, out secMap);
-
-                    if (secMap != null)
+                    // Always create (or reuse) a SmartBox child SmartObject for the section. K2 can build an
+                    // editable list + the from-scratch rules against SmartBox (unlike SharePoint SmartObjects),
+                    // so this is the reliable storage for repeating rows.
+                    string childSmoName;
+                    try
                     {
-                        foreach (var f in secMap.Fields) fieldByControl[f.Key] = f.Value;
-
-                        if (secMap.CreateIfMissing)
-                        {
-                            // Reuse the from-scratch path: create a SmartBox child SmartObject (works with
-                            // K2's list-view generator, unlike SharePoint-list SmartObjects).
-                            try
-                            {
-                                var sectionData = GetSectionDataFields(dataArray, sectionName);
-                                childSmoName = smoGen.EnsureChildSmartObject(formName, sectionName, sectionData, targetFolder);
-                                _log($"  [RepeatingSections] '{sectionName}': SmartBox child ready '{childSmoName}' (create-if-missing)");
-                                // Bind controls to the created columns (sanitized binding/name).
-                                fieldByControl.Clear();
-                                foreach (var c in sectionControls)
-                                {
-                                    string cname = c["Name"]?.Value<string>();
-                                    if (string.IsNullOrEmpty(cname)) continue;
-                                    string col = NameSanitizer.SanitizePropertyName(
-                                        NameSanitizer.ExtractFieldNameFromBinding(c["Binding"]?.Value<string>()) ?? cname);
-                                    if (!string.IsNullOrEmpty(col)) fieldByControl[cname] = col;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                _log($"  [RepeatingSections] '{sectionName}': child SmartObject create failed: {ex.Message}");
-                                continue;
-                            }
-                        }
-                        else
-                        {
-                            childSmoName = secMap.SmoName;
-                        }
+                        var sectionData = GetSectionDataFields(dataArray, sectionName);
+                        childSmoName = smoGen.EnsureChildSmartObject(formName, sectionName, sectionData, targetFolder);
+                        _log($"  [RepeatingSections] '{sectionName}': SmartBox child ready '{childSmoName}'");
                     }
-                    else if (explicitFieldMap != null && explicitFieldMap.Count > 0)
+                    catch (Exception ex)
                     {
-                        // Fallback: derive the child SmartObject from the SMO::smo::field map.
-                        var smoVotes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                        foreach (var c in sectionControls)
-                        {
-                            string cname = c["Name"]?.Value<string>();
-                            if (string.IsNullOrEmpty(cname)) continue;
-                            if (!explicitFieldMap.TryGetValue(cname, out var val) || string.IsNullOrEmpty(val)) continue;
-                            if (!val.StartsWith("SMO::", StringComparison.Ordinal)) continue;
-                            var parts = val.Substring("SMO::".Length).Split(new[] { "::" }, StringSplitOptions.None);
-                            if (parts.Length < 2) continue;
-                            smoVotes[parts[0]] = smoVotes.TryGetValue(parts[0], out var n) ? n + 1 : 1;
-                            fieldByControl[cname] = parts[1];
-                        }
-                        if (smoVotes.Count > 0) childSmoName = smoVotes.OrderByDescending(x => x.Value).First().Key;
-                    }
-
-                    if (string.IsNullOrEmpty(childSmoName))
-                    {
-                        _log($"  [RepeatingSections] '{sectionName}': no SmartObject mapping - skipping (use 'Map Sections')");
+                        _log($"  [RepeatingSections] '{sectionName}': child SmartObject create failed: {ex.Message}");
                         continue;
                     }
 
-                    // Binding bridge for the item view: InfoPath control keys -> child column.
+                    // Binding bridge: InfoPath control key -> child column (sanitized from the control's binding/name,
+                    // which matches the columns EnsureChildSmartObject created from the same section fields).
                     var inner = new Dictionary<string, FieldInfo>(StringComparer.OrdinalIgnoreCase);
                     foreach (var c in sectionControls)
                     {
                         string cname = c["Name"]?.Value<string>();
-                        if (cname == null || !fieldByControl.TryGetValue(cname, out var field) || string.IsNullOrEmpty(field)) continue;
+                        if (string.IsNullOrEmpty(cname)) continue;
+                        string col = NameSanitizer.SanitizePropertyName(
+                            NameSanitizer.ExtractFieldNameFromBinding(c["Binding"]?.Value<string>()) ?? cname);
+                        if (string.IsNullOrEmpty(col)) continue;
                         var fi = new FieldInfo
                         {
                             FieldGuid = Guid.NewGuid().ToString(),
-                            FieldName = field,
-                            DisplayName = field,
+                            FieldName = col,
+                            DisplayName = col,
                             DataType = MapInfoPathToK2DataType(c["Type"]?.Value<string>())
                         };
                         AddSmoKey(inner, cname, fi);
                         AddSmoKey(inner, NameSanitizer.ExtractFieldNameFromBinding(c["Binding"]?.Value<string>()), fi);
-                        AddSmoKey(inner, field, fi);
+                        AddSmoKey(inner, col, fi);
                     }
-
                     var smoFieldMappings = new Dictionary<string, Dictionary<string, FieldInfo>> { [childSmoName] = inner };
 
                     try
@@ -460,7 +417,7 @@ namespace K2SmartObjectGenerator
                             sectionArray, dataArray ?? new JArray(), viewCategory);
                         result.ViewsUpdated += 2;
                         pairs.Add((sectionName, res.ItemView, res.ListView, res.GridRow));
-                        _log($"  [RepeatingSections] '{sectionName}' → child '{childSmoName}': item '{res.ItemView}' + list '{res.ListView}' generated (gridRow {res.GridRow})");
+                        _log($"  [RepeatingSections] '{sectionName}' → SmartBox child '{childSmoName}': item '{res.ItemView}' + list '{res.ListView}' generated (gridRow {res.GridRow})");
                     }
                     catch (Exception ex)
                     {
@@ -495,63 +452,140 @@ namespace K2SmartObjectGenerator
             var areas = panels?.SelectSingleNode("Panel/Areas") as XmlElement;
             if (controls == null || areas == null) { _log("  [FormInsert] form Controls/Areas not found - cannot insert"); return; }
 
-            // Resolve view GUIDs and build the insertion list: list view then item view per section, ordered by grid row.
-            var toInsert = new List<(string ViewName, string ViewGuid)>();
+            // Build one Area per section (Item then List, matching from-scratch), ordered by grid row.
+            // Insert after the main view area; keep the LAST existing areas (attachments / button table) last.
+            XmlNode anchor = areas.SelectSingleNode("Area");   // the main view area
+            int inserted = 0;
+            var wiring = new List<SectionWiring>();
             foreach (var p in pairs.OrderBy(p => p.GridRow))
             {
-                foreach (var vn in new[] { p.ListView, p.ItemView })
+                string itemGuid = null, listGuid = null;
+                try { itemGuid = fm.GetView(p.ItemView)?.Guid.ToString(); } catch { }
+                if (!string.IsNullOrEmpty(p.ListView) && p.ListView != "(list failed)")
+                    try { listGuid = fm.GetView(p.ListView)?.Guid.ToString(); } catch { }
+                if (string.IsNullOrEmpty(itemGuid) && string.IsNullOrEmpty(listGuid))
                 {
-                    if (string.IsNullOrEmpty(vn) || vn == "(list failed)") continue;
-                    string vguid = null;
-                    try { vguid = fm.GetView(vn)?.Guid.ToString(); } catch { }
-                    if (string.IsNullOrEmpty(vguid)) { _log($"  [FormInsert] could not resolve view GUID for '{vn}' - skipping"); continue; }
-                    if (areas.SelectSingleNode($".//Item[@ViewID='{vguid}']") != null) { _log($"  [FormInsert] '{vn}' already on form"); continue; }
-                    toInsert.Add((vn, vguid));
+                    _log($"  [FormInsert] '{p.Section}': could not resolve view GUIDs - skipping");
+                    continue;
                 }
-            }
-            if (toInsert.Count == 0) { _log("  [FormInsert] nothing new to insert"); return; }
+                // Skip if this section's views are already on the form.
+                if ((itemGuid != null && areas.SelectSingleNode($".//Item[@ViewID='{itemGuid}']") != null) ||
+                    (listGuid != null && areas.SelectSingleNode($".//Item[@ViewID='{listGuid}']") != null))
+                {
+                    _log($"  [FormInsert] '{p.Section}' already on form - skipping");
+                    continue;
+                }
 
-            // Insert after the first existing area (the main view area) so sections sit below the main fields.
-            XmlNode anchor = areas.SelectSingleNode("Area");
-            foreach (var v in toInsert)
-            {
                 string areaGuid = Guid.NewGuid().ToString();
-                string areaItemGuid = Guid.NewGuid().ToString();
+                string itemInstanceGuid = Guid.NewGuid().ToString();
+                string listInstanceGuid = Guid.NewGuid().ToString();
 
-                controls.AppendChild(MakeFormControlDef(doc, areaGuid, "Area", "Area_" + v.ViewName));
-                controls.AppendChild(MakeFormControlDef(doc, areaItemGuid, "AreaItem", v.ViewName));
+                controls.AppendChild(MakeFormControlDef(doc, areaGuid, "Area", "Area_" + p.Section));
 
                 var areaEl = doc.CreateElement("Area");
                 areaEl.SetAttribute("ID", areaGuid);
                 var itemsEl = doc.CreateElement("Items");
-                var itemEl = doc.CreateElement("Item");
-                itemEl.SetAttribute("ID", areaItemGuid);
-                itemEl.SetAttribute("ViewID", v.ViewGuid);
-                itemEl.SetAttribute("ViewName", v.ViewName);
-                itemEl.SetAttribute("ViewDisplayName", v.ViewName);
-                AddChild(doc, itemEl, "Name", v.ViewName);
-                AddChild(doc, itemEl, "DisplayName", v.ViewName);
-                itemsEl.AppendChild(itemEl);
                 areaEl.AppendChild(itemsEl);
+
+                if (!string.IsNullOrEmpty(itemGuid))
+                {
+                    controls.AppendChild(MakeFormControlDef(doc, itemInstanceGuid, "AreaItem", p.ItemView));
+                    itemsEl.AppendChild(MakeAreaItem(doc, itemInstanceGuid, itemGuid, p.ItemView));
+                }
+                if (!string.IsNullOrEmpty(listGuid))
+                {
+                    // List starts hidden — only the item view shows until Add is clicked (from-scratch behavior).
+                    controls.AppendChild(MakeFormControlDef(doc, listInstanceGuid, "AreaItem", p.ListView, hidden: true));
+                    itemsEl.AppendChild(MakeAreaItem(doc, listInstanceGuid, listGuid, p.ListView));
+                }
 
                 if (anchor != null) { areas.InsertAfter(areaEl, anchor); anchor = areaEl; }
                 else areas.AppendChild(areaEl);
-            }
+                inserted++;
 
+                wiring.Add(new SectionWiring
+                {
+                    Section = p.Section, AreaGuid = areaGuid,
+                    ItemViewName = p.ItemView, ItemViewGuid = itemGuid, ItemInstanceGuid = itemInstanceGuid,
+                    ListViewName = p.ListView, ListViewGuid = listGuid, ListInstanceGuid = listInstanceGuid
+                });
+            }
+            if (inserted == 0) { _log("  [FormInsert] nothing new to insert"); return; }
+
+            // Phase A: deploy the LAYOUT (areas) first so the sections always land on the form,
+            // even if the (hand-built) button-rule XML is rejected.
             try
             {
                 try { fm.CheckOutForm(mapping.K2FormGuid); } catch { }
                 fm.DeployForms(doc.OuterXml, true);
-                _log($"  [FormInsert] inserted {toInsert.Count} view area(s) into form '{mapping.K2FormDisplayName}'");
+                _log($"  [FormInsert] inserted {inserted} section area(s) into form '{mapping.K2FormDisplayName}'");
             }
             catch (Exception ex)
             {
-                _log($"  [FormInsert] form deploy failed: {ex.Message}");
+                _log($"  [FormInsert] layout deploy failed: {ex.Message}");
+                try { fm.UndoFormCheckOut(mapping.K2FormGuid); } catch { }
+                return; // nothing committed
+            }
+
+            // Phase B: wire the item↔list toggle + Add/Cancel using the SAME from-scratch rule engine.
+            // The item/list views were generated in-process, so ButtonTracker + ControlMappingService are
+            // populated and ApplyListItemViewRules can resolve the buttons + field mappings. Best-effort:
+            // if the rules are rejected, the Phase-A layout stays committed.
+            try
+            {
+                var viewPairs = new Dictionary<string, ViewPairInfo>(StringComparer.OrdinalIgnoreCase);
+                foreach (var w in wiring)
+                {
+                    if (string.IsNullOrEmpty(w.ItemViewGuid) || string.IsNullOrEmpty(w.ListViewGuid)) continue;
+                    viewPairs[w.Section] = new ViewPairInfo
+                    {
+                        SectionName = w.Section,
+                        ItemViewName = w.ItemViewName,
+                        ListViewName = w.ListViewName,
+                        ItemViewId = w.ItemViewGuid,
+                        ListViewId = w.ListViewGuid,
+                        ItemViewInstanceId = w.ItemInstanceGuid,
+                        ListViewInstanceId = w.ListInstanceGuid,
+                        AreaGuid = w.AreaGuid,
+                        IsTopLevel = true
+                    };
+                }
+                if (viewPairs.Count > 0)
+                {
+                    new FormRulesBuilder().ApplyListItemViewRules(doc, viewPairs);
+                    try { fm.CheckOutForm(mapping.K2FormGuid); } catch { }
+                    fm.DeployForms(doc.OuterXml, true);
+                    _log($"  [FormInsert] repeating-section toggle/Add/Cancel rules deployed ({viewPairs.Count} pair(s))");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log($"  [FormInsert] rule deploy failed (layout kept): {ex.Message}");
                 try { fm.UndoFormCheckOut(mapping.K2FormGuid); } catch { }
             }
         }
 
-        private static XmlElement MakeFormControlDef(XmlDocument doc, string id, string type, string name)
+        private sealed class SectionWiring
+        {
+            public string Section;
+            public string AreaGuid;
+            public string ItemViewName, ItemViewGuid, ItemInstanceGuid;
+            public string ListViewName, ListViewGuid, ListInstanceGuid;
+        }
+
+        private static XmlElement MakeAreaItem(XmlDocument doc, string instanceGuid, string viewGuid, string viewName)
+        {
+            var itemEl = doc.CreateElement("Item");
+            itemEl.SetAttribute("ID", instanceGuid);
+            itemEl.SetAttribute("ViewID", viewGuid);
+            itemEl.SetAttribute("ViewName", viewName);
+            itemEl.SetAttribute("ViewDisplayName", viewName);
+            AddChild(doc, itemEl, "Name", viewName);
+            AddChild(doc, itemEl, "DisplayName", viewName);
+            return itemEl;
+        }
+
+        private static XmlElement MakeFormControlDef(XmlDocument doc, string id, string type, string name, bool hidden = false)
         {
             var c = doc.CreateElement("Control");
             c.SetAttribute("ID", id);
@@ -562,8 +596,286 @@ namespace K2SmartObjectGenerator
             AddChild(doc, prop, "Name", "ControlName");
             AddChild(doc, prop, "Value", name);
             props.AppendChild(prop);
+            if (hidden)
+            {
+                var vp = doc.CreateElement("Property");
+                AddChild(doc, vp, "Name", "IsVisible");
+                AddChild(doc, vp, "Value", "false");
+                props.AppendChild(vp);
+            }
             c.AppendChild(props);
             return c;
+        }
+
+        /// <summary>
+        /// Wires each repeating section's item-view Add/Cancel buttons via form rules:
+        /// Add → save the row to the child SmartObject (Execute, ItemState=Added) + clear the item view;
+        /// Cancel → clear the item view. Reads the buttons' control GUIDs from the deployed item view.
+        /// </summary>
+        private void AddRepeatingSectionFormRules(FormsManager fm, XmlDocument doc, List<SectionWiring> wiring)
+        {
+            if (wiring == null || wiring.Count == 0) return;
+
+            var events = (doc.SelectSingleNode("//States/State[@IsBase='True']/Events")
+                          ?? doc.SelectSingleNode("//States/State/Events")
+                          ?? doc.SelectSingleNode("//Events")) as XmlElement;
+            if (events == null) { _log("  [FormInsert] no base-state Events element - skipping button rules"); return; }
+
+            int wired = 0;
+            foreach (var w in wiring)
+            {
+                if (string.IsNullOrEmpty(w.ItemViewGuid) || string.IsNullOrEmpty(w.ItemInstanceGuid)) continue;
+
+                // Read the item view: Add/Cancel button GUIDs + each bound control → SmartObject column.
+                string addBtn = null, cancelBtn = null;
+                var controlCols = new List<(string CtrlGuid, string CtrlName, string Column)>();
+                try
+                {
+                    string ivXml = fm.GetViewDefinition(Guid.Parse(w.ItemViewGuid));
+                    if (!string.IsNullOrEmpty(ivXml))
+                    {
+                        var ivDoc = new XmlDocument();
+                        ivDoc.LoadXml(ivXml);
+
+                        foreach (XmlElement ctrl in ivDoc.SelectNodes("//Controls/Control[@Type='Button']")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
+                        {
+                            string nm = ReaderChildText(ctrl, "Name") ?? string.Empty;
+                            if (nm.IndexOf("Add", StringComparison.OrdinalIgnoreCase) >= 0) addBtn = ctrl.GetAttribute("ID");
+                            else if (nm.IndexOf("Cancel", StringComparison.OrdinalIgnoreCase) >= 0) cancelBtn = ctrl.GetAttribute("ID");
+                        }
+
+                        // field GUID -> SmartObject column (FieldName) from the item view's primary Source.
+                        var fieldCol = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (XmlElement f in ivDoc.SelectNodes("//Sources/Source/Fields/Field")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
+                        {
+                            string fid = f.GetAttribute("ID");
+                            string fn = ReaderChildText(f, "FieldName");
+                            if (!string.IsNullOrEmpty(fid) && !string.IsNullOrEmpty(fn)) fieldCol[fid] = fn;
+                        }
+                        // bound data controls (skip read-only/hidden DataLabel + layout/label controls).
+                        foreach (XmlElement ctrl in ivDoc.SelectNodes("//Controls/Control[@FieldID]")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
+                        {
+                            string type = ctrl.GetAttribute("Type");
+                            if (string.Equals(type, "DataLabel", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (string.Equals(type, "Label", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (ReaderLayoutTypes.Contains(type)) continue;
+                            string fid = ctrl.GetAttribute("FieldID");
+                            if (!fieldCol.TryGetValue(fid, out var col)) continue;
+                            controlCols.Add((ctrl.GetAttribute("ID"), ReaderChildText(ctrl, "Name"), col));
+                        }
+                    }
+                }
+                catch (Exception ex) { _log($"  [FormInsert] '{w.Section}': could not read item view: {ex.Message}"); }
+
+                // Read the list view's "Add ToolBar Button" GUID (for the re-show-item toggle).
+                string listAddBtn = null;
+                if (!string.IsNullOrEmpty(w.ListViewGuid))
+                {
+                    try
+                    {
+                        string lvXml = fm.GetViewDefinition(Guid.Parse(w.ListViewGuid));
+                        if (!string.IsNullOrEmpty(lvXml))
+                        {
+                            var lvDoc = new XmlDocument();
+                            lvDoc.LoadXml(lvXml);
+                            foreach (XmlElement ctrl in lvDoc.SelectNodes("//Controls/Control[@Type='ToolBarButton']")?.OfType<XmlElement>() ?? Enumerable.Empty<XmlElement>())
+                            {
+                                string nm = ReaderChildText(ctrl, "Name") ?? string.Empty;
+                                if (nm.IndexOf("Add", StringComparison.OrdinalIgnoreCase) >= 0) { listAddBtn = ctrl.GetAttribute("ID"); break; }
+                            }
+                        }
+                    }
+                    catch (Exception ex) { _log($"  [FormInsert] '{w.Section}': could not read list-view Add button: {ex.Message}"); }
+                }
+
+                bool hasList = !string.IsNullOrEmpty(w.ListViewGuid) && !string.IsNullOrEmpty(w.ListInstanceGuid);
+
+                // Item Add → save the row (Create) + refresh + show list + hide item.
+                if (!string.IsNullOrEmpty(addBtn))
+                {
+                    var ev = MakeButtonEvent(doc, addBtn, "Add Button", w.ItemInstanceGuid, w.ItemViewGuid, w.ItemViewName,
+                        $"On {w.ItemViewName}, when Add Button is Clicked");
+                    var actions = ev.SelectSingleNode("Handlers/Handler/Actions") as XmlElement;
+                    actions.AppendChild(MakeCreateAction(doc, w.ItemInstanceGuid, w.ItemViewGuid, w.ItemViewName, controlCols)); // persist row to child SmO
+                    if (hasList)
+                    {
+                        actions.AppendChild(MakeExecuteAction(doc, w.ListInstanceGuid, w.ListViewGuid, w.ListViewName, null, "GetListItems")); // refresh list
+                        actions.AppendChild(MakeVisibilityAction(doc, w.ListInstanceGuid, w.ListViewGuid, w.ListViewName, true));   // show list
+                        actions.AppendChild(MakeVisibilityAction(doc, w.ItemInstanceGuid, w.ItemViewGuid, w.ItemViewName, false));  // hide item
+                    }
+                    actions.AppendChild(MakeExecuteAction(doc, w.ItemInstanceGuid, w.ItemViewGuid, w.ItemViewName, null));   // clear item
+                    events.AppendChild(ev);
+                    wired++;
+                }
+                // Item Cancel → hide item + show list.
+                if (!string.IsNullOrEmpty(cancelBtn))
+                {
+                    var ev = MakeButtonEvent(doc, cancelBtn, "Cancel", w.ItemInstanceGuid, w.ItemViewGuid, w.ItemViewName,
+                        $"On {w.ItemViewName}, when Cancel is Clicked");
+                    var actions = ev.SelectSingleNode("Handlers/Handler/Actions") as XmlElement;
+                    actions.AppendChild(MakeExecuteAction(doc, w.ItemInstanceGuid, w.ItemViewGuid, w.ItemViewName, null));   // clear
+                    if (hasList)
+                    {
+                        actions.AppendChild(MakeVisibilityAction(doc, w.ItemInstanceGuid, w.ItemViewGuid, w.ItemViewName, false)); // hide item
+                        actions.AppendChild(MakeVisibilityAction(doc, w.ListInstanceGuid, w.ListViewGuid, w.ListViewName, true));  // show list
+                    }
+                    events.AppendChild(ev);
+                    wired++;
+                }
+                // List Add ToolBar Button → hide list + show item (to add another row).
+                if (!string.IsNullOrEmpty(listAddBtn) && hasList)
+                {
+                    var ev = MakeButtonEvent(doc, listAddBtn, "Add ToolBar Button", w.ListInstanceGuid, w.ListViewGuid, w.ListViewName,
+                        $"On {w.ListViewName}, when Add ToolBar Button is Clicked");
+                    var actions = ev.SelectSingleNode("Handlers/Handler/Actions") as XmlElement;
+                    actions.AppendChild(MakeVisibilityAction(doc, w.ListInstanceGuid, w.ListViewGuid, w.ListViewName, false)); // hide list
+                    actions.AppendChild(MakeVisibilityAction(doc, w.ItemInstanceGuid, w.ItemViewGuid, w.ItemViewName, true));  // show item
+                    events.AppendChild(ev);
+                    wired++;
+                }
+            }
+            _log($"  [FormInsert] wired {wired} item-view button rule(s)");
+        }
+
+        // Persist a bound capture view's entered data as a NEW child SmartObject row — the same
+        // Execute+Method=Create+Parameters action the main form uses (FormRulesBuilder.CreateMainFormCreateAction).
+        private static XmlElement MakeCreateAction(XmlDocument doc, string instanceGuid, string viewGuid, string viewName,
+            List<(string CtrlGuid, string CtrlName, string Column)> controlCols)
+        {
+            var a = doc.CreateElement("Action");
+            a.SetAttribute("ID", Guid.NewGuid().ToString());
+            a.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
+            a.SetAttribute("Type", "Execute");
+            a.SetAttribute("ExecutionType", "Synchronous");
+            a.SetAttribute("InstanceID", instanceGuid);
+            var props = doc.CreateElement("Properties");
+            AddPropKV(doc, props, "Location", "Form");
+            var vp = doc.CreateElement("Property");
+            AddChild(doc, vp, "Name", "ViewID");
+            AddChild(doc, vp, "DisplayValue", viewName);
+            AddChild(doc, vp, "NameValue", viewName);
+            AddChild(doc, vp, "Value", viewGuid);
+            props.AppendChild(vp);
+            AddPropKV(doc, props, "Method", "Create");
+            a.AppendChild(props);
+
+            var pars = doc.CreateElement("Parameters");
+            foreach (var cc in controlCols)
+            {
+                if (string.IsNullOrEmpty(cc.CtrlGuid) || string.IsNullOrEmpty(cc.Column)) continue;
+                var par = doc.CreateElement("Parameter");
+                par.SetAttribute("SourceInstanceID", instanceGuid);
+                par.SetAttribute("SourceID", cc.CtrlGuid);
+                par.SetAttribute("SourceName", cc.CtrlName ?? cc.Column);
+                par.SetAttribute("SourceDisplayName", cc.CtrlName ?? cc.Column);
+                par.SetAttribute("SourceType", "Control");
+                par.SetAttribute("TargetInstanceID", instanceGuid);
+                par.SetAttribute("TargetID", cc.Column);
+                par.SetAttribute("TargetName", cc.Column);
+                par.SetAttribute("TargetDisplayName", cc.Column);
+                par.SetAttribute("TargetType", "ObjectProperty");
+                pars.AppendChild(par);
+            }
+            a.AppendChild(pars);
+            return a;
+        }
+
+        private static XmlElement MakeButtonEvent(XmlDocument doc, string sourceCtrlId, string sourceName,
+            string instanceGuid, string viewGuid, string viewName, string friendly)
+        {
+            var ev = doc.CreateElement("Event");
+            ev.SetAttribute("ID", Guid.NewGuid().ToString());
+            ev.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
+            ev.SetAttribute("Type", "User");
+            ev.SetAttribute("SourceID", sourceCtrlId);
+            ev.SetAttribute("SourceType", "Control");
+            ev.SetAttribute("SourceName", sourceName);
+            ev.SetAttribute("SourceDisplayName", sourceName);
+            ev.SetAttribute("IsExtended", "True");
+            ev.SetAttribute("InstanceID", instanceGuid);
+            AddChild(doc, ev, "Name", "OnClick");
+            var props = doc.CreateElement("Properties");
+            AddPropKV(doc, props, "RuleFriendlyName", friendly);
+            AddPropKV(doc, props, "Location", viewName);
+            ev.AppendChild(props);
+            var handlers = doc.CreateElement("Handlers");
+            var handler = doc.CreateElement("Handler");
+            var hprops = doc.CreateElement("Properties");
+            AddPropKV(doc, hprops, "HandlerName", "then");
+            AddPropKV(doc, hprops, "Location", "form");
+            handler.AppendChild(hprops);
+            handler.AppendChild(doc.CreateElement("Actions"));
+            handlers.AppendChild(handler);
+            ev.AppendChild(handlers);
+            return ev;
+        }
+
+        // Execute action on a view; itemState="Added" saves a new row, null/empty performs a Clear,
+        // or pass an explicit method name (e.g. the list method) to re-run it (refresh).
+        private static XmlElement MakeExecuteAction(XmlDocument doc, string instanceGuid, string viewGuid, string viewName, string itemState, string method = null)
+        {
+            var a = doc.CreateElement("Action");
+            a.SetAttribute("ID", Guid.NewGuid().ToString());
+            a.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
+            a.SetAttribute("Type", "Execute");
+            a.SetAttribute("ExecutionType", "Synchronous");
+            a.SetAttribute("InstanceID", instanceGuid);
+            if (!string.IsNullOrEmpty(itemState)) a.SetAttribute("ItemState", itemState);
+            var props = doc.CreateElement("Properties");
+            AddPropKV(doc, props, "Location", "Form");
+            var vp = doc.CreateElement("Property");
+            AddChild(doc, vp, "Name", "ViewID");
+            AddChild(doc, vp, "DisplayValue", viewName);
+            AddChild(doc, vp, "NameValue", viewName);
+            AddChild(doc, vp, "Value", viewGuid);
+            props.AppendChild(vp);
+            if (!string.IsNullOrEmpty(method)) AddPropKV(doc, props, "Method", method);
+            else if (string.IsNullOrEmpty(itemState)) AddPropKV(doc, props, "Method", "Clear");
+            a.AppendChild(props);
+            return a;
+        }
+
+        // Show/Hide a view via a ViewProperty "display" transfer (the from-scratch visibility pattern).
+        private static XmlElement MakeVisibilityAction(XmlDocument doc, string instanceGuid, string viewGuid, string viewName, bool show)
+        {
+            var a = doc.CreateElement("Action");
+            a.SetAttribute("ID", Guid.NewGuid().ToString());
+            a.SetAttribute("DefinitionID", Guid.NewGuid().ToString());
+            a.SetAttribute("Type", "Transfer");
+            a.SetAttribute("ExecutionType", "Synchronous");
+            a.SetAttribute("InstanceID", instanceGuid);
+            var props = doc.CreateElement("Properties");
+            AddPropKV(doc, props, "Location", "Form");
+            var vp = doc.CreateElement("Property");
+            AddChild(doc, vp, "Name", "ViewID");
+            AddChild(doc, vp, "DisplayValue", viewName);
+            AddChild(doc, vp, "NameValue", viewName);
+            AddChild(doc, vp, "Value", viewGuid);
+            props.AppendChild(vp);
+            a.AppendChild(props);
+            var pars = doc.CreateElement("Parameters");
+            var par = doc.CreateElement("Parameter");
+            par.SetAttribute("SourceType", "Value");
+            par.SetAttribute("TargetInstanceID", instanceGuid);
+            par.SetAttribute("TargetID", "display");
+            par.SetAttribute("TargetName", "display");
+            par.SetAttribute("TargetDisplayName", viewName);
+            par.SetAttribute("TargetType", "ViewProperty");
+            var sv = doc.CreateElement("SourceValue");
+            sv.SetAttribute("xml:space", "preserve");
+            sv.InnerText = show ? "Show" : "Hide";
+            par.AppendChild(sv);
+            pars.AppendChild(par);
+            a.AppendChild(pars);
+            return a;
+        }
+
+        private static void AddPropKV(XmlDocument doc, XmlElement props, string name, string value)
+        {
+            var p = doc.CreateElement("Property");
+            AddChild(doc, p, "Name", name);
+            AddChild(doc, p, "Value", value);
+            props.AppendChild(p);
         }
 
         private static List<JObject> GetSectionDataFields(JArray dataArray, string sectionName)

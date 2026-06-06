@@ -217,17 +217,32 @@ namespace K2SmartObjectGenerator
                     return false;
                 }
 
-                string xml = BuildListViewXml(listViewName, smoGuid, smoName, smoDisplay, listMethod, listMethodDisp, cols);
-
-                using (FormsManager fm = new FormsManager())
+                // Deploy WITH the toolbar (Add button) first; if K2 rejects it, retry WITHOUT the
+                // toolbar so the (working) read-only list view is never lost.
+                foreach (bool withToolbar in new[] { true, false })
                 {
-                    fm.CreateConnection();
-                    fm.Connection.Open(_connectionManager.ConnectionString.ConnectionString);
-                    DeleteExistingView(fm, listViewName);
-                    fm.DeployViews(xml, categoryPath, true);
+                    string xml = BuildListViewXml(listViewName, smoGuid, smoName, smoDisplay, listMethod, listMethodDisp, cols, withToolbar);
+                    try
+                    {
+                        using (FormsManager fm = new FormsManager())
+                        {
+                            fm.CreateConnection();
+                            fm.Connection.Open(_connectionManager.ConnectionString.ConnectionString);
+                            DeleteExistingView(fm, listViewName);
+                            fm.DeployViews(xml, categoryPath, true);
+                        }
+                        Console.WriteLine($"    [ManualList] deployed '{listViewName}' bound to '{smoName}' ({cols.Count} cols, method '{listMethod}', toolbar={withToolbar})");
+                        return true;
+                    }
+                    catch (Exception exDeploy)
+                    {
+                        if (withToolbar)
+                            Console.WriteLine($"    [ManualList] deploy with toolbar failed ({exDeploy.Message}); retrying without toolbar");
+                        else
+                            throw;
+                    }
                 }
-                Console.WriteLine($"    [ManualList] deployed '{listViewName}' bound to '{smoName}' ({cols.Count} cols, method '{listMethod}')");
-                return true;
+                return false;
             }
             catch (Exception ex)
             {
@@ -237,7 +252,8 @@ namespace K2SmartObjectGenerator
         }
 
         private string BuildListViewXml(string viewName, string smoGuid, string smoName, string smoDisplay,
-            string listMethod, string listMethodDisp, List<(string Name, string Disp, string DataType)> cols)
+            string listMethod, string listMethodDisp, List<(string Name, string Disp, string DataType)> cols,
+            bool includeToolbar = true)
         {
             var doc = new XmlDocument();
             XmlElement root = doc.CreateElement("SourceCode.Forms");
@@ -261,6 +277,10 @@ namespace K2SmartObjectGenerator
             string headerRowGuid = Guid.NewGuid().ToString();
             string displayRowGuid = Guid.NewGuid().ToString();
             string sourceGuid = Guid.NewGuid().ToString();
+            string toolbarTableGuid = Guid.NewGuid().ToString();
+            string toolbarRowGuid = Guid.NewGuid().ToString();
+            string toolbarCellGuid = Guid.NewGuid().ToString();
+            string addBtnGuid = Guid.NewGuid().ToString();
             var colInfos = cols.Select(c => new
             {
                 c.Name, c.Disp, c.DataType,
@@ -287,6 +307,31 @@ namespace K2SmartObjectGenerator
             AddFullProp(doc, viewProps, "DefaultMethod", listMethodDisp, listMethod, listMethod);
             viewCtrl.AppendChild(viewProps);
             controls.AppendChild(viewCtrl);
+
+            // Toolbar with an "Add" button so the form can re-show the item view (item↔list toggle).
+            if (includeToolbar)
+            {
+                XmlElement tbTable = doc.CreateElement("Control");
+                tbTable.SetAttribute("ID", toolbarTableGuid);
+                tbTable.SetAttribute("Type", "ToolbarTable");
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, tbTable, "Name", "ToolBar0 Toolbar Table");
+                var tbProps = doc.CreateElement("Properties");
+                AddSimpleProp(doc, tbProps, "ControlName", "ToolBar0 Toolbar Table");
+                tbTable.AppendChild(tbProps);
+                controls.AppendChild(tbTable);
+
+                XmlElement addBtn = doc.CreateElement("Control");
+                addBtn.SetAttribute("ID", addBtnGuid);
+                addBtn.SetAttribute("Type", "ToolBarButton");
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, addBtn, "Name", "Add ToolBar Button");
+                K2SmartObjectGenerator.Utilities.XmlHelper.AddElement(doc, addBtn, "DisplayName", "Add ToolBar Button");
+                var addProps = doc.CreateElement("Properties");
+                AddSimpleProp(doc, addProps, "ControlName", "Add ToolBar Button");
+                AddSimpleProp(doc, addProps, "Text", "Add");
+                AddSimpleProp(doc, addProps, "ImageClass", "add");
+                addBtn.AppendChild(addProps);
+                controls.AppendChild(addBtn);
+            }
 
             // List table.
             XmlElement tableCtrl = doc.CreateElement("Control");
@@ -351,6 +396,33 @@ namespace K2SmartObjectGenerator
             view.AppendChild(canvas);
             XmlElement sections = doc.CreateElement("Sections");
             canvas.AppendChild(sections);
+
+            // ToolBar section (Add button) — placed before the Body.
+            if (includeToolbar)
+            {
+                XmlElement tbSection = doc.CreateElement("Section");
+                tbSection.SetAttribute("ID", Guid.NewGuid().ToString());
+                tbSection.SetAttribute("Type", "ToolBar");
+                XmlElement tbGrid = doc.CreateElement("Control");
+                tbGrid.SetAttribute("ID", toolbarTableGuid);
+                tbGrid.SetAttribute("LayoutType", "Grid");
+                XmlElement tbRows = doc.CreateElement("Rows");
+                XmlElement tbRow = doc.CreateElement("Row");
+                tbRow.SetAttribute("ID", toolbarRowGuid);
+                XmlElement tbCells = doc.CreateElement("Cells");
+                XmlElement tbCell = doc.CreateElement("Cell");
+                tbCell.SetAttribute("ID", toolbarCellGuid);
+                XmlElement tbBtnRef = doc.CreateElement("Control");
+                tbBtnRef.SetAttribute("ID", addBtnGuid);
+                tbCell.AppendChild(tbBtnRef);
+                tbCells.AppendChild(tbCell);
+                tbRow.AppendChild(tbCells);
+                tbRows.AppendChild(tbRow);
+                tbGrid.AppendChild(tbRows);
+                tbSection.AppendChild(tbGrid);
+                sections.AppendChild(tbSection);
+            }
+
             XmlElement section = doc.CreateElement("Section");
             section.SetAttribute("ID", Guid.NewGuid().ToString());
             section.SetAttribute("Type", "Body");
